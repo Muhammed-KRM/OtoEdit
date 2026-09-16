@@ -1,0 +1,26 @@
+tamam şimdi kodlama işine başlıyoruz ama kodlama yaparken uyman gereken kesin kurallar var.
+Temiz kod yazman gerek.
+SOAP kurallarına uyman gerek.
+kod yazarken modern altyapıları kullanamlısn ve yazdıkların okunabilir olmalı. 
+Kod yazarken bunun bug lar olduğundan kolayca çözüle bilmesi için düzgünce debug edilebilr ve loglanabilir olduğundan emin ol.
+interfaceler kullanarak ve kod yazma standartlarına uyarak yazman gerek.
+Kod tekrarı yapmadığından emin olman gerk ve kullnadığın dilin özelliklerini sonuna kadar kullanman gerek.
+Kodu yazarken performansa önem vermen gerek.
+Kod yazarken güvenliğe önem vermen gerek. 
+Kod olabildiğince hızlı çalışacağı yöntemler kullanmalsın Cache kullanmak gibi ve başka yöntemler.
+Gereken herşeyi veritabanına kaydetmelisn ve en hızlı yöntem ile veri çekme işlemlerini yapmalısın.
+Veri güvenliğine öncelik vermelisin.
+Kodları şu haliyle kalıcakmış gibi yazma bu kodlar ilerde iyice gelişicek  farklı özellikler eklenicek ama şuanlıl sadece bir MVP yapıyoruz.
+olabildiğince yedekli çalışıcaz githuba her önemli eklentimizde bir commit at
+
+projede kodları yazarken kesinlikle yazığımız dökümanlarda ki dediklerimizin dışına çıkma.
+nası lbişey olucak ve kuralları ne olucak hakkındaki döküman: "D:\OtoEdit\OtoEdit\docs\gelistirici-dokumani.md" bu dökümanı her bir şey yapmadan önce buna uygun mu yaptım diye kontrol etmen gerek.
+
+birde dikkat etmen gereken bişey var kodları yada dökümnaldarı herhangi birşey yazarken onu tekte yazmaya çalışma tekte yazmaya çalışınca bir çok sefer token sınırına ulaşıyor ve hata veriyor bişeyleri yazarken bunu bölümlere ayırarak yaz. bir bölümü yaz dur ne yaptığına bak sonra devam et . bir hata aldıysan da o raya bir bak hatanın oradan mı kaynaklı olduğunu yoksa projede başka bir şey den mi olduğunu anla sonra ona göre düzelt. 
+
+her şeyi yaptıktan sonra bana neler yaptığına dair rapor ver. eğer bir sıkıntıyla karşılaşıp insiyatif alarak dökümanın  dışına çıktıysan hele kesin haber ver. olabildiğince dökümanın dışına çıkma.
+bir araştırma yapıcaksan filan internmetten bugünün 9.09.2026 tarihi olduğunu bileker yaparsın. 
+
+kod yazarken temiz kod yazmaya SOLID prensiplerine uymaya okunabilir olmasına diğer kodlara çakışmamasına veya kod tekrarına üşmemesine dikkat et. her yazdığın fonksiyonun loglana bilir ve bu log ların da veri tabanında depolanabilr olmasına önem ver.
+
+şimdi kodları yazmaya başla ama bölüm bölüm yazmayı unutma tekte yazma bir kısımnı yap ve ban rapor ver.

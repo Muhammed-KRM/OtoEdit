@@ -1,0 +1,65 @@
+## .NET
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+TestResults/
+**/TestResults/
+*.binlog
+
+## IDE
+.vs/
+.vscode/
+*.swp
+*.ide
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Logs
+logs/
+*.log
+
+## Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+.pytest_cache/
+venv/
+ENV/
+
+## Node / Angular (Frontend)
+node_modules/
+dist/
+tmp/
+out-tsc/
+.angular/
+
+## Secrets & Config
+.env
+appsettings.Production.json
+appsettings.Development.json
+docker-compose.override.yml

@@ -1,0 +1,6 @@
+@OtoEdit.API_HostAddress = http://localhost:5265
+
+GET {{OtoEdit.API_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

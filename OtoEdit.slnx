@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/OtoEdit.API/OtoEdit.API.csproj" />
+    <Project Path="src/OtoEdit.Business/OtoEdit.Business.csproj" />
+    <Project Path="src/OtoEdit.Data/OtoEdit.Data.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/OtoEdit.UnitTests/OtoEdit.UnitTests.csproj" />
+  </Folder>
+</Solution>
