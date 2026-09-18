@@ -1,16 +1,16 @@
 export interface VideoDetailDto {
   id: string;
   projectId: string;
-  orijinalDosyaAdi: string;
+  baslik: string;
   dosyaYolu: string;
-  sureSaniye: number;
-  genislik: number;
-  yukseklik: number;
-  fps: number;
-  dosyaBoyutuBytes: number;
-  mimeTipi: string;
-  olusturulmaTarihi: string;
-  streamUrl?: string;
+  temizSesYolu?: string;
+  sure?: string; // TimeSpan is serialized as string in JSON
+  dosyaBoyutu: number;
+  islemDurumu: number | string; // Adjust depending on if it's string enum
+  transkriptVar: boolean;
+  olusturmaTarihi: string;
+  islemTamamlanmaTarihi?: string;
+  streamUrl?: string; // Keep for fallback logic if needed
 }
 
 export interface VideoUploadResponseDto {

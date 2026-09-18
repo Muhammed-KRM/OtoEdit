@@ -9,4 +9,5 @@ public interface IVideoService
     Task<VideoDetailDto?> GetVideoByProjectIdAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task DeleteVideoAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<(Stream FileStream, string ContentType, string FileName)> GetVideoStreamAsync(Guid videoId, CancellationToken cancellationToken = default);
+    Task<string> GetVideoUrlAsync(Guid videoId, CancellationToken cancellationToken = default);
 }

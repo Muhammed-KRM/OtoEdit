@@ -144,4 +144,19 @@ public class RenderManager : IRenderService
             _logger.LogInformation("Render tamamlandı olarak işaretlendi: RenderJobId={RenderJobId}", renderJobId);
         }
     }
+
+    public async Task FailRenderAsync(Guid renderJobId, string hataMesaji, CancellationToken cancellationToken = default)
+    {
+        var renderJob = await _context.RenderJobs.FindAsync(new object[] { renderJobId }, cancellationToken);
+        if (renderJob != null)
+        {
+            renderJob.Durum = RenderDurumu.Hata;
+            renderJob.HataMesaji = hataMesaji;
+            renderJob.BitisZamani = DateTime.UtcNow;
+            renderJob.SureMs = (int)(renderJob.BitisZamani.Value - renderJob.BaslangicZamani).TotalMilliseconds;
+
+            await _context.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Render hata olarak işaretlendi: RenderJobId={RenderJobId}", renderJobId);
+        }
+    }
 }

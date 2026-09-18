@@ -15,6 +15,7 @@ import { CutItem, EdlContent, EdlDto, OverlayItem, SuggestionItem } from '../../
 import { ChatMessageDto } from '../../core/models/chat.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
 import { DurationPipe } from '../../shared/pipes/duration.pipe';
+import { environment } from '../../../environments/environment';
 
 @Component({
   selector: 'app-editor',
@@ -334,15 +335,24 @@ export class EditorComponent implements OnInit, OnDestroy {
       next: (v) => {
         if (v.streamUrl) {
           this.videoUrl.set(v.streamUrl);
-        } else {
-          this.videoUrl.set(`/api/projects/${this.projectId}/videos/stream`);
+        } else if (v.id) {
+          const apiKey = environment.apiKey || 'SUPER_SECRET_OTOEDIT_KEY_123!';
+          this.videoUrl.set(`${environment.apiUrl}/videos/${v.id}/stream?apiKey=${apiKey}`);
         }
-        if (v.sureSaniye) {
-          this.totalDuration.set(v.sureSaniye);
+        
+        // v.sure is a string "hh:mm:ss.fff" from C# TimeSpan
+        if (v.sure) {
+          const parts = v.sure.split(':');
+          if (parts.length >= 3) {
+            const h = parseInt(parts[0], 10);
+            const m = parseInt(parts[1], 10);
+            const s = parseFloat(parts[2]);
+            this.totalDuration.set((h * 3600) + (m * 60) + s);
+          }
         }
       },
       error: () => {
-        this.videoUrl.set(`/api/projects/${this.projectId}/videos/stream`);
+        console.error('Video yüklenemedi.');
       }
     });
   }
@@ -350,9 +360,9 @@ export class EditorComponent implements OnInit, OnDestroy {
   loadEdl(): void {
     this.edlService.getEdl(this.projectId).subscribe({
       next: (res) => {
-        this.edl.set(res.edlJson);
-        if (res.edlJson.duration) {
-          this.totalDuration.set(res.edlJson.duration);
+        this.edl.set(res.edl);
+        if (res.edl.duration) {
+          this.totalDuration.set(res.edl.duration);
         }
       },
       error: (err) => console.error('EDL yüklenemedi:', err)

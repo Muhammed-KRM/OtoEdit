@@ -16,5 +16,6 @@ public enum PipelineAsamasi
     Repurposing = 5,
     OneriOlusturma = 6,
     EdlOlusturma = 7,
-    Render = 8
+    Render = 8,
+    Tamamlandi = 9
 }

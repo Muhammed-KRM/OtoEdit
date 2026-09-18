@@ -8,42 +8,25 @@ using OtoEdit.Data.Enums;
 namespace OtoEdit.API.Consumers;
 
 /// <summary>
-/// Python Worker'dan gelen aşama ilerleme ve hata bildirimlerini dinler,
-/// SignalR üzerinden canlı olarak istemciye iletir.
+/// Python Worker'dan gelen hata bildirimlerini dinler.
 /// </summary>
-public class PipelineProgressConsumer :
-    IConsumer<PipelineStageChangedEvent>,
-    IConsumer<PipelineErrorEvent>
+public class PipelineErrorConsumer : IConsumer<PipelineErrorEvent>
 {
     private readonly IHubContext<PipelineHub> _hubContext;
     private readonly IProjectService _projectService;
-    private readonly ILogger<PipelineProgressConsumer> _logger;
+    private readonly IRenderService _renderService;
+    private readonly ILogger<PipelineErrorConsumer> _logger;
 
-    public PipelineProgressConsumer(
+    public PipelineErrorConsumer(
         IHubContext<PipelineHub> hubContext,
         IProjectService projectService,
-        ILogger<PipelineProgressConsumer> logger)
+        IRenderService renderService,
+        ILogger<PipelineErrorConsumer> logger)
     {
         _hubContext = hubContext;
         _projectService = projectService;
+        _renderService = renderService;
         _logger = logger;
-    }
-
-    public async Task Consume(ConsumeContext<PipelineStageChangedEvent> context)
-    {
-        var msg = context.Message;
-        _logger.LogInformation("PipelineStageChanged: ProjectId={ProjectId}, Asama={Asama}, Yuzde={Yuzde}, Mesaj={Mesaj}",
-            msg.ProjectId, msg.Asama, msg.Yuzde, msg.Mesaj);
-
-        await _hubContext.Clients
-            .Group($"project-{msg.ProjectId}")
-            .SendAsync("AnalysisProgress", new
-            {
-                projectId = msg.ProjectId,
-                asama = msg.Asama.ToString(),
-                yuzde = msg.Yuzde,
-                mesaj = msg.Mesaj
-            }, context.CancellationToken);
     }
 
     public async Task Consume(ConsumeContext<PipelineErrorEvent> context)
@@ -53,6 +36,11 @@ public class PipelineProgressConsumer :
             msg.ProjectId, msg.Asama, msg.HataMesaji);
 
         await _projectService.UpdateStatusAsync(msg.ProjectId, ProjectDurumu.Hata, context.CancellationToken);
+
+        if (msg.Asama == "Render" && msg.VideoId.HasValue)
+        {
+            await _renderService.FailRenderAsync(msg.VideoId.Value, msg.HataMesaji, context.CancellationToken);
+        }
 
         await _hubContext.Clients
             .Group($"project-{msg.ProjectId}")

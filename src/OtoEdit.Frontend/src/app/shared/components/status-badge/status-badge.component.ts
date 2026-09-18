@@ -15,7 +15,7 @@ import { RenderDurumu } from '../../../core/models/render.model';
   `
 })
 export class StatusBadgeComponent {
-  @Input() status: ProjectDurumu | RenderDurumu | number = 0;
+  @Input() status: ProjectDurumu | RenderDurumu | string = '';
   @Input() isRender = false;
 
   get label(): string {
@@ -42,34 +42,32 @@ export class StatusBadgeComponent {
   }
 
   get badgeClass(): string {
-    const s = Number(this.status);
-    if (s === ProjectDurumu.Tamamlandi || (this.isRender && s === RenderDurumu.Tamamlandi)) {
+    if (this.status === ProjectDurumu.Tamamlandi || (this.isRender && this.status === RenderDurumu.Tamamlandi)) {
       return 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
     }
-    if (s === ProjectDurumu.AnalizEdiliyor || s === ProjectDurumu.RenderEdiliyor) {
+    if (this.status === ProjectDurumu.AnalizEdiliyor || this.status === ProjectDurumu.RenderEdiliyor) {
       return 'bg-blue-500/10 text-blue-400 border border-blue-500/20';
     }
-    if (s === ProjectDurumu.AnalizTamamlandi) {
+    if (this.status === ProjectDurumu.AnalizTamamlandi) {
       return 'bg-purple-500/10 text-purple-400 border border-purple-500/20';
     }
-    if (s === 99) {
+    if (this.status === ProjectDurumu.Hata || (this.isRender && this.status === RenderDurumu.Hata)) {
       return 'bg-rose-500/10 text-rose-400 border border-rose-500/20';
     }
     return 'bg-slate-500/10 text-slate-400 border border-slate-500/20';
   }
 
   get dotClass(): string {
-    const s = Number(this.status);
-    if (s === ProjectDurumu.Tamamlandi || (this.isRender && s === RenderDurumu.Tamamlandi)) {
+    if (this.status === ProjectDurumu.Tamamlandi || (this.isRender && this.status === RenderDurumu.Tamamlandi)) {
       return 'bg-emerald-400';
     }
-    if (s === ProjectDurumu.AnalizEdiliyor || s === ProjectDurumu.RenderEdiliyor) {
+    if (this.status === ProjectDurumu.AnalizEdiliyor || this.status === ProjectDurumu.RenderEdiliyor) {
       return 'bg-blue-400';
     }
-    if (s === ProjectDurumu.AnalizTamamlandi) {
+    if (this.status === ProjectDurumu.AnalizTamamlandi) {
       return 'bg-purple-400';
     }
-    if (s === 99) {
+    if (this.status === ProjectDurumu.Hata || (this.isRender && this.status === RenderDurumu.Hata)) {
       return 'bg-rose-400';
     }
     return 'bg-slate-400';

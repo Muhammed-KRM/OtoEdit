@@ -282,7 +282,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   canGoToEditor(): boolean {
     const p = this.project();
     if (!p) return false;
-    return p.hasEdl || p.durum >= ProjectDurumu.AnalizTamamlandi;
+    return p.hasEdl || p.durum === ProjectDurumu.AnalizTamamlandi || p.durum === ProjectDurumu.RenderEdiliyor || p.durum === ProjectDurumu.Tamamlandi;
   }
 
   goToEditor(): void {

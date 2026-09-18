@@ -10,7 +10,7 @@ logger = get_logger(__name__)
 class SilenceDetector:
     """Videodaki veya sesteki uzun sessizlikleri (jump-cut) tespit eden motor."""
 
-    def __init__(self, min_silence_len: int = 0, silence_thresh: int = 0, padding_sec: float = 0.1):
+    def __init__(self, min_silence_len: int = 0, silence_thresh: int = 0, padding_sec: float = 0.3):
         self.min_silence_len = min_silence_len or Config.SILENCE_MIN_LEN_MS
         self.silence_thresh = silence_thresh or Config.SILENCE_THRESH_DBFS
         self.padding_sec = padding_sec  # Kelime başı/sonu kırpılmasını önleyen güvenlik marjı

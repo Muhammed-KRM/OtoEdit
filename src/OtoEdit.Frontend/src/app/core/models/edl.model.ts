@@ -83,8 +83,8 @@ export interface EdlTemplate {
 export interface EdlDto {
   projectId: string;
   versiyon: number;
-  edlJson: EdlContent;
-  guncellenmeTarihi: string;
+  edl: EdlContent;
+  guncellemeTarihi: string;
 }
 
 export interface EdlContent {

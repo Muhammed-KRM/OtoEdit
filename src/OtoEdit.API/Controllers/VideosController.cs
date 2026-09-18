@@ -60,7 +60,7 @@ public class VideosController : ControllerBase
     [HttpGet("api/videos/{videoId:guid}/stream")]
     public async Task<IActionResult> StreamVideo(Guid videoId, CancellationToken cancellationToken)
     {
-        var (stream, contentType, fileName) = await _videoService.GetVideoStreamAsync(videoId, cancellationToken);
-        return File(stream, contentType, enableRangeProcessing: true);
+        var url = await _videoService.GetVideoUrlAsync(videoId, cancellationToken);
+        return Redirect(url);
     }
 }

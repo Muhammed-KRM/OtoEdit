@@ -26,6 +26,6 @@ export class VideoService {
   }
 
   getVideo(projectId: string): Observable<VideoDetailDto> {
-    return this.http.get<VideoDetailDto>(`${this.baseUrl}/projects/${projectId}/videos`);
+    return this.http.get<VideoDetailDto>(`${this.baseUrl}/projects/${projectId}/video`);
   }
 }

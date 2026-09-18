@@ -1,17 +1,17 @@
 export enum ProjectDurumu {
-  Taslak = 0,
-  VideoYuklendi = 1,
-  AnalizEdiliyor = 2,
-  AnalizTamamlandi = 3,
-  RenderEdiliyor = 4,
-  Tamamlandi = 5,
-  Hata = 99
+  Taslak = 'Taslak',
+  VideoYuklendi = 'VideoYuklendi',
+  AnalizEdiliyor = 'AnalizEdiliyor',
+  AnalizTamamlandi = 'AnalizTamamlandi',
+  RenderEdiliyor = 'RenderEdiliyor',
+  Tamamlandi = 'Tamamlandi',
+  Hata = 'Hata'
 }
 
 export enum VideoFormati {
-  Yatay_16_9 = 0,
-  Dikey_9_16 = 1,
-  Kare_1_1 = 2
+  Yatay_16_9 = 'Yatay_16_9',
+  Dikey_9_16 = 'Dikey_9_16',
+  Kare_1_1 = 'Kare_1_1'
 }
 
 export interface ProjectListDto {

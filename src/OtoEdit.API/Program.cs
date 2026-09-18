@@ -75,7 +75,8 @@ builder.Services.AddBusinessLayer(builder.Configuration, x =>
     // Python Worker'dan gelen event'leri dinleyen MassTransit Consumer'lar
     x.AddConsumer<AnalysisNotificationConsumer>();
     x.AddConsumer<RenderNotificationConsumer>();
-    x.AddConsumer<PipelineProgressConsumer>();
+    x.AddConsumer<PipelineStageChangedConsumer>();
+    x.AddConsumer<PipelineErrorConsumer>();
 });
 
 // 6. CORS

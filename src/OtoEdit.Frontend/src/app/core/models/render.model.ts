@@ -1,8 +1,8 @@
 export enum RenderDurumu {
-  Kuyrukta = 0,
-  RenderEdiliyor = 1,
-  Tamamlandi = 2,
-  Hata = 99
+  Kuyrukta = 'Kuyrukta',
+  RenderEdiliyor = 'RenderEdiliyor',
+  Tamamlandi = 'Tamamlandi',
+  Hata = 'Hata'
 }
 
 export interface RenderStatusDto {

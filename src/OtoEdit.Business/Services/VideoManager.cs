@@ -163,25 +163,35 @@ public class VideoManager : IVideoService
         await _videoRepository.SaveChangesAsync();
     }
 
+    private static readonly HttpClient _httpClient = new HttpClient();
+
     public async Task<(Stream FileStream, string ContentType, string FileName)> GetVideoStreamAsync(Guid videoId, CancellationToken cancellationToken = default)
     {
         var video = await _videoRepository.GetByIdAsync(videoId);
-        if (video == null)
-        {
-            throw new NotFoundException("Video bulunamadı", videoId);
-        }
-
-        var stream = await _fileStorageService.DownloadFileAsync(video.DosyaYolu, cancellationToken);
+        if (video == null) throw new NotFoundException("Video bulunamadı", videoId);
+        var presignedUrl = await _fileStorageService.GetPresignedUrlAsync(video.DosyaYolu, TimeSpan.FromHours(12), cancellationToken);
+        var request = new HttpRequestMessage(HttpMethod.Get, presignedUrl);
+        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        
         var ext = Path.GetExtension(video.DosyaYolu).ToLowerInvariant();
-        var contentType = ext switch
-        {
-            ".mp4" => "video/mp4",
-            ".webm" => "video/webm",
-            ".mov" => "video/quicktime",
-            ".mkv" => "video/x-matroska",
-            _ => "application/octet-stream"
-        };
-
+        var contentType = ext switch { ".mp4" => "video/mp4", ".webm" => "video/webm", ".mov" => "video/quicktime", ".mkv" => "video/x-matroska", _ => "application/octet-stream" };
         return (stream, contentType, $"{video.Baslik}{ext}");
+    }
+
+    public async Task<string> GetVideoUrlAsync(Guid videoId, CancellationToken cancellationToken = default)
+    {
+        var video = await _videoRepository.GetByIdAsync(videoId);
+        if (video == null) throw new NotFoundException("Video bulunamadı", videoId);
+
+        var presignedUrl = await _fileStorageService.GetPresignedUrlAsync(video.DosyaYolu, TimeSpan.FromHours(12), cancellationToken);
+        // Replace internal docker network host 'minio' with 'localhost' so the browser can reach it.
+        if (presignedUrl.Contains("://minio:"))
+        {
+            presignedUrl = presignedUrl.Replace("://minio:", "://localhost:");
+        }
+        
+        return presignedUrl;
     }
 }
