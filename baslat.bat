@@ -5,6 +5,9 @@ echo       OtoEdit Sistemi Baslatiliyor...
 echo ========================================================
 echo.
 
+REM Angular CLI Analytics promptunu kapat
+set "NG_CLI_ANALYTICS=false"
+
 echo [1/4] Eski acik servisler temizleniyor (Eger varsa)...
 taskkill /F /IM "dotnet.exe" /T > nul 2>&1
 taskkill /F /IM "node.exe" /T > nul 2>&1
@@ -29,11 +32,11 @@ if exist "%~dp0.env" (
 echo.
 
 echo [2/4] Docker servisleri baslatiliyor (PostgreSQL, Redis, RabbitMQ, MinIO, Python Worker)...
-docker-compose -f "%~dp0docker-compose.dev.yml" up -d --build
+docker-compose -f "%~dp0docker-compose.dev.yml" up -d --wait
 
 echo.
-echo [3/4] Servislerin hazir olmasi bekleniyor (PostgreSQL, RabbitMQ, MinIO vb.)...
-ping 127.0.0.1 -n 12 > nul
+echo [3/4] Servislerin saglik durumlari kontrol ediliyor...
+docker-compose -f "%~dp0docker-compose.dev.yml" ps
 
 echo.
 echo [3.5/4] Projeler derleniyor (dosya kilitlenme cakismasini onlemek icin)...

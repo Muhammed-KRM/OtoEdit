@@ -24,6 +24,7 @@ Thumbs.db
 ## Logs
 logs/
 *.log
+hata*.txt
 
 ## Python
 __pycache__/
