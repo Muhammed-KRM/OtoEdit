@@ -1,5 +1,7 @@
 using MassTransit;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.SignalR;
+using System.Threading.RateLimiting;
 using OtoEdit.API.Consumers;
 using OtoEdit.API.Hubs;
 using OtoEdit.API.Middleware;
@@ -85,16 +87,28 @@ builder.Services.AddCors(options =>
     });
 });
 
+// 7. Rate Limiter (API Koruması)
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddFixedWindowLimiter("fixed", opt =>
+    {
+        opt.PermitLimit = 100;
+        opt.Window = TimeSpan.FromMinutes(1);
+        opt.QueueLimit = 20;
+    });
+});
+
 var app = builder.Build();
 
-// 7. PipelineNotificationManager ile SignalR Hub bağlantısı
+// 8. PipelineNotificationManager ile SignalR Hub bağlantısı
 var hubContext = app.Services.GetRequiredService<IHubContext<PipelineHub>>();
 PipelineNotificationManager.SendSignalRMessageAsync = async (projectId, method, payload) =>
 {
     await hubContext.Clients.Group($"project-{projectId}").SendAsync(method, payload);
 };
 
-// 8. Middleware Pipeline Sıralaması
+// 9. Middleware Pipeline Sıralaması
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<RequestResponseLoggingMiddleware>();
 
@@ -108,6 +122,7 @@ if (app.Environment.IsDevelopment() || true) // Swagger her zaman erişilebilir
 }
 
 app.UseCors("AllowFrontend");
+app.UseRateLimiter();
 
 // X-API-Key doğrulaması
 app.UseMiddleware<ApiKeyAuthMiddleware>();

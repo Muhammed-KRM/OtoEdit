@@ -59,7 +59,8 @@ public static class DependencyInjection
         services.AddScoped<IChatService, ChatManager>();
         services.AddScoped<IRenderService, RenderManager>();
         services.AddScoped<ITemplateService, TemplateManager>();
-        services.AddHttpClient<IPexelsService, PexelsService>();
+        services.AddHttpClient<IPexelsService, PexelsService>()
+            .AddStandardResilienceHandler();
 
         // 6. MassTransit (RabbitMQ) ile Raw JSON Serializer (Python Worker entegrasyonu)
         services.AddMassTransit(x =>
