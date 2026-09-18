@@ -1,0 +1,13 @@
+{
+  "/api": {
+    "target": "http://localhost:5001",
+    "secure": false,
+    "changeOrigin": true
+  },
+  "/pipeline-hub": {
+    "target": "http://localhost:5001",
+    "secure": false,
+    "ws": true,
+    "changeOrigin": true
+  }
+}
