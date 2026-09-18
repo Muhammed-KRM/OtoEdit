@@ -20,8 +20,9 @@ class GestureDetector:
         logger.info(f"El hareketi (Gesture) algılama başlıyor: {video_path} (frame_skip={self.frame_skip})")
 
         try:
-            import cv2
-            import mediapipe as mp
+            import importlib
+            cv2 = importlib.import_module("cv2")
+            mp = importlib.import_module("mediapipe")
 
             mp_hands = mp.solutions.hands
             cap = cv2.VideoCapture(video_path)

@@ -18,8 +18,9 @@ class FaceTracker:
         logger.info(f"Yüz takibi (Face Tracking) başlıyor: {video_path}")
 
         try:
-            import cv2
-            import mediapipe as mp
+            import importlib
+            cv2 = importlib.import_module("cv2")
+            mp = importlib.import_module("mediapipe")
 
             mp_face = mp.solutions.face_detection
             cap = cv2.VideoCapture(video_path)

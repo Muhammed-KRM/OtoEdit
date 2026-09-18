@@ -16,7 +16,8 @@ class GeminiClient:
 
         if self.api_key:
             try:
-                import google.generativeai as genai
+                import importlib
+                genai = importlib.import_module("google.generativeai")
                 genai.configure(api_key=self.api_key)
                 self.model = genai.GenerativeModel("gemini-2.5-flash")
                 logger.info("Gemini API istemcisi başarıyla yapılandırıldı.")

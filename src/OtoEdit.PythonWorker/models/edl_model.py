@@ -1,5 +1,22 @@
 from typing import List, Dict, Any, Optional
-from pydantic import BaseModel, Field
+
+try:
+    from pydantic import BaseModel, Field
+except ImportError:
+    try:
+        import importlib
+        pyd = importlib.import_module("pydantic")
+        BaseModel = pyd.BaseModel
+        Field = pyd.Field
+    except Exception:
+        class BaseModel:
+            def __init__(self, **kwargs):
+                for k, v in kwargs.items():
+                    setattr(self, k, v)
+            def model_dump(self):
+                return self.__dict__
+        def Field(default_factory=None, **kwargs):
+            return default_factory() if default_factory else None
 
 
 class CutItem(BaseModel):

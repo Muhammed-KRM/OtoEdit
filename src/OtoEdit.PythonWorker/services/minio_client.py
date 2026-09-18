@@ -1,7 +1,18 @@
 import os
 from pathlib import Path
-from minio import Minio
-from minio.error import S3Error
+try:
+    from minio import Minio
+    from minio.error import S3Error
+except ImportError:
+    try:
+        import importlib
+        Minio = importlib.import_module("minio").Minio
+        S3Error = importlib.import_module("minio.error").S3Error
+    except Exception:
+        Minio = None
+        class S3Error(Exception):
+            pass
+
 from config import Config
 from utils.logger import get_logger
 
