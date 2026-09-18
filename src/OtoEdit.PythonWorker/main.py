@@ -1,11 +1,32 @@
 """OtoEdit Python Worker - Video & AI İşleme Motoru Giriş Noktası."""
 import sys
 import time
+import threading
 from config import Config
 from utils.logger import setup_logging, get_logger
 
 setup_logging()
 logger = get_logger("OtoEdit.PythonWorker")
+
+
+def run_analysis_consumer():
+    try:
+        from consumers.analysis_consumer import AnalysisConsumer
+        consumer = AnalysisConsumer()
+        logger.info("AnalysisConsumer dinleme döngüsüne giriyor...")
+        consumer.start()
+    except Exception as ex:
+        logger.error(f"AnalysisConsumer hatası: {ex}", exc_info=True)
+
+
+def run_render_consumer():
+    try:
+        from consumers.render_consumer import RenderConsumer
+        consumer = RenderConsumer()
+        logger.info("RenderConsumer dinleme döngüsüne giriyor...")
+        consumer.start()
+    except Exception as ex:
+        logger.error(f"RenderConsumer hatası: {ex}", exc_info=True)
 
 
 def main():
@@ -19,15 +40,19 @@ def main():
     Config.ensure_directories()
 
     try:
-        from consumers.analysis_consumer import AnalysisConsumer
-        consumer = AnalysisConsumer()
-        logger.info("RabbitMQ AnalysisConsumer dinleme döngüsüne giriyor...")
-        consumer.start()
-    except ImportError:
-        logger.info("Henüz pipeline modülleri yükleniyor (Kısım 1 tamamlandı). Bekleme moduna geçiliyor.")
-        # Test ve yapı kontrolü için canlı tut
-        while True:
-            time.sleep(10)
+        # İki tüketiciyi ayrı arka plan iş parçacıklarında başlat
+        t_analysis = threading.Thread(target=run_analysis_consumer, name="AnalysisConsumerThread", daemon=True)
+        t_render = threading.Thread(target=run_render_consumer, name="RenderConsumerThread", daemon=True)
+
+        t_analysis.start()
+        t_render.start()
+
+        logger.info("Tüm consumer iş parçacıkları başarıyla başlatıldı.")
+
+        # Ana iş parçacığını canlı tut
+        while t_analysis.is_alive() or t_render.is_alive():
+            time.sleep(1)
+
     except KeyboardInterrupt:
         logger.info("Worker kullanıcı tarafından durduruldu.")
     except Exception as e:

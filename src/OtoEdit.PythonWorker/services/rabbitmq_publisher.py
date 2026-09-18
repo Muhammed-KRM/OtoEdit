@@ -90,6 +90,20 @@ class RabbitMQPublisher:
         }
         self.publish(RabbitMQConstants.EXCHANGE_PIPELINE_ERROR, payload)
 
+    def publish_render_completed(self, render_job_id: str, project_id: str, indirme_url: str):
+        """Render tamamlanma bildirimini ve indirme linkini .NET'e gönderir."""
+        payload = {
+            "renderJobId": render_job_id,
+            "projectId": project_id,
+            "indirmeUrl": indirme_url
+        }
+        self.publish(RabbitMQConstants.EXCHANGE_RENDER_COMPLETED, payload)
+        logger.info(f"RenderCompletedEvent yayınlandı: RenderJobId={render_job_id}")
+
+    def publish_render_progress(self, render_job_id: str, project_id: str, yuzde: int, mesaj: str = ""):
+        """Render aşama ilerleme bildirimini .NET'e gönderir."""
+        self.publish_stage_changed(project_id, render_job_id, PipelineStage.RENDER, yuzde, mesaj)
+
     def _close(self):
         try:
             if self._channel and not self._channel.is_closed:
