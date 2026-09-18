@@ -51,19 +51,13 @@ class AnalysisConsumer:
         connection = pika.BlockingConnection(parameters)
         channel = connection.channel()
 
-        # MassTransit Publish<VideoUploadedEvent> fanout exchange üretir
-        channel.exchange_declare(
-            exchange=RabbitMQConstants.EXCHANGE_VIDEO_UPLOADED,
-            exchange_type='fanout',
-            durable=True
-        )
-
-        # Worker kuyruğu tanımla ve exchange'e bağla
+        # Worker kuyruğu tanımla
         channel.queue_declare(queue=RabbitMQConstants.QUEUE_VIDEO_UPLOADED, durable=True)
-        channel.queue_bind(
-            queue=RabbitMQConstants.QUEUE_VIDEO_UPLOADED,
-            exchange=RabbitMQConstants.EXCHANGE_VIDEO_UPLOADED
-        )
+
+        # Hem sade hem MassTransit tam isimli exchange'lere bağla
+        for ex in [RabbitMQConstants.EXCHANGE_VIDEO_UPLOADED, f"OtoEdit.Business.Events:{RabbitMQConstants.EXCHANGE_VIDEO_UPLOADED}"]:
+            channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
+            channel.queue_bind(queue=RabbitMQConstants.QUEUE_VIDEO_UPLOADED, exchange=ex)
 
         # Qos: Her seferde 1 mesaj al
         channel.basic_qos(prefetch_count=1)

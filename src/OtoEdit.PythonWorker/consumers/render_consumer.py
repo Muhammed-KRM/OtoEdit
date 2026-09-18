@@ -39,19 +39,13 @@ class RenderConsumer:
         connection = pika.BlockingConnection(parameters)
         channel = connection.channel()
 
-        # MassTransit Publish<RenderRequestedEvent> fanout exchange üretir
-        channel.exchange_declare(
-            exchange=RabbitMQConstants.EXCHANGE_RENDER_REQUESTED,
-            exchange_type='fanout',
-            durable=True
-        )
-
-        # Worker render kuyruğunu tanımla ve exchange'e bağla
+        # Worker render kuyruğunu tanımla
         channel.queue_declare(queue=RabbitMQConstants.QUEUE_RENDER_REQUESTED, durable=True)
-        channel.queue_bind(
-            queue=RabbitMQConstants.QUEUE_RENDER_REQUESTED,
-            exchange=RabbitMQConstants.EXCHANGE_RENDER_REQUESTED
-        )
+
+        # Hem sade hem MassTransit tam isimli exchange'lere bağla
+        for ex in [RabbitMQConstants.EXCHANGE_RENDER_REQUESTED, f"OtoEdit.Business.Events:{RabbitMQConstants.EXCHANGE_RENDER_REQUESTED}"]:
+            channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
+            channel.queue_bind(queue=RabbitMQConstants.QUEUE_RENDER_REQUESTED, exchange=ex)
 
         channel.basic_qos(prefetch_count=1)
         channel.basic_consume(

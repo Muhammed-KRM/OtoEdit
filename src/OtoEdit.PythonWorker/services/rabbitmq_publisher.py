@@ -42,8 +42,9 @@ class RabbitMQPublisher:
         """Verilen exchange üzerine raw JSON mesajı yayınlar."""
         try:
             channel = self._get_channel()
-            # MassTransit fanout exchange yapısını garantiye al
-            channel.exchange_declare(exchange=exchange_name, exchange_type='fanout', durable=True)
+            exchanges = [exchange_name]
+            if not exchange_name.startswith("OtoEdit.Business.Events:"):
+                exchanges.append(f"OtoEdit.Business.Events:{exchange_name}")
 
             body = json.dumps(message_dict, ensure_ascii=False).encode('utf-8')
             properties = pika.BasicProperties(
@@ -51,13 +52,15 @@ class RabbitMQPublisher:
                 delivery_mode=2  # Persistent mesaj
             )
 
-            channel.basic_publish(
-                exchange=exchange_name,
-                routing_key='',
-                body=body,
-                properties=properties
-            )
-            logger.info(f"RabbitMQ event yayınlandı: exchange={exchange_name}")
+            for ex in exchanges:
+                channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
+                channel.basic_publish(
+                    exchange=ex,
+                    routing_key='',
+                    body=body,
+                    properties=properties
+                )
+                logger.info(f"RabbitMQ event yayınlandı: exchange={ex}")
         except Exception as e:
             logger.error(f"RabbitMQ yayın hatası (exchange={exchange_name}): {e}", exc_info=True)
             # Bağlantıyı sıfırla ki bir sonraki istekte yeniden denesin
