@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
-from dotenv import load_dotenv
-
-# .env dosyasını varsa yükle
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 
 class Config:
