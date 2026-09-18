@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OtoEdit.Data.Entities;
+using OtoEdit.Data.Enums;
 
 namespace OtoEdit.Data.Configurations;
 
@@ -27,7 +28,7 @@ public class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.Property(p => p.VideoFormati)
             .HasColumnName("video_formati")
             .IsRequired()
-            .HasDefaultValue(0);
+            .HasDefaultValue(VideoFormati.Yatay_16_9);
 
         builder.Property(p => p.TemplateId)
             .HasColumnName("template_id");
@@ -45,7 +46,7 @@ public class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.Property(p => p.Durum)
             .HasColumnName("durum")
             .IsRequired()
-            .HasDefaultValue(0);
+            .HasDefaultValue(ProjectDurumu.Taslak);
 
         builder.Property(p => p.OlusturmaTarihi)
             .HasColumnName("olusturma_tarihi")

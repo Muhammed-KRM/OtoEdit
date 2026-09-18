@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OtoEdit.Data.Entities;
+using OtoEdit.Data.Enums;
 
 namespace OtoEdit.Data.Configurations;
 
@@ -46,7 +47,7 @@ public class VideoConfiguration : IEntityTypeConfiguration<Video>
         builder.Property(v => v.IslemDurumu)
             .HasColumnName("islem_durumu")
             .IsRequired()
-            .HasDefaultValue(0);
+            .HasDefaultValue(VideoIslemDurumu.Bekliyor);
 
         builder.Property(v => v.OlusturmaTarihi)
             .HasColumnName("olusturma_tarihi")

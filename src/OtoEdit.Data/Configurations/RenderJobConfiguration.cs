@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using OtoEdit.Data.Entities;
+using OtoEdit.Data.Enums;
 
 namespace OtoEdit.Data.Configurations;
 
@@ -27,7 +28,7 @@ public class RenderJobConfiguration : IEntityTypeConfiguration<RenderJob>
         builder.Property(r => r.Durum)
             .HasColumnName("durum")
             .IsRequired()
-            .HasDefaultValue(0);
+            .HasDefaultValue(RenderDurumu.Kuyrukta);
 
         builder.Property(r => r.CiktiYolu)
             .HasColumnName("cikti_yolu")
