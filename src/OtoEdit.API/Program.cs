@@ -8,6 +8,8 @@ using OtoEdit.API.Middleware;
 using OtoEdit.Business;
 using OtoEdit.Business.Services;
 using OtoEdit.Data;
+using OtoEdit.Data.Context;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -130,6 +132,21 @@ app.UseMiddleware<ApiKeyAuthMiddleware>();
 app.UseAuthorization();
 app.MapControllers();
 app.MapHub<PipelineHub>("/pipeline-hub");
+
+// 10. Otomatik Veritabanı Migration
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        db.Database.Migrate();
+    }
+    catch (Exception ex)
+    {
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
+        logger.LogWarning(ex, "Veritabanı migration uygulanırken uyarı/hata oluştu.");
+    }
+}
 
 app.Run();
 
