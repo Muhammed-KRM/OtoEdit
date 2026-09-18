@@ -5,7 +5,7 @@ try:
 except Exception:
     pika = None
 from config import Config
-from utils.constants import RabbitMQConstants
+from utils.constants import PipelineStage, RabbitMQConstants
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
