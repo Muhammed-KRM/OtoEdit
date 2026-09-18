@@ -9,8 +9,9 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 try:
-    import ffmpeg
-except ImportError:
+    import importlib
+    ffmpeg = importlib.import_module("ffmpeg")
+except Exception:
     ffmpeg = None
 
 

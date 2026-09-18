@@ -15,8 +15,9 @@ class Transcriber:
 
         if self.api_key:
             try:
-                from openai import OpenAI
-                self.client = OpenAI(api_key=self.api_key)
+                import importlib
+                openai_mod = importlib.import_module("openai")
+                self.client = openai_mod.OpenAI(api_key=self.api_key)
                 logger.info("Whisper API istemcisi hazırlandı.")
             except Exception as e:
                 logger.warning(f"OpenAI istemcisi başlatılamadı: {e}")

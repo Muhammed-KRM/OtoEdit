@@ -1,5 +1,9 @@
 import json
-import pika
+try:
+    import importlib
+    pika = importlib.import_module("pika")
+except Exception:
+    pika = None
 from config import Config
 from utils.constants import RabbitMQConstants
 from utils.logger import get_logger

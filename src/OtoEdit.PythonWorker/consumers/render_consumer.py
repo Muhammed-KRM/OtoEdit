@@ -1,7 +1,11 @@
 """RenderConsumer — RabbitMQ'dan RenderRequestedEvent dinler ve FFmpeg ile render işlemini yürütür."""
 import json
 import os
-import pika
+try:
+    import importlib
+    pika = importlib.import_module("pika")
+except Exception:
+    pika = None
 from config import Config
 from render.video_renderer import VideoRenderer
 from services.minio_client import MinioClient

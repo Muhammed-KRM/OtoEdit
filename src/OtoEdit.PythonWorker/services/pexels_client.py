@@ -1,6 +1,10 @@
 from pathlib import Path
 from typing import Optional
-import requests
+try:
+    import importlib
+    requests = importlib.import_module("requests")
+except Exception:
+    requests = None
 from config import Config
 from utils.logger import get_logger
 

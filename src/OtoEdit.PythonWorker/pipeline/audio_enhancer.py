@@ -27,9 +27,11 @@ class AudioEnhancer:
 
             # 2. noisereduce ve pydub ile AI tabanlı gürültü temizleme
             try:
-                import numpy as np
-                import noisereduce as nr
-                from pydub import AudioSegment
+                import importlib
+                np = importlib.import_module("numpy")
+                nr = importlib.import_module("noisereduce")
+                pydub_mod = importlib.import_module("pydub")
+                AudioSegment = pydub_mod.AudioSegment
 
                 audio = AudioSegment.from_wav(raw_wav)
                 samples = np.array(audio.get_array_of_samples(), dtype=np.float32)

@@ -21,8 +21,11 @@ class SilenceDetector:
         cuts = []
 
         try:
-            from pydub import AudioSegment
-            from pydub.silence import detect_silence
+            import importlib
+            pydub_mod = importlib.import_module("pydub")
+            pydub_silence = importlib.import_module("pydub.silence")
+            AudioSegment = pydub_mod.AudioSegment
+            detect_silence = pydub_silence.detect_silence
 
             ext = Path(audio_path).suffix.lower()
             if ext == ".mp3":

@@ -1,5 +1,9 @@
 import json
-import pika
+try:
+    import importlib
+    pika = importlib.import_module("pika")
+except Exception:
+    pika = None
 from config import Config
 from pipeline.audio_enhancer import AudioEnhancer
 from pipeline.edl_builder import EdlBuilder

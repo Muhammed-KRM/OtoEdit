@@ -1,9 +1,10 @@
 import os
 from pathlib import Path
 try:
-    from dotenv import load_dotenv
-    load_dotenv()
-except ImportError:
+    import importlib
+    dotenv = importlib.import_module("dotenv")
+    dotenv.load_dotenv()
+except Exception:
     pass
 
 
