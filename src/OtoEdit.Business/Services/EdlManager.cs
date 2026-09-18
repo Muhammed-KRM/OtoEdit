@@ -72,12 +72,72 @@ public class EdlManager : IEdlService
         // Mevcut EDL JSON'u JsonNode olarak parse et
         var rootNode = JsonNode.Parse(edl.EdlJson) as JsonObject ?? new JsonObject();
 
-        // Gelen patch alanlarını merge et
+        // Gelen patch alanlarını akıllıca merge et (cuts, overlays, settings vb.)
         using var patchDoc = JsonDocument.Parse(patch.GetRawText());
         foreach (var property in patchDoc.RootElement.EnumerateObject())
         {
+            var propName = property.Name;
             var patchValueNode = JsonNode.Parse(property.Value.GetRawText());
-            rootNode[property.Name] = patchValueNode;
+
+            if ((propName.Equals("cuts", StringComparison.OrdinalIgnoreCase) ||
+                 propName.Equals("overlays", StringComparison.OrdinalIgnoreCase) ||
+                 propName.Equals("suggestions", StringComparison.OrdinalIgnoreCase)) &&
+                patchValueNode is JsonArray patchArray &&
+                rootNode[propName] is JsonArray targetArray)
+            {
+                foreach (var item in patchArray)
+                {
+                    if (item is JsonObject objItem)
+                    {
+                        var itemId = objItem["id"]?.GetValue<string>();
+                        var isRemove = objItem["action"]?.GetValue<string>() == "remove";
+
+                        if (!string.IsNullOrEmpty(itemId))
+                        {
+                            int existingIndex = -1;
+                            for (int i = 0; i < targetArray.Count; i++)
+                            {
+                                if (targetArray[i] is JsonObject existingObj &&
+                                    existingObj["id"]?.GetValue<string>() == itemId)
+                                {
+                                    existingIndex = i;
+                                    break;
+                                }
+                            }
+
+                            if (isRemove)
+                            {
+                                if (existingIndex >= 0)
+                                    targetArray.RemoveAt(existingIndex);
+                            }
+                            else
+                            {
+                                if (existingIndex >= 0)
+                                    targetArray[existingIndex] = objItem.DeepClone();
+                                else
+                                    targetArray.Add(objItem.DeepClone());
+                            }
+                        }
+                        else
+                        {
+                            targetArray.Add(objItem.DeepClone());
+                        }
+                    }
+                }
+            }
+            else if (propName.Equals("settings", StringComparison.OrdinalIgnoreCase) &&
+                     patchValueNode is JsonObject patchSettings &&
+                     rootNode["settings"] is JsonObject targetSettings)
+            {
+                foreach (var settingProp in patchSettings)
+                {
+                    targetSettings[settingProp.Key] = settingProp.Value?.DeepClone();
+                }
+            }
+            else
+            {
+                rootNode[propName] = patchValueNode;
+            }
         }
 
         edl.EdlJson = rootNode.ToJsonString();
