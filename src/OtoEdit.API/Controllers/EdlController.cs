@@ -39,4 +39,28 @@ public class EdlController : ControllerBase
         var result = await _edlService.PatchEdlAsync(projectId, patch, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>
+    /// En son yapılan EDL değişikliğini geri alır (Undo).
+    /// </summary>
+    [HttpPost("undo")]
+    [ProducesResponseType(typeof(EdlDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UndoEdl(Guid projectId, CancellationToken cancellationToken)
+    {
+        var result = await _edlService.UndoAsync(projectId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Geri alınan EDL değişikliğini ileri alır (Redo).
+    /// </summary>
+    [HttpPost("redo")]
+    [ProducesResponseType(typeof(EdlDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> RedoEdl(Guid projectId, CancellationToken cancellationToken)
+    {
+        var result = await _edlService.RedoAsync(projectId, cancellationToken);
+        return Ok(result);
+    }
 }

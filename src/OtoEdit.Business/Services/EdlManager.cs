@@ -69,6 +69,9 @@ public class EdlManager : IEdlService
             throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
         }
 
+        // --- MEMENTO PATTERN: Mevcut durumu snapshot olarak kaydet ---
+        await SaveSnapshotAsync(projectId, edl, "EDL Patch Öncesi", "system", cancellationToken);
+
         // Mevcut EDL JSON'u JsonNode olarak parse et
         var rootNode = JsonNode.Parse(edl.EdlJson) as JsonObject ?? new JsonObject();
 
@@ -157,6 +160,140 @@ public class EdlManager : IEdlService
         };
     }
 
+    public async Task<EdlDto> UndoAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var edl = await _context.EditDecisionLists
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId, cancellationToken);
+
+        if (edl == null)
+            throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
+
+        // En son 'system' kaynaklı snapshot'ı bul (bu bizim döneceğimiz önceki state)
+        var lastSystemSnapshot = await _context.EdlSnapshots
+            .Where(s => s.ProjectId == projectId && s.Kaynak == "system")
+            .OrderByDescending(s => s.OlusturmaTarihi)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (lastSystemSnapshot == null)
+            throw new InvalidOperationException("Geri alınacak bir işlem bulunamadı.");
+
+        // Mevcut durumu Redo (system_undo) olarak kaydet
+        var redoSnapshot = new EdlSnapshot
+        {
+            ProjectId = projectId,
+            Versiyon = edl.Versiyon,
+            EdlJson = edl.EdlJson,
+            Aciklama = "Undo Öncesi (Redo için)",
+            Kaynak = "system_undo"
+        };
+        _context.EdlSnapshots.Add(redoSnapshot);
+
+        // EDL'i önceki state'e geri döndür
+        edl.EdlJson = lastSystemSnapshot.EdlJson;
+        edl.Versiyon += 1; // Frontend'in değişikliği algılaması için arttırıyoruz
+        edl.GuncellemeTarihi = DateTime.UtcNow;
+
+        // Kullanılan snapshot'ı 'system' stack'inden çıkar
+        _context.EdlSnapshots.Remove(lastSystemSnapshot);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
+
+        using var doc = JsonDocument.Parse(edl.EdlJson);
+        return new EdlDto
+        {
+            ProjectId = edl.ProjectId,
+            Versiyon = edl.Versiyon,
+            Edl = doc.RootElement.Clone(),
+            GuncellemeTarihi = edl.GuncellemeTarihi.Value
+        };
+    }
+
+    public async Task<EdlDto> RedoAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var edl = await _context.EditDecisionLists
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId, cancellationToken);
+
+        if (edl == null)
+            throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
+
+        // En son 'system_undo' kaynaklı snapshot'ı bul
+        var redoSnapshot = await _context.EdlSnapshots
+            .Where(s => s.ProjectId == projectId && s.Kaynak == "system_undo")
+            .OrderByDescending(s => s.OlusturmaTarihi)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (redoSnapshot == null)
+            throw new InvalidOperationException("İleri alınacak bir işlem bulunamadı.");
+
+        // Mevcut durumu 'system' stack'ine geri ekle (Undo için)
+        var undoSnapshot = new EdlSnapshot
+        {
+            ProjectId = projectId,
+            Versiyon = edl.Versiyon,
+            EdlJson = edl.EdlJson,
+            Aciklama = "Redo Öncesi (Undo için)",
+            Kaynak = "system"
+        };
+        _context.EdlSnapshots.Add(undoSnapshot);
+
+        // EDL'i ileri state'e döndür
+        edl.EdlJson = redoSnapshot.EdlJson;
+        edl.Versiyon += 1;
+        edl.GuncellemeTarihi = DateTime.UtcNow;
+
+        // Kullanılan redo snapshot'ını sil
+        _context.EdlSnapshots.Remove(redoSnapshot);
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
+
+        using var doc = JsonDocument.Parse(edl.EdlJson);
+        return new EdlDto
+        {
+            ProjectId = edl.ProjectId,
+            Versiyon = edl.Versiyon,
+            Edl = doc.RootElement.Clone(),
+            GuncellemeTarihi = edl.GuncellemeTarihi.Value
+        };
+    }
+
+    private async Task SaveSnapshotAsync(Guid projectId, EditDecisionList edl, string aciklama, string kaynak, CancellationToken cancellationToken)
+    {
+        // Normal bir işlem yapılıyorsa (kaynak == system), ileri alma (redo) geçmişini temizle
+        if (kaynak == "system")
+        {
+            var redoSnapshots = await _context.EdlSnapshots
+                .Where(s => s.ProjectId == projectId && s.Kaynak == "system_undo")
+                .ToListAsync(cancellationToken);
+            _context.EdlSnapshots.RemoveRange(redoSnapshots);
+        }
+
+        var snapshot = new EdlSnapshot
+        {
+            ProjectId = projectId,
+            Versiyon = edl.Versiyon,
+            EdlJson = edl.EdlJson,
+            Aciklama = aciklama,
+            Kaynak = kaynak
+        };
+        
+        _context.EdlSnapshots.Add(snapshot);
+        
+        // Snapshot limitini koru (Örn: Son 50)
+        var snapshotCount = await _context.EdlSnapshots.CountAsync(s => s.ProjectId == projectId, cancellationToken);
+        if (snapshotCount >= 50)
+        {
+            var oldestSnapshots = await _context.EdlSnapshots
+                .Where(s => s.ProjectId == projectId)
+                .OrderBy(s => s.OlusturmaTarihi)
+                .Take(snapshotCount - 49) // 1 tane de yeni ekleneceği için 49
+                .ToListAsync(cancellationToken);
+                
+            _context.EdlSnapshots.RemoveRange(oldestSnapshots);
+        }
+    }
+
     public async Task<EditDecisionList> CreateOrUpdateAsync(Guid projectId, JsonDocument edlJson, CancellationToken cancellationToken = default)
     {
         var existing = await _context.EditDecisionLists
@@ -166,6 +303,8 @@ public class EdlManager : IEdlService
 
         if (existing != null)
         {
+            await SaveSnapshotAsync(projectId, existing, "CreateOrUpdate Öncesi", "system", cancellationToken);
+            
             existing.EdlJson = jsonString;
             existing.Versiyon += 1;
             existing.GuncellemeTarihi = DateTime.UtcNow;

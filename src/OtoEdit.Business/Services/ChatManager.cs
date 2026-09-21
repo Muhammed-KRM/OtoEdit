@@ -3,6 +3,7 @@ using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using OtoEdit.Business.DTOs.Chat;
+using OtoEdit.Business.DTOs.Edl;
 using OtoEdit.Business.Exceptions;
 using OtoEdit.Business.Interfaces;
 using OtoEdit.Data.Context;
@@ -77,7 +78,13 @@ public class ChatManager : IChatService
 
         var edlJson = currentEdl?.EdlJson ?? "{}";
 
-        // 3. Kullanıcı mesajını kaydet
+        // 3. Mevcut transkripti oku
+        var transcript = await _context.VideoTranscripts
+            .AsNoTracking()
+            .FirstOrDefaultAsync(t => t.Video.ProjectId == projectId, cancellationToken);
+        var transcriptText = transcript?.HamMetin;
+
+        // 4. Kullanıcı mesajını kaydet
         var userChatMessage = new ChatMessage
         {
             ProjectId = projectId,
@@ -87,38 +94,51 @@ public class ChatManager : IChatService
         };
         _context.ChatMessages.Add(userChatMessage);
 
-        // 4. Gemini AI Provider ile komutu çözümle
-        var chatResult = await _chatProvider.ProcessCommandAsync(message, edlJson, historyItems, cancellationToken);
+        // 5. Gemini AI Provider ile komutu çözümle
+        var chatResult = await _chatProvider.ProcessCommandAsync(message, edlJson, transcriptText, historyItems, cancellationToken);
 
-        // 5. Eğer bir EDL Patch üretilmişse ve içinde resim overlay'i varsa Pexels ile zenginleştir
+        // 6. Niyet sınıflandırmasına göre patch uygula veya beklemeye al (HitL)
         int? yeniVersiyon = null;
+        string patchDurumu = "none";
+        string? pendingPatchString = null;
+        
         if (chatResult.EdlPatch.HasValue)
         {
-            try
+            if (chatResult.Intent == "information")
             {
-                var patchedElement = await EnrichImageOverlaysWithPexelsAsync(projectId, chatResult.EdlPatch.Value, cancellationToken);
-                var patchResponse = await _edlService.PatchEdlAsync(projectId, patchedElement, cancellationToken);
-                yeniVersiyon = patchResponse.Versiyon;
+                // Sadece bilgi, işlem yapma
             }
-            catch (Exception ex)
+            else // "suggestion" veya "command"
             {
-                _logger.LogWarning(ex, "AI tarafından üretilen EDL Patch uygulanamadı.");
+                // HitL: Değişikliği kalıcı yapmak yerine onaya sun (Pending)
+                try
+                {
+                    var patchedElement = await EnrichImageOverlaysWithPexelsAsync(projectId, chatResult.EdlPatch.Value, cancellationToken);
+                    pendingPatchString = patchedElement.GetRawText();
+                    patchDurumu = "pending";
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "AI tarafından üretilen EDL Patch zenginleştirilemedi.");
+                }
             }
         }
 
-        // 6. Asistan yanıtını kaydet
+        // 7. Asistan yanıtını kaydet
         var assistantChatMessage = new ChatMessage
         {
             ProjectId = projectId,
             Rol = "assistant",
             Mesaj = chatResult.Mesaj,
-            EdlPatch = chatResult.EdlPatch?.GetRawText(),
+            EdlPatch = chatResult.FormFields.HasValue ? chatResult.FormFields.Value.GetRawText() : null, // Geçici olarak form verilerini EdlPatch alanında saklıyoruz (tablo yapısını değiştirmemek için)
+            PendingEdlPatch = pendingPatchString,
+            PatchDurumu = chatResult.Intent == "clarification" ? "clarification" : patchDurumu,
             OlusturmaTarihi = DateTime.UtcNow
         };
         _context.ChatMessages.Add(assistantChatMessage);
         await _context.SaveChangesAsync(cancellationToken);
 
-        // 7. Önbelleği temizle
+        // 8. Önbelleği temizle
         await _cacheService.RemoveAsync(cacheKey, cancellationToken);
 
         return new ChatResponseDto
@@ -126,18 +146,63 @@ public class ChatManager : IChatService
             Id = assistantChatMessage.Id,
             Rol = "assistant",
             Mesaj = chatResult.Mesaj,
-            EdlPatch = chatResult.EdlPatch,
+            Intent = chatResult.Intent,
+            EdlPatch = null,
+            PendingEdlPatch = string.IsNullOrEmpty(pendingPatchString) ? null : JsonDocument.Parse(pendingPatchString).RootElement,
+            FormFields = chatResult.FormFields,
+            PatchDurumu = assistantChatMessage.PatchDurumu,
             EdlVersiyonYeni = yeniVersiyon
         };
     }
 
-    public async Task<IEnumerable<ChatMessage>> GetHistoryAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<EdlPatchResponseDto> ApplyPendingPatchAsync(Guid messageId, CancellationToken cancellationToken = default)
     {
-        return await _context.ChatMessages
+        var message = await _context.ChatMessages.FindAsync(new object[] { messageId }, cancellationToken);
+        if (message == null)
+            throw new NotFoundException("Chat mesajı bulunamadı", messageId);
+
+        if (message.PatchDurumu != "pending" || string.IsNullOrEmpty(message.PendingEdlPatch))
+            throw new InvalidOperationException("Bu mesajda onay bekleyen geçerli bir değişiklik yok.");
+
+        using var patchDoc = JsonDocument.Parse(message.PendingEdlPatch);
+        
+        // EDL'ye kalıcı olarak uygula (EdlManager zaten snapshot alacak)
+        var result = await _edlService.PatchEdlAsync(message.ProjectId, patchDoc.RootElement, cancellationToken);
+
+        // Mesajın durumunu güncelle
+        message.PatchDurumu = "applied";
+        
+        // Asıl EdlPatch alanına kopyalayabiliriz veya sadece durumu applied olarak bırakabiliriz
+        message.EdlPatch = message.PendingEdlPatch;
+        message.PendingEdlPatch = null; // Bekleyen iş kalmadı
+
+        await _context.SaveChangesAsync(cancellationToken);
+        
+        // Önbelleği temizle
+        await _cacheService.RemoveAsync($"{CachePrefix}{message.ProjectId}:history", cancellationToken);
+
+        return result;
+    }
+
+    public async Task<IEnumerable<object>> GetHistoryAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var messages = await _context.ChatMessages
             .Where(c => c.ProjectId == projectId)
             .OrderBy(c => c.OlusturmaTarihi)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+            
+        return messages.Select(m => new
+        {
+            Id = m.Id,
+            ProjectId = m.ProjectId,
+            Rol = m.Rol,
+            Mesaj = m.Mesaj,
+            PatchDurumu = m.PatchDurumu,
+            OlusturulmaZamani = m.OlusturmaTarihi,
+            PendingEdlPatch = string.IsNullOrEmpty(m.PendingEdlPatch) ? null : JsonDocument.Parse(m.PendingEdlPatch).RootElement,
+            FormFields = (m.PatchDurumu == "clarification" && !string.IsNullOrEmpty(m.EdlPatch)) ? JsonDocument.Parse(m.EdlPatch).RootElement : (JsonElement?)null
+        });
     }
 
     /// <summary>

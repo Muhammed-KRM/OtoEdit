@@ -17,6 +17,7 @@ public class AppDbContext : DbContext
     public virtual DbSet<Video> Videos { get; set; } = null!;
     public virtual DbSet<VideoTranscript> VideoTranscripts { get; set; } = null!;
     public virtual DbSet<EditDecisionList> EditDecisionLists { get; set; } = null!;
+    public virtual DbSet<EdlSnapshot> EdlSnapshots { get; set; } = null!;
     public virtual DbSet<Template> Templates { get; set; } = null!;
     public virtual DbSet<ChatMessage> ChatMessages { get; set; } = null!;
     public virtual DbSet<RenderJob> RenderJobs { get; set; } = null!;

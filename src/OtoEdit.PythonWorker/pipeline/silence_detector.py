@@ -10,10 +10,11 @@ logger = get_logger(__name__)
 class SilenceDetector:
     """Videodaki veya sesteki uzun sessizlikleri (jump-cut) tespit eden motor."""
 
-    def __init__(self, min_silence_len: int = 0, silence_thresh: int = 0, padding_sec: float = 0.3):
+    def __init__(self, min_silence_len: int = 0, silence_thresh: int = 0, padding_sec: float = 0.3, min_keep_duration_sec: float = 0.4):
         self.min_silence_len = min_silence_len or Config.SILENCE_MIN_LEN_MS
         self.silence_thresh = silence_thresh or Config.SILENCE_THRESH_DBFS
         self.padding_sec = padding_sec  # Kelime başı/sonu kırpılmasını önleyen güvenlik marjı
+        self.min_keep_duration_sec = min_keep_duration_sec
 
     def detect(self, audio_path: str) -> List[CutItem]:
         """Ses dosyasındaki sessizlik aralıklarını bularak CutItem listesi döner."""
@@ -42,7 +43,22 @@ class SilenceDetector:
                 silence_thresh=self.silence_thresh
             )
 
-            for idx, (start_ms, end_ms) in enumerate(silent_ranges_ms, start=1):
+            # Kısa sesleri yoksayma (Merge silences if gap < min_keep_duration_ms)
+            min_keep_ms = self.min_keep_duration_sec * 1000.0
+            merged_silences = []
+            for current in silent_ranges_ms:
+                if not merged_silences:
+                    merged_silences.append(current)
+                else:
+                    prev = merged_silences[-1]
+                    gap = current[0] - prev[1]
+                    if gap < min_keep_ms:
+                        # Gap is too small, merge the silences (i.e. cut out the short noise too)
+                        merged_silences[-1] = (prev[0], current[1])
+                    else:
+                        merged_silences.append(current)
+
+            for idx, (start_ms, end_ms) in enumerate(merged_silences, start=1):
                 start_sec = max(0.0, (start_ms / 1000.0) + self.padding_sec)
                 end_sec = max(start_sec, (end_ms / 1000.0) - self.padding_sec)
 

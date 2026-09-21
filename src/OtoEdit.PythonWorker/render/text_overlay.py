@@ -138,11 +138,26 @@ class TextOverlay:
             bg_ass = cls.hex_to_ass_color(ov.get("backgroundColor", "#00000080"))
             align = cls.position_to_ass_alignment(ov.get("position", ["center", "bottom"]))
             animation = ov.get("animation", "pop-up")
+            
+            posX = ov.get("positionX")
+            posY = ov.get("positionY")
 
             anim_tags = AnimationEffects.get_ass_tags(animation, duration_sec)
 
+            pos_tag = ""
+            if posX is not None and posY is not None:
+                # Convert percentage to actual pixels
+                px = int(float(posX) / 100.0 * play_res_x)
+                py = int(float(posY) / 100.0 * play_res_y)
+                pos_tag = f"\\pos({px},{py})"
+
             # Özel stil tagleri (inline override)
-            inline_tags = f"{{\\an{align}\\fn{font}\\fs{size}\\c{color_ass}\\4c{bg_ass}{anim_tags}}}"
+            if pos_tag:
+                # If absolute pos is given, alignment usually needs to be center-center (5) so it centers on the mouse cursor
+                inline_tags = f"{{\\an5\\fn{font}\\fs{size}\\c{color_ass}\\4c{bg_ass}{pos_tag}{anim_tags}}}"
+            else:
+                inline_tags = f"{{\\an{align}\\fn{font}\\fs{size}\\c{color_ass}\\4c{bg_ass}{anim_tags}}}"
+                
             clean_content = content.replace("\n", "\\N")
             dialogue_lines.append(f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{inline_tags}{clean_content}")
 

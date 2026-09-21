@@ -32,6 +32,16 @@ public class ChatMessageConfiguration : IEntityTypeConfiguration<ChatMessage>
         builder.Property(c => c.EdlPatch)
             .HasColumnName("edl_patch")
             .HasColumnType("jsonb");
+            
+        builder.Property(c => c.PendingEdlPatch)
+            .HasColumnName("pending_edl_patch")
+            .HasColumnType("jsonb");
+            
+        builder.Property(c => c.PatchDurumu)
+            .HasColumnName("patch_durumu")
+            .HasMaxLength(20)
+            .HasDefaultValue("none")
+            .IsRequired();
 
         builder.Property(c => c.OlusturmaTarihi)
             .HasColumnName("olusturma_tarihi")

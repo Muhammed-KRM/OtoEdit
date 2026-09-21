@@ -18,9 +18,12 @@ export interface OverlayItem {
   fontSize?: number;
   color?: string;
   backgroundColor?: string;
-  animation?: 'fade' | 'pop-up' | 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down';
+  animation?: 'fade' | 'pop-up' | 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down' | 'none';
   position?: [string, string];
+  positionX?: number; // 0-100 percentage
+  positionY?: number; // 0-100 percentage
   scale?: number;
+  trackId?: number;
 }
 
 export interface TranscriptWord {

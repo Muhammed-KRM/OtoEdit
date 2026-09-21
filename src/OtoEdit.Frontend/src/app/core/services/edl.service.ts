@@ -16,4 +16,12 @@ export class EdlService {
   patchEdl(projectId: string, patch: EdlPatchDto): Observable<{ versiyon: number }> {
     return this.api.patch<{ versiyon: number }>(`/projects/${projectId}/edl`, patch);
   }
+
+  undoEdl(projectId: string): Observable<EdlDto> {
+    return this.api.post<EdlDto>(`/projects/${projectId}/edl/undo`, {});
+  }
+
+  redoEdl(projectId: string): Observable<EdlDto> {
+    return this.api.post<EdlDto>(`/projects/${projectId}/edl/redo`, {});
+  }
 }

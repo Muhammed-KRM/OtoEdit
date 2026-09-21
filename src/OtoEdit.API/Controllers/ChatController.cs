@@ -43,4 +43,17 @@ public class ChatController : ControllerBase
         var history = await _chatService.GetHistoryAsync(projectId, cancellationToken);
         return Ok(history);
     }
+
+    /// <summary>
+    /// AI'ın önerdiği ve onay bekleyen (pending) değişiklikleri EDL'ye uygular (HitL).
+    /// </summary>
+    [HttpPost("{messageId:guid}/apply")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ApplyPendingPatch(Guid projectId, Guid messageId, CancellationToken cancellationToken)
+    {
+        var result = await _chatService.ApplyPendingPatchAsync(messageId, cancellationToken);
+        return Ok(result);
+    }
 }

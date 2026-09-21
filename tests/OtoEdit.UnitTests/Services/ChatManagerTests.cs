@@ -82,6 +82,7 @@ public class ChatManagerTests : IDisposable
         var patchDoc = JsonDocument.Parse("{\"cuts\": [{\"id\": \"cut_ai_1\", \"start\": 0.0, \"end\": 5.0}]}");
         var aiResult = new ChatResult
         {
+            Intent = "command",
             Mesaj = "Girişteki ilk 5 saniyeyi kestim.",
             EdlPatch = patchDoc.RootElement
         };
@@ -89,6 +90,7 @@ public class ChatManagerTests : IDisposable
         _chatProviderMock.Setup(c => c.ProcessCommandAsync(
             "İlk 5 saniyeyi kes",
             It.IsAny<string>(),
+            It.IsAny<string?>(),
             It.IsAny<List<ChatHistoryItem>>(),
             It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResult);
@@ -106,7 +108,9 @@ public class ChatManagerTests : IDisposable
         response.Should().NotBeNull();
         response.Rol.Should().Be("assistant");
         response.Mesaj.Should().Be("Girişteki ilk 5 saniyeyi kestim.");
-        response.EdlVersiyonYeni.Should().Be(2);
+        // HitL gereği patch pending durumuna düşmeli ve edlVersiyon null dönmeli
+        response.PatchDurumu.Should().Be("pending");
+        response.EdlVersiyonYeni.Should().BeNull();
 
         // Veritabanında hem kullanıcı hem asistan mesajı olmalı
         var messages = await _dbContext.ChatMessages.Where(c => c.ProjectId == projectId).ToListAsync();
@@ -129,11 +133,12 @@ public class ChatManagerTests : IDisposable
         var patchWithImage = JsonDocument.Parse("{\"overlays\": [{\"id\": \"img_1\", \"type\": \"image\", \"content\": \"cat\"}]}");
         var aiResult = new ChatResult
         {
+            Intent = "command",
             Mesaj = "Kedi resmi eklendi.",
             EdlPatch = patchWithImage.RootElement
         };
 
-        _chatProviderMock.Setup(c => c.ProcessCommandAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<List<ChatHistoryItem>>(), It.IsAny<CancellationToken>()))
+        _chatProviderMock.Setup(c => c.ProcessCommandAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<List<ChatHistoryItem>>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(aiResult);
 
         _pexelsServiceMock.Setup(p => p.SearchAndSaveAssetAsync(projectId, "cat", "landscape", It.IsAny<CancellationToken>()))
@@ -147,8 +152,10 @@ public class ChatManagerTests : IDisposable
         await _sut.SendMessageAsync(projectId, "Kedi resmi ekle");
 
         _pexelsServiceMock.Verify(p => p.SearchAndSaveAssetAsync(projectId, "cat", "landscape", It.IsAny<CancellationToken>()), Times.Once);
-        receivedPatch.Should().NotBeNull();
-        receivedPatch.Value.GetRawText().Should().Contain($"assets/{projectId}/cat_123.jpg");
+        // Patch artık onay bekleyeceği için EdlService.PatchEdlAsync doğrudan çağrılmayacak. HitL pending objesi zenginleşecek.
+        var messages = await _dbContext.ChatMessages.Where(c => c.ProjectId == projectId && c.Rol == "assistant").ToListAsync();
+        messages.Should().HaveCount(1);
+        messages.First().PendingEdlPatch.Should().Contain($"assets/{projectId}/cat_123.jpg");
     }
 
     [Fact]

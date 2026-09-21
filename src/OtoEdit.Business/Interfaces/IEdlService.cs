@@ -8,5 +8,7 @@ public interface IEdlService
 {
     Task<EdlDto> GetEdlAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<EdlPatchResponseDto> PatchEdlAsync(Guid projectId, JsonElement patch, CancellationToken cancellationToken = default);
+    Task<EdlDto> UndoAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<EdlDto> RedoAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<EditDecisionList> CreateOrUpdateAsync(Guid projectId, JsonDocument edlJson, CancellationToken cancellationToken = default);
 }

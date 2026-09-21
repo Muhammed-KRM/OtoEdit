@@ -26,6 +26,7 @@ public class GeminiChatProvider : IChatProvider
     public async Task<ChatResult> ProcessCommandAsync(
         string userMessage,
         string currentEdlJson,
+        string? transcriptText,
         List<ChatHistoryItem> history,
         CancellationToken cancellationToken = default)
     {
@@ -45,23 +46,52 @@ public class GeminiChatProvider : IChatProvider
             var model = googleAi.GenerativeModel(_modelName);
 
             var systemPrompt = """
-                Sen bir video editörü asistanısın. Kullanıcının doğal dildeki kurgu komutunu alıp,
-                mevcut EDL JSON üzerinde yapılacak değişiklikleri JSON patch olarak döndürüyorsun.
+                Sen profesyonel bir video kurgu asistanısın. 
+                Görevin, kullanıcının komutlarını analiz edip uygun niyetle (intent) JSON formatında yanıt vermektir.
 
-                Kurallar:
-                - Sadece "cuts", "overlays", "settings" ve "suggestions" alanlarını değiştirebilir veya ekleme yapabilirsin.
-                - Her cut'a benzersiz id ver (cut_ai_{timestamp}).
-                - Her overlay'e benzersiz id ver (text_ai_{timestamp} veya img_ai_{timestamp}).
-                - Yanıtını SADECE geçerli bir JSON formatında ver:
+                KURALLAR (KESİNLİKLE UYULACAK):
+                1. Niyet (intent) 4 çeşittir: 
+                   - "information": Kullanıcı sadece soru soruyorsa veya bilgi istiyorsa (EDL değişmez).
+                   - "suggestion": Kullanıcı "ne ekleyebiliriz?" diyorsa veya onaya sunulacak bir öneri ise.
+                   - "command": Kullanıcı kesin bir dille "şurayı kes", "şunu ekle" diyorsa ve eksik parametre (renk, konum vb.) yoksa.
+                   - "clarification": Kullanıcının talebi ("buraya yazı ekle" veya "resim koy") tam detaylı değilse (metin, renk, font, konum, animasyon, boyut eksikse) KESİNLİKLE bu intent'i kullan.
+                2. Eğer intent "clarification" ise, "formFields" array'ini dön. Type'lar "text", "color", "select", "number" olabilir.
+                   Örn Yazı için: "text" (İçerik), "color" (Renk), "select" (Font: Inter, Arial, Roboto), "select" (Konum: Merkez, Alt, Üst, Sağ, Sol vb.), "select" (Animasyon: pop-up, fade, slide-up, none).
+                   Örn Görsel/Resim için: "select" (Konum), "number" (Boyut/Scale, örn 1.0).
+                3. Videonun içeriğini SADECE verilen VİDEO TRANSKRİPTİNE göre değerlendir. Transkriptte geçmeyen HİÇBİR KELİMEYİ VEYA OLAYI UYDURMA. Bilgi yoksa "Bu bilgi transkriptte yok" de.
+                4. Zaman damgalarını transkriptteki gerçek sürelere göre belirle.
+                5. Sadece "cuts", "overlays", "settings" ve "suggestions" alanlarını değiştirebilir veya ekleme yapabilirsin.
+                6. Her cut'a benzersiz id ver (cut_ai_{timestamp}). Her overlay'e benzersiz id ver (text_ai_{timestamp} veya img_ai_{timestamp}).
+                7. Yanıtını SADECE aşağıdaki JSON formatında ver:
                 {
-                    "mesaj": "Kullanıcıya gösterilecek samimi Türkçe yanıt",
-                    "edlPatch": { ...değişecek alanlar... }
+                   "mesaj": "Kullanıcıya gösterilecek açıklayıcı yanıt metni",
+                   "intent": "information, suggestion, command veya clarification",
+                   "edlPatch": { ... JSON patch ... } (eğer değişiklik yoksa null),
+                   "formFields": [ { "id": "renk", "type": "color", "label": "Yazı Rengi", "defaultValue": "#FFFFFF" } ] (eğer intent clarification ise dolu, değilse null)
                 }
-                - Başka hiçbir açıklama, markdown tag'i olmadan sadece JSON dön.
                 """;
 
             var historyText = string.Join("\n", history.Select(h => $"{h.Role}: {h.Message}"));
-            var prompt = $"{systemPrompt}\n\nGeçmiş Sohbet:\n{historyText}\n\nMevcut EDL:\n{currentEdlJson}\n\nKullanıcı: {userMessage}";
+            
+            var transcriptSection = string.IsNullOrWhiteSpace(transcriptText) 
+                ? "[TRANSKRİPT BULUNAMADI]" 
+                : transcriptText;
+
+            var prompt = $@"{systemPrompt}
+
+=== VİDEO TRANSKRİPTİ ===
+{transcriptSection}
+=========================
+
+=== GEÇMİŞ SOHBET ===
+{historyText}
+=====================
+
+=== MEVCUT EDL ===
+{currentEdlJson}
+==================
+
+Kullanıcı: {userMessage}";
 
             var response = await model.GenerateContent(prompt);
             var rawText = response.Text ?? string.Empty;

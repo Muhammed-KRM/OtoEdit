@@ -38,7 +38,10 @@ class OverlayItem(BaseModel):
     duration: float = 5.0
     animation: Optional[str] = "pop-up"  # "pop-up", "fade", "slide-left"
     position: List[str] = Field(default_factory=lambda: ["center", "bottom"])
+    positionX: Optional[float] = None
+    positionY: Optional[float] = None
     scale: Optional[float] = 1.0
+    track_id: Optional[int] = 1
 
 
 class SuggestionItem(BaseModel):

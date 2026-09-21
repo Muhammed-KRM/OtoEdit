@@ -96,34 +96,17 @@ class Transcriber:
 
     @staticmethod
     def _generate_fallback_transcript(audio_path: str) -> TranscriptResult:
-        """API anahtarı olmadığında geliştirme ve test için sentetik transkript üretir."""
-        sample_words = [
-            ("Merhaba", 0.5, 1.2),
-            ("değerli", 1.3, 1.8),
-            ("izleyiciler", 1.9, 2.7),
-            ("bugün", 3.0, 3.5),
-            ("yapay", 3.6, 4.0),
-            ("zeka", 4.1, 4.5),
-            ("ile", 4.6, 4.8),
-            ("otomatik", 4.9, 5.5),
-            ("video", 5.6, 6.0),
-            ("kurgusunu", 6.1, 6.8),
-            ("konuşuyoruz", 6.9, 7.8),
-            ("burayı", 12.0, 12.5),
-            ("kes", 12.6, 13.0),
-            ("kanalımıza", 15.0, 15.8),
-            ("abone", 15.9, 16.4),
-            ("olmayı", 16.5, 17.0),
-            ("unutmayın", 17.1, 18.0)
-        ]
-
-        words = [WordTimestamp(word=w, start=s, end=e) for w, s, e in sample_words]
-        full_text = " ".join(w for w, _, _ in sample_words)
-        segment = TranscriptSegment(start=0.5, end=18.0, text=full_text, words=words)
+        """API anahtarı olmadığında geliştirme ve test için BOŞ bir transkript üretir. (Halüsinasyonları önlemek için sahte veri silinmiştir)"""
+        logger.warning("TRANSKRIPT UYARISI: API anahtarı yok, boş transkript dönülüyor. AI sisteminin videoyu okuyabilmesi için geçerli bir API anahtarı sağlayın.")
+        
+        # Sadece hata olduğunu belirten tek bir segment dönüyoruz, uydurma veri yok.
+        warning_text = "[TRANSKRİPT ÇIKARILAMADI - API ANAHTARI EKSİK]"
+        words = [WordTimestamp(word=warning_text, start=0.0, end=1.0)]
+        segment = TranscriptSegment(start=0.0, end=1.0, text=warning_text, words=words)
 
         return TranscriptResult(
-            full_text=full_text,
+            full_text=warning_text,
             segments=[segment],
             words=words,
-            duration=20.0
+            duration=1.0
         )

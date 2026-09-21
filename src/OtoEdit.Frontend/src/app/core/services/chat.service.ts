@@ -17,4 +17,8 @@ export class ChatService {
   getHistory(projectId: string): Observable<ChatMessageDto[]> {
     return this.api.get<ChatMessageDto[]>(`/projects/${projectId}/chat`);
   }
+
+  applyPendingPatch(projectId: string, messageId: string): Observable<any> {
+    return this.api.post<any>(`/projects/${projectId}/chat/${messageId}/apply`, {});
+  }
 }

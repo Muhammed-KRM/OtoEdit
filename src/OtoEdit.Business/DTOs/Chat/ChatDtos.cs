@@ -13,7 +13,11 @@ public record ChatResponseDto
     public Guid Id { get; init; }
     public string Rol { get; init; } = "assistant";
     public string Mesaj { get; init; } = string.Empty;
+    public string Intent { get; init; } = "information";
     public JsonElement? EdlPatch { get; init; }
+    public JsonElement? PendingEdlPatch { get; init; }
+    public JsonElement? FormFields { get; init; }
+    public string PatchDurumu { get; init; } = "none";
     public int? EdlVersiyonYeni { get; init; }
 }
 
@@ -25,9 +29,15 @@ public record ChatHistoryItem
 
 public class ChatResult
 {
+    [JsonPropertyName("intent")]
+    public string Intent { get; set; } = "information";
+
     [JsonPropertyName("mesaj")]
     public string Mesaj { get; set; } = string.Empty;
 
     [JsonPropertyName("edlPatch")]
     public JsonElement? EdlPatch { get; set; }
+
+    [JsonPropertyName("formFields")]
+    public JsonElement? FormFields { get; set; }
 }
