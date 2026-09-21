@@ -10,6 +10,8 @@ from pipeline.edl_builder import EdlBuilder
 from pipeline.face_tracker import FaceTracker
 from pipeline.multimodal_command_engine import MultimodalCommandEngine
 from pipeline.repurposing_engine import RepurposingEngine
+from pipeline.retake_detector import RetakeDetector
+from pipeline.auto_broll_engine import AutoBrollEngine
 from pipeline.silence_detector import SilenceDetector
 from pipeline.suggestion_engine import SuggestionEngine
 from pipeline.transcriber import Transcriber
@@ -30,6 +32,8 @@ class AnalysisConsumer:
         self.audio_enhancer = AudioEnhancer()
         self.transcriber = Transcriber()
         self.silence_detector = SilenceDetector()
+        self.retake_detector = RetakeDetector()
+        self.auto_broll_engine = AutoBrollEngine()
         self.command_engine = MultimodalCommandEngine()
         self.face_tracker = FaceTracker()
         self.repurposing = RepurposingEngine()
@@ -86,7 +90,13 @@ class AnalysisConsumer:
         gesture_enabled = bool(msg.get("gestureCommandsEnabled", True))
         audio_enhancement = bool(msg.get("audioEnhancementEnabled", True))
 
-        logger.info(f"🎬 VideoUploadedEvent alındı: VideoId={video_id}, ProjectId={project_id}, Format={video_format}")
+        # 🚀 2026 Akıllı Yönetmen Bayrakları
+        auto_jumpcut = bool(msg.get("autoJumpcutEnabled", True))
+        auto_retake = bool(msg.get("autoRetakeEnabled", True))
+        auto_broll = bool(msg.get("autoBrollEnabled", True))
+        auto_subtitles = bool(msg.get("autoSubtitlesEnabled", False))
+
+        logger.info(f"🎬 VideoUploadedEvent alındı: VideoId={video_id}, ProjectId={project_id}, Format={video_format}, JumpCut={auto_jumpcut}, Retake={auto_retake}, BRoll={auto_broll}, Subs={auto_subtitles}")
 
         try:
             # 1. Ham videoyu MinIO'dan indir
@@ -108,31 +118,47 @@ class AnalysisConsumer:
             transcript = self.transcriber.transcribe(clean_audio_path, video_id=video_id)
 
             # 4. Aşama 2: Sessizlik Algılama (Jump-cut)
-            self._publish_progress(project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 45, "Sessiz aralıklar tespit ediliyor...")
-            silence_cuts = self.silence_detector.detect(clean_audio_path)
+            silence_cuts = []
+            if auto_jumpcut:
+                self._publish_progress(project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 40, "Sessiz aralıklar tespit ediliyor...")
+                silence_cuts = self.silence_detector.detect(clean_audio_path)
 
-            # 5. Aşama 3: Çoklu-Modal Komut Algılama (El Hareketi + Ses)
+            # 5. Aşama 2.5: Akıllı Hatalı Tekrar (Retake) ve Akustik Puanlama
+            retake_cuts = []
+            if auto_retake:
+                self._publish_progress(project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 50, "Akıllı tekrar ve ses patlaması analizi yapılıyor...")
+                retake_cuts = self.retake_detector.detect_retakes(clean_audio_path, transcript)
+
+            # 6. Aşama 3: Çoklu-Modal Komut Algılama (El Hareketi + Ses)
             commands = []
             if gesture_enabled:
                 self._publish_progress(project_id, video_id, PipelineStage.KOMUT_ALGILAMA, 60, "El hareketleri ve sesli komutlar taranıyor...")
                 commands = self.command_engine.detect(local_video_path, transcript)
 
-            # 6. Aşama 4: Yüz Takibi (Dikey/Kare Format İse)
+            # 7. Aşama 4: Yüz Takibi (Dikey/Kare Format İse)
             face_data = []
             if video_format in (1, 2):  # 9:16 veya 1:1
                 self._publish_progress(project_id, video_id, PipelineStage.YUZ_TAKIBI, 70, "Dikey kadraj için yüz takibi yapılıyor...")
                 face_data = self.face_tracker.track(local_video_path)
 
-            # 7. Aşama 5: Repurposing (Viral Klip Tespiti)
+            # 8. Aşama 5: Repurposing (Viral Klip Tespiti)
             self._publish_progress(project_id, video_id, PipelineStage.REPURPOSING, 80, "Yapay zeka ile viral anlar belirleniyor...")
             repurposing_data = self.repurposing.analyze(transcript)
 
-            # 8. Aşama 6: Akıllı B-Roll ve Görsel/Metin Öneri Motoru
-            self._publish_progress(project_id, video_id, PipelineStage.ONERI_OLUSTURMA, 90, "Görsel ve metin önerileri hazırlanıyor...")
+            # 9. Aşama 6: Akıllı B-Roll ve Görsel/Metin Öneri Motoru
+            self._publish_progress(project_id, video_id, PipelineStage.ONERI_OLUSTURMA, 88, "Görsel ve metin önerileri hazırlanıyor...")
             suggestions = self.suggestion_engine.generate_suggestions(transcript)
 
-            # 9. Aşama 7: EDL Oluşturma (Tüm sonuçları birleştir)
-            self._publish_progress(project_id, video_id, PipelineStage.EDL_OLUSTURMA, 95, "Nihai EDL karar listesi derleniyor...")
+            # 10. Aşama 6.5: Otomatik B-Roll Stok Görsel Katmanı
+            broll_overlays = []
+            if auto_broll:
+                self._publish_progress(project_id, video_id, PipelineStage.ONERI_OLUSTURMA, 92, "Pexels ile ilgili stok görseller yerleştiriliyor...")
+                from utils.constants import VideoFormat
+                fmt_str = VideoFormat.TO_STRING.get(video_format, "16:9")
+                broll_overlays = self.auto_broll_engine.generate_broll_overlays(transcript, video_format_str=fmt_str)
+
+            # 11. Aşama 7: EDL Oluşturma (Tüm sonuçları birleştir)
+            self._publish_progress(project_id, video_id, PipelineStage.EDL_OLUSTURMA, 96, "Nihai EDL karar listesi derleniyor...")
             edl_dict = self.edl_builder.build(
                 project_id=project_id,
                 video_id=video_id,
@@ -142,7 +168,9 @@ class AnalysisConsumer:
                 face_data=face_data,
                 repurposing_data=repurposing_data,
                 suggestions=suggestions,
-                video_format=video_format
+                video_format=video_format,
+                extra_cuts=retake_cuts,
+                extra_overlays=broll_overlays
             )
 
             # 10. Tamamlandı Bildirimi ve EDL'yi .NET API'ye Gönder

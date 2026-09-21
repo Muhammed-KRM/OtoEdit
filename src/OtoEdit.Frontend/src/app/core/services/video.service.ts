@@ -11,9 +11,17 @@ export class VideoService {
   private http = inject(HttpClient);
   private baseUrl = environment.apiUrl;
 
-  uploadVideo(projectId: string, file: File): Observable<HttpEvent<VideoUploadResponseDto>> {
+  uploadVideo(
+    projectId: string, 
+    file: File, 
+    options?: { autoJumpcut?: boolean; autoRetake?: boolean; autoBroll?: boolean; autoSubtitles?: boolean }
+  ): Observable<HttpEvent<VideoUploadResponseDto>> {
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('autoJumpcut', String(options?.autoJumpcut ?? true));
+    formData.append('autoRetake', String(options?.autoRetake ?? true));
+    formData.append('autoBroll', String(options?.autoBroll ?? true));
+    formData.append('autoSubtitles', String(options?.autoSubtitles ?? false));
 
     return this.http.post<VideoUploadResponseDto>(
       `${this.baseUrl}/projects/${projectId}/videos`,

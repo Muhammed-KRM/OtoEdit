@@ -116,9 +116,26 @@ public class EdlManager : IEdlService
                             else
                             {
                                 if (existingIndex >= 0)
-                                    targetArray[existingIndex] = objItem.DeepClone();
+                                {
+                                    if (targetArray[existingIndex] is JsonObject existingItemObj)
+                                    {
+                                        foreach (var kvp in objItem)
+                                        {
+                                            if (!kvp.Key.Equals("action", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                existingItemObj[kvp.Key] = kvp.Value?.DeepClone();
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        targetArray[existingIndex] = objItem.DeepClone();
+                                    }
+                                }
                                 else
+                                {
                                     targetArray.Add(objItem.DeepClone());
+                                }
                             }
                         }
                         else

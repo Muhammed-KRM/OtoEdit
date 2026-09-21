@@ -8,6 +8,18 @@ public record ChatMessageDto
     public string Mesaj { get; init; } = string.Empty;
 }
 
+public record ChatMessageHistoryDto
+{
+    public Guid Id { get; init; }
+    public Guid ProjectId { get; init; }
+    public string Rol { get; init; } = string.Empty;
+    public string Mesaj { get; init; } = string.Empty;
+    public string PatchDurumu { get; init; } = "none";
+    public DateTime OlusturulmaZamani { get; init; }
+    public JsonElement? PendingEdlPatch { get; init; }
+    public JsonElement? FormFields { get; init; }
+}
+
 public record ChatResponseDto
 {
     public Guid Id { get; init; }

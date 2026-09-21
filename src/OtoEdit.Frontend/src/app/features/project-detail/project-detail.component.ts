@@ -129,6 +129,53 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
             </div>
           </div>
 
+          <!-- Akıllı Yönetmen Pipeline Tercihleri -->
+          <div class="glass-panel rounded-2xl p-6 border border-slate-800 space-y-4">
+            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+              <span class="w-2 h-2 rounded-full bg-brand-cyan shadow-glow-sm"></span>
+              Akıllı Yönetmen Pipeline Tercihleri
+            </h3>
+            <p class="text-xs text-slate-400">Yapay zekanın video analizinde otomatik icra edeceği görevler:</p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <!-- Jump-Cut -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoJumpcut" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">Otomatik Jump-Cut</div>
+                  <div class="text-[11px] text-slate-400">Sessiz duraksamaları ve nefes boşluklarını keser</div>
+                </div>
+              </label>
+
+              <!-- Akıllı Retake -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoRetake" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">Akıllı Hatalı Tekrar (Retake)</div>
+                  <div class="text-[11px] text-slate-400">Ses patlaması & takılmaları puanlayıp temizler</div>
+                </div>
+              </label>
+
+              <!-- Oto B-Roll -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoBroll" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">Oto Görsel / B-Roll Yerleştir</div>
+                  <div class="text-[11px] text-slate-400">Vurgulara Pexels telifsiz stok görsel ekler</div>
+                </div>
+              </label>
+
+              <!-- Altyazı -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoSubtitles" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">Dinamik Kelime Altyazısı</div>
+                  <div class="text-[11px] text-slate-400">TikTok/Reels tarzı kelime parlamalı altyazı</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
           <!-- Format ve Kadraj Ayarı -->
           <div class="glass-panel rounded-2xl p-6 border border-slate-800">
             <h2 class="text-lg font-bold text-white mb-4">Çıktı Formatı</h2>
@@ -220,6 +267,12 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   readonly analysisStageMessage = signal<string>('Analiz başlıyor...');
   readonly isAnalyzing = signal<boolean>(false);
   readonly VideoFormati = VideoFormati;
+
+  // Akıllı Yönetmen Tercihleri
+  autoJumpcut = true;
+  autoRetake = true;
+  autoBroll = true;
+  autoSubtitles = false;
 
   isDragging = false;
   private sub = new Subscription();
@@ -328,7 +381,12 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.uploading.set(true);
     this.uploadPercentage.set(0);
 
-    this.videoService.uploadVideo(p.id, file).subscribe({
+    this.videoService.uploadVideo(p.id, file, {
+      autoJumpcut: this.autoJumpcut,
+      autoRetake: this.autoRetake,
+      autoBroll: this.autoBroll,
+      autoSubtitles: this.autoSubtitles
+    }).subscribe({
       next: (event) => {
         if (event.type === HttpEventType.UploadProgress && event.total) {
           this.uploadPercentage.set(Math.round((100 * event.loaded) / event.total));

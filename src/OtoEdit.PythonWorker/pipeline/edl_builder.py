@@ -24,14 +24,21 @@ class EdlBuilder:
         face_data: List[Dict[str, Any]],
         repurposing_data: RepurposingData,
         suggestions: List[SuggestionItem],
-        video_format: int = 0
+        video_format: int = 0,
+        extra_cuts: Optional[List[CutItem]] = None,
+        extra_overlays: Optional[List[OverlayItem]] = None
     ) -> Dict[str, Any]:
         """Tüm analiz çıktılarını tek bir EDL JSON sözlüğüne derler."""
         logger.info(f"EDL dokümanı inşa ediliyor: ProjectId={project_id}, VideoId={video_id}")
 
         target_format_str = VideoFormat.TO_STRING.get(video_format, "16:9")
         cuts: List[CutItem] = list(silence_cuts)
+        if extra_cuts:
+            cuts.extend(extra_cuts)
+
         overlays: List[OverlayItem] = []
+        if extra_overlays:
+            overlays.extend(extra_overlays)
 
         # 1. Çoklu-modal komutları EDL'ye dönüştür
         for idx, cmd in enumerate(commands, start=1):

@@ -42,7 +42,14 @@ public class VideoManager : IVideoService
         _logger = logger;
     }
 
-    public async Task<VideoListDto> UploadVideoAsync(Guid projectId, IFormFile file, CancellationToken cancellationToken = default)
+    public async Task<VideoListDto> UploadVideoAsync(
+        Guid projectId, 
+        IFormFile file, 
+        bool autoJumpcut = true,
+        bool autoRetake = true,
+        bool autoBroll = true,
+        bool autoSubtitles = false,
+        CancellationToken cancellationToken = default)
     {
         var project = await _projectRepository.GetByIdAsync(projectId);
         if (project == null)
@@ -101,7 +108,11 @@ public class VideoManager : IVideoService
             DosyaYolu = objectKey,
             VideoFormati = (int)project.VideoFormati,
             GestureCommandsEnabled = project.GestureCommandsEnabled,
-            AudioEnhancementEnabled = project.AudioEnhancementEnabled
+            AudioEnhancementEnabled = project.AudioEnhancementEnabled,
+            AutoJumpcutEnabled = autoJumpcut,
+            AutoRetakeEnabled = autoRetake,
+            AutoBrollEnabled = autoBroll,
+            AutoSubtitlesEnabled = autoSubtitles
         }, cancellationToken);
 
         _logger.LogInformation("VideoUploadedEvent publish edildi: VideoId={VideoId}, ProjectId={ProjectId}", video.Id, projectId);

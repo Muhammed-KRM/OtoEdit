@@ -70,20 +70,44 @@ import { environment } from '../../../environments/environment';
               controls>
             </video>
 
-              <!-- Dinamik Aktif Metin Overlay Önizlemesi -->
+              <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
               <div 
                 *ngFor="let ov of activeOverlays()" 
                 (mousedown)="onCanvasDragStart($event, ov.id)"
-                (click)="selectOverlay(ov.id)"
+                (click)="$event.stopPropagation(); selectOverlay(ov.id)"
                 [style.top]="getOverlayTop(ov)"
                 [style.left]="getOverlayLeft(ov)"
-                class="absolute transition-none z-20 cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2"
+                class="absolute transition-none z-20 cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
+                [ngClass]="selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''"
                 [style.color]="ov.color || '#FFFFFF'"
                 [style.backgroundColor]="ov.backgroundColor || 'transparent'"
                 [style.fontFamily]="ov.font || 'Inter, sans-serif'">
-                <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold" [style.fontSize.px]="(ov.fontSize || 48) / 2">
+                
+                <!-- Metin Kaplaması -->
+                <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize.px]="(ov.fontSize || 48) / 2">
                   {{ ov.content }}
                 </span>
+
+                <!-- Görsel / B-Roll Kaplaması -->
+                <div *ngIf="ov.type === 'image'" class="relative group">
+                  <img 
+                    *ngIf="ov.source" 
+                    [src]="ov.source" 
+                    [alt]="ov.content || 'Görsel'" 
+                    class="rounded-lg shadow-xl border border-brand-cyan/50 pointer-events-none object-cover"
+                    [style.width.px]="(160 * (ov.scale || 1.0))"
+                    [style.maxHeight.px]="(120 * (ov.scale || 1.0))" />
+                  
+                  <!-- Kaynak yoksa placeholder -->
+                  <div *ngIf="!ov.source" class="px-4 py-3 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-2">
+                    <span>🖼️</span>
+                    <span>{{ ov.content || 'B-Roll Görseli' }}</span>
+                  </div>
+
+                  <span class="absolute -top-2 -right-2 text-[9px] bg-brand-cyan text-slate-900 font-extrabold px-1 rounded shadow">
+                    GÖRSEL
+                  </span>
+                </div>
               </div>
           </div>
 
@@ -117,75 +141,119 @@ import { environment } from '../../../environments/environment';
                 <button (click)="rippleManual.set(!rippleManual())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-sky-400 border border-slate-700" title="Manuel Kesimleri Sıkıştır/Genişlet">
                   {{ rippleManual() ? '🖐 Manuel Sıkıştırılmış' : '🖐 Manuel Geniş' }}
                 </button>
-                <button (click)="deleteSelectedClip()" *ngIf="selectedClipId()" class="p-1 px-2 rounded bg-rose-600/80 text-white font-bold hover:bg-rose-500 border border-rose-500 shadow-glow-sm" title="Seçili Klibi Sil (Del)">✕ Sil (Del)</button>
-                <button (click)="addOverlayToSelected()" *ngIf="selectedClipId()" class="p-1 px-2 rounded bg-brand-cyan text-slate-900 font-bold hover:bg-cyan-400 border border-cyan-500 shadow-glow-sm" title="Seçili Klibe Yazı Ekle">T Yazı Ekle</button>
-                <span class="text-slate-400 ml-2 text-[10px]" *ngIf="!selectedClipId()">Kesmek/silmek için yeşil klibe çift tıklayın.</span>
+                <button (click)="deleteSelectedClip()" *ngIf="selectedClipId()" class="p-1 px-2.5 rounded bg-rose-600/80 text-white font-bold hover:bg-rose-500 border border-rose-500 shadow-glow-sm" title="Seçili Klibi Sil (Del)">✕ Sil (Del)</button>
+                <button (click)="addTextOverlay()" class="p-1 px-2.5 rounded bg-brand-cyan text-slate-900 font-bold hover:bg-cyan-400 border border-cyan-500 shadow-glow-sm flex items-center gap-1" title="Zaman çizgisine yazı katmanı ekle">
+                  <span class="font-black">T</span>
+                  <span>Yazı Ekle</span>
+                </button>
+                <button (click)="addImageOverlay()" class="p-1 px-2.5 rounded bg-purple-500 text-white font-bold hover:bg-purple-400 border border-purple-400 shadow-glow-sm flex items-center gap-1" title="Zaman çizgisine görsel katmanı ekle">
+                  <span>🖼️</span>
+                  <span>Görsel Ekle</span>
+                </button>
               </div>
             </div>
 
-            <!-- Interaktif Timeline Track -->
-            <div class="overflow-x-auto pb-4 w-full scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-dark-900">
+            <!-- Interaktif Timeline Track (Çok Kanallı / Katmanlı Mimari) -->
+            <div class="overflow-x-auto pb-3 w-full scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-dark-900">
               <div 
                 #timelineTrack
                 (click)="seekTimeline($event)"
                 [style.width.%]="100 * timelineZoom()"
-                class="relative h-14 bg-dark-900 rounded-xl overflow-hidden cursor-pointer border border-slate-700/60 select-none min-w-full flex">
+                class="relative bg-dark-950 rounded-xl overflow-hidden cursor-pointer border border-slate-700/60 select-none min-w-full flex flex-col gap-1 p-2">
                 
-                <!-- Klipler (Flexbox ile sıralanır) -->
-                <ng-container *ngFor="let clip of clips()">
+                <!-- Kanal 1: Katmanlar (Yazı / Görsel Track) -->
+                <div class="relative h-8 bg-dark-900/90 rounded-lg border border-slate-800/80 overflow-hidden flex items-center">
+                  <!-- Katman Etiketi -->
+                  <div class="absolute left-2 top-0 bottom-0 flex items-center gap-1 text-[9px] font-bold text-sky-400/70 uppercase tracking-wider pointer-events-none z-10">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
+                    </svg>
+                    Katmanlar
+                  </div>
+
+                  <!-- Katman Yoksa Bilgi -->
+                  <div *ngIf="!activeEdl()?.overlays?.length" class="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500 italic pointer-events-none">
+                    Yazı veya görsel eklemek için yukarıdaki 'T Yazı Ekle' veya '🖼️ Görsel Ekle' butonuna basın
+                  </div>
+
+                  <!-- Katman Öğeleri (Pill'ler) -->
                   <div 
-                    *ngIf="isVisible(clip)"
-                    (click)="selectClip(clip.id, $event)"
-                    (dblclick)="toggleClip(clip, $event)"
-                    class="relative h-full transition-colors border-r border-white/40 box-border group"
-                    [ngClass]="{
-                       'bg-rose-900/80 hover:bg-rose-800': clip.isCut && clip.cutObj?.reason !== 'Manuel kesim',
-                       'bg-rose-500/80 hover:bg-rose-400': clip.isCut && clip.cutObj?.reason === 'Manuel kesim',
-                       'bg-emerald-600/40 hover:bg-emerald-500/60': !clip.isCut,
-                       'ring-2 ring-inset ring-brand-yellow shadow-[0_0_10px_rgba(250,204,21,0.5)] z-10': selectedClipId() === clip.id
-                    }"
-                    [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual()) ? visibleDuration() : totalDuration() )) * 100"
-                    [title]="'Klip (' + (clip.start | number:'1.1-1') + 's - ' + (clip.end | number:'1.1-1') + 's) - İşlem için çift tıkla'">
+                    *ngFor="let ov of activeEdl()?.overlays"
+                    (mousedown)="onOverlayDragStart($event, ov.id)"
+                    (click)="$event.stopPropagation(); selectOverlay(ov.id)"
+                    class="absolute top-1 bottom-1 rounded-md px-2 flex items-center justify-between text-[10px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-md overflow-hidden"
+                    [ngClass]="[
+                       ov.type === 'text' ? 'bg-gradient-to-r from-sky-600 to-cyan-500 text-white border border-sky-300/80' : 'bg-gradient-to-r from-purple-600 to-fuchsia-500 text-white border border-purple-300/80',
+                       selectedOverlayId() === ov.id ? 'ring-2 ring-white shadow-[0_0_10px_rgba(255,255,255,0.9)] z-30 brightness-110' : 'hover:brightness-105'
+                    ]"
+                    [ngStyle]="getOverlayStyle(ov)"
+                    [title]="(ov.type === 'text' ? 'Metin: ' : 'Görsel: ') + (ov.content || ov.source || ov.id)">
                     
-                    <!-- Kırmızı kısımları silme (Gizle modu kapalıyken) -->
-                    <div *ngIf="clip.isCut" class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                      <span class="text-[10px] text-white font-bold">✕ İptal</span>
+                    <!-- Sol Boyutlandırma Kolu (Resize Left) -->
+                    <div 
+                      (mousedown)="onOverlayResizeStart($event, ov.id, 'left')"
+                      class="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/60 bg-white/30 rounded-l flex items-center justify-center z-30"
+                      title="Başlangıcı Sürükle">
+                      <div class="w-0.5 h-3 bg-black/60 rounded"></div>
+                    </div>
+
+                    <!-- Katman Başlığı ve İkonu -->
+                    <span class="truncate px-2 pointer-events-none font-medium flex items-center gap-1">
+                      <span>{{ ov.type === 'text' ? 'T' : '🖼️' }}</span>
+                      <span class="truncate">{{ ov.content || (ov.type === 'text' ? 'Metin' : 'Görsel') }}</span>
+                    </span>
+
+                    <!-- Sağ Boyutlandırma Kolu (Resize Right) -->
+                    <div 
+                      (mousedown)="onOverlayResizeStart($event, ov.id, 'right')"
+                      class="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/60 bg-white/30 rounded-r flex items-center justify-center z-30"
+                      title="Bitişi Sürükle">
+                      <div class="w-0.5 h-3 bg-black/60 rounded"></div>
                     </div>
                   </div>
-                </ng-container>
-
-              <!-- Overlay Marker'ları (Yazı ve Görsel İşaretleri) -->
-              <div 
-                *ngFor="let ov of activeEdl()?.overlays"
-                (mousedown)="onOverlayDragStart($event, ov.id)"
-                (click)="$event.stopPropagation(); selectOverlay(ov.id)"
-                class="absolute top-1 bottom-1 rounded-md opacity-90 transition-shadow cursor-grab active:cursor-grabbing z-20 group"
-                [ngClass]="[
-                   ov.type === 'text' ? 'bg-sky-400/80 border border-sky-300' : 'bg-purple-500/80 border border-purple-300',
-                   selectedOverlayId() === ov.id ? 'ring-2 ring-white shadow-[0_0_8px_white]' : ''
-                ]"
-                [ngStyle]="getOverlayStyle(ov)"
-                [title]="ov.type + ': ' + (ov.content || ov.id)">
-                
-                <!-- Sol Kenar (Resize Handle) -->
-                <div 
-                  (mousedown)="onOverlayResizeStart($event, ov.id, 'left')"
-                  class="absolute left-0 top-0 bottom-0 w-2.5 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/30 rounded-l-md z-30">
                 </div>
-                <!-- Sağ Kenar (Resize Handle) -->
+
+                <!-- Kanal 2: Video Klipleri Track -->
+                <div class="relative h-12 bg-dark-900 rounded-lg overflow-hidden border border-slate-800/80 flex">
+                  <!-- Video Etiketi -->
+                  <div class="absolute left-2 top-0 bottom-0 flex items-center gap-1 text-[9px] font-bold text-emerald-400/60 uppercase tracking-wider pointer-events-none z-10">
+                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    Video
+                  </div>
+
+                  <!-- Klipler (Flexbox ile sıralanır) -->
+                  <ng-container *ngFor="let clip of clips()">
+                    <div 
+                      *ngIf="isVisible(clip)"
+                      (click)="selectClip(clip.id, $event)"
+                      (dblclick)="toggleClip(clip, $event)"
+                      class="relative h-full transition-colors border-r border-white/20 box-border group"
+                      [ngClass]="{
+                         'bg-rose-900/80 hover:bg-rose-800': clip.isCut && clip.cutObj?.reason !== 'Manuel kesim',
+                         'bg-rose-500/80 hover:bg-rose-400': clip.isCut && clip.cutObj?.reason === 'Manuel kesim',
+                         'bg-emerald-600/40 hover:bg-emerald-500/60': !clip.isCut,
+                         'ring-2 ring-inset ring-brand-yellow shadow-[0_0_10px_rgba(250,204,21,0.5)] z-10': selectedClipId() === clip.id
+                      }"
+                      [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual()) ? visibleDuration() : totalDuration() )) * 100"
+                      [title]="'Klip (' + (clip.start | number:'1.1-1') + 's - ' + (clip.end | number:'1.1-1') + 's) - İşlem için çift tıkla'">
+                      
+                      <!-- Kırmızı kısımları silme (Gizle modu kapalıyken) -->
+                      <div *ngIf="clip.isCut" class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100">
+                        <span class="text-[10px] text-white font-bold">✕ İptal</span>
+                      </div>
+                    </div>
+                  </ng-container>
+                </div>
+
+                <!-- Ortak Zaman İmleci (Playhead) - Her iki kanalı da dikine keser -->
                 <div 
-                  (mousedown)="onOverlayResizeStart($event, ov.id, 'right')"
-                  class="absolute right-0 top-0 bottom-0 w-2.5 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/30 rounded-r-md z-30">
+                  class="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-40 pointer-events-none"
+                  [style.left.%]="getPlayheadPosition()">
+                  <div class="w-3.5 h-3.5 bg-white rotate-45 -translate-x-[6px] -translate-y-[4px] shadow-lg rounded-sm border border-slate-300"></div>
                 </div>
               </div>
-
-              <!-- Zaman İmleci (Playhead) -->
-              <div 
-                class="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-30 pointer-events-none"
-                [style.left.%]="getPlayheadPosition()">
-                <div class="w-3 h-3 bg-white rotate-45 -translate-x-[5px] -translate-y-[4px]"></div>
-              </div>
-            </div>
             </div>
 
             <!-- Akıllı Öneri Çipleri (AI Suggestions) -->
@@ -231,7 +299,6 @@ import { environment } from '../../../environments/environment';
               Katmanlar ({{ activeEdl()?.overlays?.length || 0 }})
             </button>
             <button 
-              *ngIf="selectedOverlay()"
               (click)="activeTab.set('inspector')"
               [ngClass]="activeTab() === 'inspector' ? 'text-brand-yellow border-brand-yellow bg-dark-900/60' : 'text-slate-400 hover:text-slate-200 border-transparent'"
               class="flex-1 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-2">
@@ -396,85 +463,145 @@ import { environment } from '../../../environments/environment';
           </div>
 
           <!-- Sekme 3: Özellikler (Inspector) -->
-          <div *ngIf="activeTab() === 'inspector' && selectedOverlay()" class="flex-1 p-5 overflow-y-auto space-y-4">
-             <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">Katman Özellikleri</h3>
-             
-             <!-- Content Edit -->
-             <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase">Metin İçeriği</label>
-                <textarea 
-                   [(ngModel)]="inspectorData.content" 
-                   class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none"
-                   rows="3"></textarea>
-             </div>
-
-             <!-- Times -->
-             <div class="grid grid-cols-2 gap-3">
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase">Başlangıç (sn)</label>
-                   <input type="number" step="0.1" [(ngModel)]="inspectorData.timestamp" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" />
-                </div>
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase">Süre (sn)</label>
-                   <input type="number" step="0.1" [(ngModel)]="inspectorData.duration" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" />
+          <div *ngIf="activeTab() === 'inspector'" class="flex-1 p-5 overflow-y-auto space-y-4">
+             <!-- Hiçbir katman seçili değilse -->
+             <div *ngIf="!selectedOverlay()" class="text-center py-16 text-slate-500 text-xs space-y-3">
+                <div class="text-3xl">📝</div>
+                <p class="font-bold text-slate-300">Hiçbir Katman Seçili Değil</p>
+                <p class="text-[11px] text-slate-400 max-w-xs mx-auto">
+                  Düzenlemek istediğiniz yazı veya görsele video ekranından veya timeline katman kanalından tıklayın.
+                </p>
+                <div class="pt-2 flex justify-center gap-2">
+                  <button (click)="addTextOverlay()" class="px-3 py-1.5 rounded-lg bg-brand-cyan text-slate-900 font-bold text-xs hover:bg-cyan-400 transition-colors shadow-glow-sm">
+                    + Yeni Yazı Ekle
+                  </button>
                 </div>
              </div>
 
-             <!-- Appearance -->
-             <div class="grid grid-cols-2 gap-3" *ngIf="inspectorData.type === 'text'">
+             <!-- Seçili katman varsa düzenleme paneli -->
+             <div *ngIf="selectedOverlay()" class="space-y-4">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                  <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Katman Özellikleri</h3>
+                  <span 
+                    [ngClass]="inspectorData.type === 'text' ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30'"
+                    class="px-2 py-0.5 rounded text-[10px] font-bold uppercase border">
+                    {{ inspectorData.type === 'text' ? 'Metin Katmanı' : 'Görsel Katmanı' }}
+                  </span>
+                </div>
+                
+                <!-- Content Edit -->
                 <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase">Yazı Rengi (Hex)</label>
-                   <div class="flex items-center gap-2">
-                     <input type="color" [(ngModel)]="inspectorData.color" class="w-8 h-8 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
-                     <input type="text" [(ngModel)]="inspectorData.color" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" placeholder="#FFFFFF" />
+                   <label class="text-[10px] text-slate-400 uppercase font-semibold">
+                     {{ inspectorData.type === 'image' ? 'Görsel Başlığı / Açıklaması' : 'Metin İçeriği' }}
+                   </label>
+                   <textarea 
+                      [(ngModel)]="inspectorData.content" 
+                      (ngModelChange)="onInspectorChange()"
+                      class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-brand-cyan focus:outline-none transition-all"
+                      rows="2"
+                      placeholder="Ekranda görünecek metni yazın..."></textarea>
+                </div>
+
+                <!-- Görsel URL / Kaynak (Image ise) -->
+                <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
+                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Görsel Kaynağı (URL veya Stok Yolu)</label>
+                   <input 
+                      type="text" 
+                      [(ngModel)]="inspectorData.source" 
+                      (ngModelChange)="onInspectorChange()"
+                      class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none"
+                      placeholder="https://images.pexels.com/..." />
+                </div>
+
+                <!-- Görsel Ölçek / Boyut (Image ise) -->
+                <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
+                   <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
+                     <span>Ölçek / Boyut</span>
+                     <span class="text-brand-cyan font-bold">{{ inspectorData.scale || 1.0 }}x</span>
+                   </div>
+                   <input 
+                      type="range" 
+                      min="0.2" 
+                      max="2.0" 
+                      step="0.05" 
+                      [(ngModel)]="inspectorData.scale" 
+                      (ngModelChange)="onInspectorChange()"
+                      class="w-full accent-brand-cyan cursor-pointer" />
+                </div>
+
+                <!-- Times -->
+                <div class="grid grid-cols-2 gap-3">
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Başlangıç (sn)</label>
+                      <input type="number" step="0.1" [(ngModel)]="inspectorData.timestamp" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
+                   </div>
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Süre (sn)</label>
+                      <input type="number" step="0.1" [(ngModel)]="inspectorData.duration" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
                    </div>
                 </div>
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase">Boyut (px)</label>
-                   <input type="number" [(ngModel)]="inspectorData.fontSize" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" />
-                </div>
-             </div>
 
-             <div class="space-y-1" *ngIf="inspectorData.type === 'text'">
-                <label class="text-[10px] text-slate-400 uppercase">Font</label>
-                <select [(ngModel)]="inspectorData.font" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
-                  <option value="Inter">Inter (Varsayılan)</option>
-                  <option value="Arial">Arial</option>
-                  <option value="Roboto">Roboto</option>
-                  <option value="Montserrat">Montserrat</option>
-                  <option value="Impact">Impact</option>
-                  <option value="Comic Sans MS">Comic Sans (Eğlenceli)</option>
-                </select>
-             </div>
+                <!-- Appearance -->
+                <div class="grid grid-cols-2 gap-3" *ngIf="inspectorData.type === 'text'">
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Rengi</label>
+                      <div class="flex items-center gap-2">
+                        <input type="color" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="w-8 h-8 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                        <input type="text" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none font-mono" placeholder="#FFFFFF" />
+                      </div>
+                   </div>
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Boyut (px)</label>
+                      <input type="number" [(ngModel)]="inspectorData.fontSize" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
+                   </div>
+                </div>
 
-             <!-- Animation & Position -->
-             <div class="grid grid-cols-2 gap-3">
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase">X Konumu (%)</label>
-                   <input type="number" step="0.1" [(ngModel)]="inspectorData.positionX" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" />
-                </div>
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase">Y Konumu (%)</label>
-                   <input type="number" step="0.1" [(ngModel)]="inspectorData.positionY" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" />
-                </div>
-             </div>
-             
-             <div class="grid grid-cols-2 gap-3 mt-3">
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase">Giriş Animasyonu</label>
-                   <select [(ngModel)]="inspectorData.animation" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white">
-                     <option value="none">Yok</option>
-                     <option value="fade">Fade In</option>
-                     <option value="pop-up">Pop Up</option>
-                     <option value="slide-up">Slide Up</option>
+                <div class="space-y-1" *ngIf="inspectorData.type === 'text'">
+                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font)</label>
+                   <select [(ngModel)]="inspectorData.font" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
+                     <option value="Inter">Inter (Modern & Temiz)</option>
+                     <option value="Arial">Arial (Klasik Sans)</option>
+                     <option value="Roboto">Roboto (Google Standart)</option>
+                     <option value="Montserrat">Montserrat (Güçlü & Kalın)</option>
+                     <option value="Impact">Impact (YouTube Başlık)</option>
+                     <option value="Comic Sans MS">Comic Sans (Eğlenceli)</option>
                    </select>
                 </div>
-             </div>
 
-             <!-- Actions -->
-             <div class="pt-4 border-t border-slate-800 flex gap-2">
-                <button (click)="saveInspector()" class="flex-1 py-2 bg-brand-cyan hover:bg-cyan-400 text-slate-900 font-bold rounded-lg transition-colors">Kaydet</button>
-                <button (click)="cancelInspector()" class="flex-1 py-2 bg-dark-800 hover:bg-dark-700 text-white border border-slate-700 font-bold rounded-lg transition-colors">İptal</button>
+                <!-- Animation & Position -->
+                <div class="grid grid-cols-2 gap-3">
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">X Konumu (%)</label>
+                      <input type="number" step="0.5" [(ngModel)]="inspectorData.positionX" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
+                   </div>
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Y Konumu (%)</label>
+                      <input type="number" step="0.5" [(ngModel)]="inspectorData.positionY" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
+                   </div>
+                </div>
+                
+                <div class="space-y-1">
+                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Giriş Animasyonu</label>
+                   <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
+                     <option value="none">Yok (Doğrudan Göster)</option>
+                     <option value="fade">Fade In (Yumuşak Geçiş)</option>
+                     <option value="pop-up">Pop Up (Büyüyerek Çık)</option>
+                     <option value="slide-up">Slide Up (Aşağıdan Yukarı)</option>
+                   </select>
+                </div>
+
+                <!-- Actions -->
+                <div class="pt-4 border-t border-slate-800 flex gap-2">
+                   <button (click)="saveInspector()" class="flex-1 py-2 bg-brand-cyan hover:bg-cyan-400 text-slate-900 font-bold rounded-lg transition-colors shadow-glow-sm">
+                     Kaydet
+                   </button>
+                   <button (click)="removeOverlay(selectedOverlayId()!)" class="px-3 py-2 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-600/40 font-bold rounded-lg transition-colors" title="Katmanı Sil">
+                     Sil
+                   </button>
+                   <button (click)="cancelInspector()" class="px-3 py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 border border-slate-700 font-bold rounded-lg transition-colors">
+                     Kapat
+                   </button>
+                </div>
              </div>
           </div>
 
@@ -537,7 +664,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly videoUrl = signal<string>('');
   readonly currentTime = signal<number>(0);
   readonly totalDuration = signal<number>(100);
-  readonly activeOverlays = signal<OverlayItem[]>([]);
+  readonly activeOverlays = computed(() => {
+    const t = this.currentTime();
+    const overlays = this.activeEdl()?.overlays || [];
+    return overlays.filter(ov => t >= ov.timestamp && t <= (ov.timestamp + ov.duration));
+  });
   readonly activeTab = signal<'chat' | 'overlays' | 'inspector' | 'media'>('chat');
   readonly rendering = signal<boolean>(false);
   readonly rippleAi = signal<boolean>(true); // Varsayılan: AI kısımları Sıkıştırılmış
@@ -695,6 +826,14 @@ export class EditorComponent implements OnInit, OnDestroy {
         if (res.edl.duration && res.edl.duration > 5) {
           this.totalDuration.set(res.edl.duration);
         }
+        // Seçili katman varsa verilerini yenilenen EDL ile senkronize et
+        const selId = this.selectedOverlayId();
+        if (selId) {
+          const ov = res.edl.overlays?.find(o => o.id === selId);
+          if (ov) {
+            this.inspectorData = { ...this.inspectorData, ...ov };
+          }
+        }
       },
       error: (err) => console.error('EDL yüklenemedi:', err)
     });
@@ -727,11 +866,6 @@ export class EditorComponent implements OnInit, OnDestroy {
         return;
       }
     }
-
-    // 2. Aktif metin overlay'lerini güncelle
-    const overlays = this.activeEdl()?.overlays || [];
-    const active = overlays.filter(ov => t >= ov.timestamp && t <= (ov.timestamp + ov.duration));
-    this.activeOverlays.set(active);
   }
 
   onMetadataLoaded(): void {
@@ -741,34 +875,46 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  getPlayheadPosition(): number {
-    const t = this.currentTime();
+  getRawTimeFromVisTime(visTime: number): number {
     if (!this.rippleAi() && !this.rippleManual()) {
-       return (t / this.totalDuration()) * 100;
+       return Math.max(0, Math.min(this.totalDuration(), visTime));
     }
-
-    let passedDuration = 0;
+    let accumulated = 0;
     for (const c of this.clips()) {
-       if (t >= c.start && t <= c.end) {
+       if (this.isVisible(c)) {
+          if (accumulated + c.duration >= visTime) {
+             return c.start + (visTime - accumulated);
+          }
+          accumulated += c.duration;
+       }
+    }
+    return this.totalDuration();
+  }
+
+  getVisTimeFromRawTime(rawTime: number): number {
+    if (!this.rippleAi() && !this.rippleManual()) {
+       return Math.max(0, Math.min(this.totalDuration(), rawTime));
+    }
+    let passed = 0;
+    for (const c of this.clips()) {
+       if (rawTime >= c.start && rawTime <= c.end) {
           if (this.isVisible(c)) {
-             passedDuration += (t - c.start);
+             passed += (rawTime - c.start);
           }
           break;
        }
        if (this.isVisible(c)) {
-          passedDuration += c.duration;
+          passed += c.duration;
        }
     }
-    
-    const visDur = this.visibleDuration();
-    if (visDur === 0) return 0;
-    return (passedDuration / visDur) * 100;
+    return passed;
   }
 
-  getTimelineTime(event: MouseEvent): number {
-    const target = event.currentTarget as HTMLElement;
-    const rect = target.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
+  getTimeAtClientX(clientX: number): number {
+    const track = this.timelineTrackRef?.nativeElement;
+    if (!track) return 0;
+    const rect = track.getBoundingClientRect();
+    const clickX = clientX - rect.left;
     const percentage = Math.max(0, Math.min(1, clickX / rect.width));
     
     if (!this.rippleAi() && !this.rippleManual()) {
@@ -776,26 +922,29 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
 
     const targetVisDuration = percentage * this.visibleDuration();
-    let accumulated = 0;
-    let targetTime = 0;
-    
-    for (const c of this.clips()) {
-       if (this.isVisible(c)) {
-          if (accumulated + c.duration >= targetVisDuration) {
-             targetTime = c.start + (targetVisDuration - accumulated);
-             break;
-          }
-          accumulated += c.duration;
-       }
+    return this.getRawTimeFromVisTime(targetVisDuration);
+  }
+
+  getPlayheadPosition(): number {
+    const t = this.currentTime();
+    if (!this.rippleAi() && !this.rippleManual()) {
+       return (t / this.totalDuration()) * 100;
     }
-    return targetTime;
+    const visDur = this.visibleDuration();
+    if (visDur <= 0) return 0;
+    return (this.getVisTimeFromRawTime(t) / visDur) * 100;
+  }
+
+  getTimelineTime(event: MouseEvent): number {
+    return this.getTimeAtClientX(event.clientX);
   }
 
   seekTimeline(event: MouseEvent): void {
-    const targetTime = this.getTimelineTime(event);
+    const targetTime = this.getTimeAtClientX(event.clientX);
     if (this.videoRef?.nativeElement) {
       this.videoRef.nativeElement.currentTime = targetTime;
     }
+    this.currentTime.set(targetTime);
   }
 
   selectClip(clipId: string, event: MouseEvent): void {
@@ -914,82 +1063,202 @@ export class EditorComponent implements OnInit, OnDestroy {
         };
      }
 
-     const getVisTime = (t: number) => {
-        let passed = 0;
-        for (const c of this.clips()) {
-           if (t >= c.start && t <= c.end) {
-              if (this.isVisible(c)) passed += (t - c.start);
-              break;
-           }
-           if (this.isVisible(c)) passed += c.duration;
-        }
-        return passed;
-     };
-
-     const startVis = getVisTime(ov.timestamp);
-     const endVis = getVisTime(ov.timestamp + ov.duration);
+     const startVis = this.getVisTimeFromRawTime(ov.timestamp);
+     const endVis = this.getVisTimeFromRawTime(ov.timestamp + ov.duration);
      const visDur = this.visibleDuration();
      
-     if (visDur === 0) return { display: 'none' };
+     if (visDur <= 0 || endVis <= startVis) return { display: 'none' };
      
      return {
         left: `${(startVis / visDur) * 100}%`,
-        width: `${((endVis - startVis) / visDur) * 100}%`
+        width: `${Math.max(0.6, ((endVis - startVis) / visDur) * 100)}%`
      };
   }
 
-  addOverlayToSelected(): void {
+  addTextOverlay(): void {
+    let start = this.currentTime();
+    let duration = 3.0;
+    
     const selId = this.selectedClipId();
-    if (!selId) return;
-    const clip = this.clips().find(c => c.id === selId);
-    if (!clip) return;
-
-    const text = prompt('Klibe eklenecek yazıyı girin:');
-    if (text) {
-      const newOvId = `ov_${Date.now()}`;
-      this.edlService.patchEdl(this.projectId, {
-        overlays: [{
-          id: newOvId,
-          type: 'text',
-          content: text,
-          timestamp: clip.start,
-          duration: clip.duration,
-          color: '#FFFFFF',
-          fontSize: 64,
-          font: 'Inter',
-          action: 'add'
-        }]
-      }).subscribe(() => {
-         this.loadEdl();
-         this.selectOverlay(newOvId);
-      });
+    if (selId) {
+      const clip = this.clips().find(c => c.id === selId);
+      if (clip) {
+        start = clip.start;
+        duration = Math.max(1.0, clip.duration);
+      }
     }
+    
+    const newOvId = `ov_txt_${Date.now()}`;
+    const newOverlay: any = {
+      id: newOvId,
+      type: 'text',
+      content: 'Yeni Metin',
+      timestamp: parseFloat(start.toFixed(2)),
+      duration: parseFloat(duration.toFixed(2)),
+      color: '#FFFFFF',
+      fontSize: 54,
+      font: 'Inter',
+      positionX: 50,
+      positionY: 80,
+      animation: 'fade',
+      action: 'add'
+    };
+
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [newOverlay]
+    }).subscribe({
+      next: () => {
+        this.loadEdl();
+        if (this.videoRef?.nativeElement) {
+          this.videoRef.nativeElement.currentTime = start;
+          this.currentTime.set(start);
+        }
+        this.selectOverlay(newOvId);
+        this.activeTab.set('inspector');
+      },
+      error: (err) => console.error('Metin eklenemedi:', err)
+    });
+  }
+
+  addImageOverlay(): void {
+    let start = this.currentTime();
+    let duration = 4.0;
+    
+    const selId = this.selectedClipId();
+    if (selId) {
+      const clip = this.clips().find(c => c.id === selId);
+      if (clip) {
+        start = clip.start;
+        duration = Math.max(1.0, clip.duration);
+      }
+    }
+    
+    const newOvId = `ov_img_${Date.now()}`;
+    const newOverlay: any = {
+      id: newOvId,
+      type: 'image',
+      content: 'Görsel Kaplaması',
+      source: 'https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=600',
+      timestamp: parseFloat(start.toFixed(2)),
+      duration: parseFloat(duration.toFixed(2)),
+      positionX: 50,
+      positionY: 45,
+      scale: 1.0,
+      animation: 'fade',
+      action: 'add'
+    };
+
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [newOverlay]
+    }).subscribe({
+      next: () => {
+        this.loadEdl();
+        if (this.videoRef?.nativeElement) {
+          this.videoRef.nativeElement.currentTime = start;
+          this.currentTime.set(start);
+        }
+        this.selectOverlay(newOvId);
+        this.activeTab.set('inspector');
+      },
+      error: (err) => console.error('Görsel eklenemedi:', err)
+    });
+  }
+
+  // Geriye dönük uyumluluk için alias'lar
+  addOverlayToSelected(): void {
+    this.addTextOverlay();
+  }
+
+  addImageOverlayToSelected(): void {
+    this.addImageOverlay();
   }
 
   selectOverlay(id: string): void {
      this.selectedOverlayId.set(id);
      const ov = this.activeEdl()?.overlays?.find(o => o.id === id);
      if (ov) {
-        this.inspectorData = { ...ov }; // clone for form binding
+        this.inspectorData = {
+          id: ov.id,
+          type: ov.type || 'text',
+          content: ov.content || '',
+          source: ov.source || '',
+          timestamp: ov.timestamp ?? 0,
+          duration: ov.duration ?? 3,
+          fontSize: ov.fontSize ?? 48,
+          font: ov.font || 'Inter',
+          color: ov.color || '#FFFFFF',
+          positionX: ov.positionX ?? 50,
+          positionY: ov.positionY ?? 50,
+          animation: ov.animation || 'none',
+          scale: ov.scale ?? 1.0
+        };
         this.activeTab.set('inspector');
+        
+        // Zaman imleci katmanın dışındaysa, ekranda görünmesi için oraya git
+        const t = this.currentTime();
+        if (t < ov.timestamp || t > (ov.timestamp + ov.duration)) {
+           if (this.videoRef?.nativeElement) {
+              this.videoRef.nativeElement.currentTime = ov.timestamp + 0.05;
+              this.currentTime.set(ov.timestamp + 0.05);
+           }
+        }
      }
   }
 
+  onInspectorChange(): void {
+    const selId = this.selectedOverlayId();
+    if (!selId) return;
+    const ov = this.activeEdl()?.overlays?.find(o => o.id === selId);
+    if (ov) {
+      ov.content = this.inspectorData.content;
+      ov.source = this.inspectorData.source;
+      ov.color = this.inspectorData.color;
+      ov.fontSize = Number(this.inspectorData.fontSize) || 48;
+      ov.font = this.inspectorData.font;
+      ov.scale = Number(this.inspectorData.scale) || 1.0;
+      ov.animation = this.inspectorData.animation;
+      ov.positionX = Number(this.inspectorData.positionX);
+      ov.positionY = Number(this.inspectorData.positionY);
+      ov.timestamp = Number(this.inspectorData.timestamp);
+      ov.duration = Number(this.inspectorData.duration);
+      
+      this.edl.update(e => e ? { ...e } : null);
+    }
+  }
+
   saveInspector(): void {
-     if (!this.selectedOverlayId() || !this.inspectorData) return;
+     const selId = this.selectedOverlayId();
+     if (!selId || !this.inspectorData) return;
      
-     // Update the backend EDL with the modified overlay
      this.edlService.patchEdl(this.projectId, {
-        overlays: [{ ...this.inspectorData, action: 'update' } as any]
-     }).subscribe(() => {
-        this.loadEdl();
-        // optionally show toast "Saved"
+        overlays: [{
+          id: selId,
+          type: this.inspectorData.type || 'text',
+          content: this.inspectorData.content,
+          source: this.inspectorData.source,
+          timestamp: Number(this.inspectorData.timestamp),
+          duration: Number(this.inspectorData.duration),
+          positionX: Number(this.inspectorData.positionX),
+          positionY: Number(this.inspectorData.positionY),
+          color: this.inspectorData.color,
+          fontSize: Number(this.inspectorData.fontSize),
+          font: this.inspectorData.font,
+          scale: Number(this.inspectorData.scale),
+          animation: this.inspectorData.animation,
+          action: 'update'
+        } as any]
+     }).subscribe({
+        next: () => {
+           this.loadEdl();
+        },
+        error: (err) => console.error('Katman kaydedilemedi:', err)
      });
   }
 
   cancelInspector(): void {
      this.selectedOverlayId.set(null);
      this.activeTab.set('overlays');
+     this.loadEdl();
   }
 
   setPrompt(p: string): void {
@@ -1128,14 +1397,17 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
 
     this.previewEdl.set(simulated);
-    this.previewMessageId.set(msg.id);
+    this.previewMessageId.set(msg.id || null);
     
     // Geri sarıp göstersin
     if (this.videoRef?.nativeElement) {
       // Eğer patch'te belirli bir timestamp varsa, oraya sarsın (kabaca ilk elemanın süresi)
       let seekTo = 0;
-      if (patch.cuts?.length > 0) seekTo = Math.max(0, patch.cuts[0].start - 2);
-      else if (patch.overlays?.length > 0) seekTo = Math.max(0, patch.overlays[0].timestamp - 2);
+      if (patch.cuts && patch.cuts.length > 0) {
+        seekTo = Math.max(0, patch.cuts[0].start - 2);
+      } else if (patch.overlays && patch.overlays.length > 0) {
+        seekTo = Math.max(0, patch.overlays[0].timestamp - 2);
+      }
       if (seekTo > 0) this.videoRef.nativeElement.currentTime = seekTo;
       this.videoRef.nativeElement.play();
     }
@@ -1288,7 +1560,6 @@ export class EditorComponent implements OnInit, OnDestroy {
          if (!video) return;
          
          const rect = video.getBoundingClientRect();
-         
          const deltaX = event.clientX - this.canvasDragStartX;
          const deltaY = event.clientY - this.canvasDragStartY;
          
@@ -1301,7 +1572,6 @@ export class EditorComponent implements OnInit, OnDestroy {
              let newX = this.canvasDragOriginalX + deltaXPercent;
              let newY = this.canvasDragOriginalY + deltaYPercent;
              
-             // Clamping between 0 and 100
              if (newX < 0) newX = 0; if (newX > 100) newX = 100;
              if (newY < 0) newY = 0; if (newY > 100) newY = 100;
              
@@ -1313,22 +1583,10 @@ export class EditorComponent implements OnInit, OnDestroy {
                  this.inspectorData.positionY = parseFloat(newY.toFixed(2));
              }
          }
-         return; // Skip timeline drag logic
+         return;
      }
      
      if (!this.isDraggingOverlay && !this.isResizingOverlay) return;
-     
-     const track = this.timelineTrackRef?.nativeElement;
-     if (!track) return;
-     
-     const rect = track.getBoundingClientRect();
-     // Pixel to seconds
-     const totalDur = (this.rippleAi() || this.rippleManual()) ? this.visibleDuration() : this.totalDuration();
-     if (totalDur <= 0) return;
-     
-     const pixelsPerSecond = rect.width / totalDur;
-     const deltaX = event.clientX - this.dragStartX;
-     const deltaSeconds = deltaX / (pixelsPerSecond * this.timelineZoom());
      
      const ovId = this.selectedOverlayId();
      if (!ovId) return;
@@ -1338,40 +1596,51 @@ export class EditorComponent implements OnInit, OnDestroy {
      if (!ov) return;
      
      if (this.isDraggingOverlay) {
-        let newStart = this.dragOverlayOriginalStart + deltaSeconds;
-        if (newStart < 0) newStart = 0;
+        if (!this.rippleAi() && !this.rippleManual()) {
+           const track = this.timelineTrackRef?.nativeElement;
+           if (!track) return;
+           const rect = track.getBoundingClientRect();
+           const pixelsPerSec = rect.width / this.totalDuration();
+           const deltaSec = (event.clientX - this.dragStartX) / (pixelsPerSec * this.timelineZoom());
+           let newStart = Math.max(0, this.dragOverlayOriginalStart + deltaSec);
+           ov.timestamp = parseFloat(newStart.toFixed(2));
+        } else {
+           const startVis = this.getVisTimeFromRawTime(this.dragOverlayOriginalStart);
+           const currentMouseRaw = this.getTimeAtClientX(event.clientX);
+           const startMouseRaw = this.getTimeAtClientX(this.dragStartX);
+           const deltaVis = this.getVisTimeFromRawTime(currentMouseRaw) - this.getVisTimeFromRawTime(startMouseRaw);
+           const newVis = Math.max(0, startVis + deltaVis);
+           const newStart = this.getRawTimeFromVisTime(newVis);
+           ov.timestamp = parseFloat(newStart.toFixed(2));
+        }
         
-        ov.timestamp = newStart;
         if (this.inspectorData && this.inspectorData.id === ovId) {
-            this.inspectorData.timestamp = parseFloat(newStart.toFixed(2));
+            this.inspectorData.timestamp = ov.timestamp;
         }
      } else if (this.isResizingOverlay) {
+        const mouseRawTime = this.getTimeAtClientX(event.clientX);
+        
         if (this.resizeEdge === 'left') {
-           let newStart = this.dragOverlayOriginalStart + deltaSeconds;
-           let newDuration = this.dragOverlayOriginalDuration - deltaSeconds;
-           
-           if (newDuration < 0.5) {
-              newDuration = 0.5;
-              newStart = this.dragOverlayOriginalStart + (this.dragOverlayOriginalDuration - 0.5);
+           const originalEnd = this.dragOverlayOriginalStart + this.dragOverlayOriginalDuration;
+           let newStart = Math.max(0, mouseRawTime);
+           if (newStart >= originalEnd - 0.3) {
+              newStart = originalEnd - 0.3;
            }
-           if (newStart < 0) {
-              newStart = 0;
-              newDuration = this.dragOverlayOriginalDuration + this.dragOverlayOriginalStart;
-           }
-           ov.timestamp = newStart;
-           ov.duration = newDuration;
+           const newDuration = originalEnd - newStart;
+           ov.timestamp = parseFloat(newStart.toFixed(2));
+           ov.duration = parseFloat(newDuration.toFixed(2));
            
            if (this.inspectorData && this.inspectorData.id === ovId) {
-              this.inspectorData.timestamp = parseFloat(newStart.toFixed(2));
-              this.inspectorData.duration = parseFloat(newDuration.toFixed(2));
+              this.inspectorData.timestamp = ov.timestamp;
+              this.inspectorData.duration = ov.duration;
            }
         } else if (this.resizeEdge === 'right') {
-           let newDuration = this.dragOverlayOriginalDuration + deltaSeconds;
-           if (newDuration < 0.5) newDuration = 0.5;
-           ov.duration = newDuration;
+           const newEnd = mouseRawTime;
+           const newDuration = Math.max(0.3, newEnd - ov.timestamp);
+           ov.duration = parseFloat(newDuration.toFixed(2));
            
            if (this.inspectorData && this.inspectorData.id === ovId) {
-              this.inspectorData.duration = parseFloat(newDuration.toFixed(2));
+              this.inspectorData.duration = ov.duration;
            }
         }
      }
@@ -1385,7 +1654,10 @@ export class EditorComponent implements OnInit, OnDestroy {
          const ovId = this.canvasDragOverlayId;
          this.canvasDragOverlayId = null;
          
-         if (ovId) {
+         const moved = Math.abs(event.clientX - this.canvasDragStartX) > 2 || 
+                       Math.abs(event.clientY - this.canvasDragStartY) > 2;
+                       
+         if (ovId && moved) {
              const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
              if (ov) {
                  this.edlService.patchEdl(this.projectId, {
@@ -1405,11 +1677,10 @@ export class EditorComponent implements OnInit, OnDestroy {
          if (ovId) {
             const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
             if (ov) {
-               // Update Backend with the new time
                this.edlService.patchEdl(this.projectId, {
                   overlays: [{ id: ov.id, timestamp: ov.timestamp, duration: ov.duration, type: ov.type, action: 'update' } as any]
                }).subscribe(() => {
-                  this.loadEdl(); // Reload to ensure sync
+                  this.loadEdl();
                });
             }
          }

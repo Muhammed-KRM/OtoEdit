@@ -12,4 +12,8 @@ public record VideoUploadedEvent
     public int VideoFormati { get; init; }
     public bool GestureCommandsEnabled { get; init; }
     public bool AudioEnhancementEnabled { get; init; }
+    public bool AutoJumpcutEnabled { get; init; } = true;
+    public bool AutoRetakeEnabled { get; init; } = true;
+    public bool AutoBrollEnabled { get; init; } = true;
+    public bool AutoSubtitlesEnabled { get; init; } = false;
 }

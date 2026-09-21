@@ -184,7 +184,7 @@ public class ChatManager : IChatService
         return result;
     }
 
-    public async Task<IEnumerable<object>> GetHistoryAsync(Guid projectId, CancellationToken cancellationToken = default)
+    public async Task<IEnumerable<ChatMessageHistoryDto>> GetHistoryAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var messages = await _context.ChatMessages
             .Where(c => c.ProjectId == projectId)
@@ -192,7 +192,7 @@ public class ChatManager : IChatService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
             
-        return messages.Select(m => new
+        return messages.Select(m => new ChatMessageHistoryDto
         {
             Id = m.Id,
             ProjectId = m.ProjectId,
@@ -200,7 +200,7 @@ public class ChatManager : IChatService
             Mesaj = m.Mesaj,
             PatchDurumu = m.PatchDurumu,
             OlusturulmaZamani = m.OlusturmaTarihi,
-            PendingEdlPatch = string.IsNullOrEmpty(m.PendingEdlPatch) ? null : JsonDocument.Parse(m.PendingEdlPatch).RootElement,
+            PendingEdlPatch = string.IsNullOrEmpty(m.PendingEdlPatch) ? (JsonElement?)null : JsonDocument.Parse(m.PendingEdlPatch).RootElement,
             FormFields = (m.PatchDurumu == "clarification" && !string.IsNullOrEmpty(m.EdlPatch)) ? JsonDocument.Parse(m.EdlPatch).RootElement : (JsonElement?)null
         });
     }

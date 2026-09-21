@@ -107,14 +107,23 @@ class ImageOverlay:
                 img_input = img_input.filter("scale", scale_w, -1)
 
             # Konum ve animasyon
-            x_expr, y_expr = AnimationEffects.get_ffmpeg_overlay_coords(
-                position=position,
-                base_w=base_w,
-                base_h=base_h,
-                anim_type=animation,
-                start_time=start_t,
-                duration=duration
-            )
+            pos_x = ov.get("positionX")
+            pos_y = ov.get("positionY")
+            if pos_x is not None and pos_y is not None:
+                # 0.0 - 1.0 normalize koordinatları piksele çevir (merkezi hizala)
+                center_px_x = int(float(pos_x) * base_w)
+                center_px_y = int(float(pos_y) * base_h)
+                x_expr = f"{center_px_x} - (w/2)"
+                y_expr = f"{center_px_y} - (h/2)"
+            else:
+                x_expr, y_expr = AnimationEffects.get_ffmpeg_overlay_coords(
+                    position=position,
+                    base_w=base_w,
+                    base_h=base_h,
+                    anim_type=animation,
+                    start_time=start_t,
+                    duration=duration
+                )
 
             enable_expr = f"between(t,{start_t:.2f},{end_t:.2f})"
 

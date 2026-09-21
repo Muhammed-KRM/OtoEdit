@@ -23,9 +23,19 @@ public class VideosController : ControllerBase
     [ProducesResponseType(typeof(VideoListDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> UploadVideo(Guid projectId, IFormFile file, CancellationToken cancellationToken)
+    public async Task<IActionResult> UploadVideo(
+        Guid projectId, 
+        [FromForm] VideoUploadDto dto, 
+        CancellationToken cancellationToken)
     {
-        var result = await _videoService.UploadVideoAsync(projectId, file, cancellationToken);
+        var result = await _videoService.UploadVideoAsync(
+            projectId, 
+            dto.File, 
+            dto.AutoJumpcut,
+            dto.AutoRetake,
+            dto.AutoBroll,
+            dto.AutoSubtitles,
+            cancellationToken);
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
