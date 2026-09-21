@@ -78,7 +78,12 @@ import { environment } from '../../../environments/environment';
                 [style.top]="getOverlayTop(ov)"
                 [style.left]="getOverlayLeft(ov)"
                 class="absolute transition-none z-20 cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
-                [ngClass]="selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''"
+                [ngClass]="[
+                   selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : '',
+                   ov.animation === 'fade' ? 'animate-fade-in' : '',
+                   ov.animation === 'pop-up' ? 'scale-in' : '',
+                   ov.animation === 'slide-up' ? 'translate-y-4 opacity-0 animate-slide-up-forwards' : ''
+                ]"
                 [style.color]="ov.color || '#FFFFFF'"
                 [style.backgroundColor]="ov.backgroundColor || 'transparent'"
                 [style.fontFamily]="ov.font || 'Inter, sans-serif'">
@@ -108,6 +113,13 @@ import { environment } from '../../../environments/environment';
                     GÖRSEL
                   </span>
                 </div>
+
+                <!-- Canvas Resize Handle -->
+                <div *ngIf="selectedOverlayId() === ov.id"
+                     (mousedown)="onCanvasResizeStart($event, ov.id)"
+                     class="absolute -bottom-2 -right-2 w-5 h-5 bg-white border-2 border-brand-cyan rounded-full cursor-nwse-resize z-30 shadow-md hover:scale-125 transition-transform flex items-center justify-center">
+                     <span class="text-[8px] text-brand-cyan">⤡</span>
+                </div>
               </div>
           </div>
 
@@ -119,7 +131,8 @@ import { environment } from '../../../environments/environment';
             </div>
             <div class="flex items-center gap-4">
               <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Korunan</span>
-              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Kesilen (Jump-Cut)</span>
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-amber-500"></span> Retake</span>
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Jump-Cut</span>
               <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-sky-400"></span> Yazı</span>
               <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-purple-400"></span> Görsel</span>
             </div>
@@ -138,11 +151,18 @@ import { environment } from '../../../environments/environment';
                 <button (click)="rippleAi.set(!rippleAi())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-sky-400 border border-slate-700" title="AI Kesimlerini Sıkıştır/Genişlet">
                   {{ rippleAi() ? '🤖 AI Sıkıştırılmış' : '🤖 AI Geniş' }}
                 </button>
+                <button (click)="rippleRetake.set(!rippleRetake())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-amber-400 border border-slate-700" title="Retake (Hatalı Tekrar) Kısımlarını Sıkıştır/Genişlet">
+                  {{ rippleRetake() ? '🔄 Retake Sıkıştırılmış' : '🔄 Retake Geniş' }}
+                </button>
                 <button (click)="rippleManual.set(!rippleManual())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-sky-400 border border-slate-700" title="Manuel Kesimleri Sıkıştır/Genişlet">
                   {{ rippleManual() ? '🖐 Manuel Sıkıştırılmış' : '🖐 Manuel Geniş' }}
                 </button>
-                <button (click)="deleteSelectedClip()" *ngIf="selectedClipId()" class="p-1 px-2.5 rounded bg-rose-600/80 text-white font-bold hover:bg-rose-500 border border-rose-500 shadow-glow-sm" title="Seçili Klibi Sil (Del)">✕ Sil (Del)</button>
-                <button (click)="addTextOverlay()" class="p-1 px-2.5 rounded bg-brand-cyan text-slate-900 font-bold hover:bg-cyan-400 border border-cyan-500 shadow-glow-sm flex items-center gap-1" title="Zaman çizgisine yazı katmanı ekle">
+                <div *ngIf="selectedClipIds().length > 0" class="flex items-center gap-2 border-l border-slate-700 pl-2 ml-1">
+                  <span class="text-[10px] font-bold text-slate-300">{{ selectedClipIds().length }} Seçili</span>
+                  <button (click)="deleteSelectedClips()" class="p-1 px-2.5 rounded bg-rose-600/80 text-white font-bold hover:bg-rose-500 border border-rose-500 shadow-glow-sm" title="Seçili Klipleri Sil (Del)">✕ Sil (Del)</button>
+                  <button *ngIf="selectedClipIds().length > 1" (click)="mergeSelectedClips()" class="p-1 px-2.5 rounded bg-emerald-600/80 text-white font-bold hover:bg-emerald-500 border border-emerald-500 shadow-glow-sm" title="Seçili Klipleri Birleştir">🔗 Birleştir</button>
+                </div>
+                <button (click)="addTextOverlay()" class="p-1 px-2.5 rounded bg-brand-cyan text-slate-900 font-bold hover:bg-cyan-400 border border-cyan-500 shadow-glow-sm flex items-center gap-1 ml-auto" title="Zaman çizgisine yazı katmanı ekle">
                   <span class="font-black">T</span>
                   <span>Yazı Ekle</span>
                 </button>
@@ -231,12 +251,13 @@ import { environment } from '../../../environments/environment';
                       (dblclick)="toggleClip(clip, $event)"
                       class="relative h-full transition-colors border-r border-white/20 box-border group"
                       [ngClass]="{
-                         'bg-rose-900/80 hover:bg-rose-800': clip.isCut && clip.cutObj?.reason !== 'Manuel kesim',
+                         'bg-amber-500/80 hover:bg-amber-400': clip.isCut && (clip.cutObj?.reason === 'Retake' || clip.cutObj?.reason === 'Hatalı Tekrar'),
+                         'bg-rose-900/80 hover:bg-rose-800': clip.isCut && clip.cutObj?.reason !== 'Manuel kesim' && clip.cutObj?.reason !== 'Retake' && clip.cutObj?.reason !== 'Hatalı Tekrar',
                          'bg-rose-500/80 hover:bg-rose-400': clip.isCut && clip.cutObj?.reason === 'Manuel kesim',
                          'bg-emerald-600/40 hover:bg-emerald-500/60': !clip.isCut,
-                         'ring-2 ring-inset ring-brand-yellow shadow-[0_0_10px_rgba(250,204,21,0.5)] z-10': selectedClipId() === clip.id
+                         'ring-2 ring-inset ring-brand-yellow shadow-[0_0_10px_rgba(250,204,21,0.5)] z-10': selectedClipIds().includes(clip.id)
                       }"
-                      [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual()) ? visibleDuration() : totalDuration() )) * 100"
+                      [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual() || rippleRetake()) ? visibleDuration() : totalDuration() )) * 100"
                       [title]="'Klip (' + (clip.start | number:'1.1-1') + 's - ' + (clip.end | number:'1.1-1') + 's) - İşlem için çift tıkla'">
                       
                       <!-- Kırmızı kısımları silme (Gizle modu kapalıyken) -->
@@ -618,20 +639,20 @@ import { environment } from '../../../environments/environment';
              </div>
              
              <div class="mt-4">
-               <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-2">Stok Görseller (Pexels)</h4>
+               <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-2">Stok Görseller (Örnek)</h4>
                <div class="flex gap-2 mb-3">
                  <input type="text" placeholder="Arama yap..." class="flex-1 bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" />
                  <button class="px-3 bg-dark-700 text-white rounded text-xs">Ara</button>
                </div>
                <div class="grid grid-cols-2 gap-2">
-                 <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan">
-                   <div class="absolute inset-0 flex items-center justify-center text-slate-500 text-xs">Stok 1</div>
+                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan">
+                   <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
                    <div class="absolute inset-0 bg-brand-cyan/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                      <span class="bg-black/50 text-white text-[10px] px-2 py-1 rounded">Ekle +</span>
                    </div>
                  </div>
-                 <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan">
-                   <div class="absolute inset-0 flex items-center justify-center text-slate-500 text-xs">Stok 2</div>
+                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan">
+                   <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
                    <div class="absolute inset-0 bg-brand-cyan/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                      <span class="bg-black/50 text-white text-[10px] px-2 py-1 rounded">Ekle +</span>
                    </div>
@@ -673,9 +694,10 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly rendering = signal<boolean>(false);
   readonly rippleAi = signal<boolean>(true); // Varsayılan: AI kısımları Sıkıştırılmış
   readonly rippleManual = signal<boolean>(true); // Varsayılan: Manuel kısımlar Sıkıştırılmış
+  readonly rippleRetake = signal<boolean>(true); // Varsayılan: Retake kısımları Sıkıştırılmış
   readonly timelineZoom = signal<number>(1);
   readonly splitMarkers = signal<number[]>([]);
-  readonly selectedClipId = signal<string | null>(null);
+  readonly selectedClipIds = signal<string[]>([]);
   readonly selectedOverlayId = signal<string | null>(null);
   
   // Inspector Data State
@@ -696,6 +718,14 @@ export class EditorComponent implements OnInit, OnDestroy {
   canvasDragStartY = 0;
   canvasDragOriginalX = 0;
   canvasDragOriginalY = 0;
+
+  // Canvas Resize State
+  isCanvasResizing = false;
+  canvasResizeOverlayId: string | null = null;
+  canvasResizeStartX = 0;
+  canvasResizeOriginalScale = 1;
+  canvasResizeOriginalFontSize = 48;
+  
   
   readonly selectedOverlay = computed(() => {
     const id = this.selectedOverlayId();
@@ -751,6 +781,9 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!clip.isCut) return true;
     if (clip.cutObj.reason === 'Manuel kesim') {
        return !this.rippleManual();
+    }
+    if (clip.cutObj.reason === 'Retake' || clip.cutObj.reason === 'Hatalı Tekrar') {
+       return !this.rippleRetake();
     }
     return !this.rippleAi();
   }
@@ -949,10 +982,23 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   selectClip(clipId: string, event: MouseEvent): void {
     event.stopPropagation();
-    if (this.selectedClipId() === clipId) {
-      this.selectedClipId.set(null); // Tekrar tıklanınca seçimi kaldır
+    
+    const current = this.selectedClipIds();
+    
+    // Ctrl (Windows) veya Cmd (Mac) basılıysa çoklu seçim yap
+    if (event.ctrlKey || event.metaKey) {
+       if (current.includes(clipId)) {
+          this.selectedClipIds.set(current.filter(id => id !== clipId));
+       } else {
+          this.selectedClipIds.set([...current, clipId]);
+       }
     } else {
-      this.selectedClipId.set(clipId);
+       // Tekli seçim
+       if (current.length === 1 && current[0] === clipId) {
+          this.selectedClipIds.set([]); // Zaten seçiliyse kaldır
+       } else {
+          this.selectedClipIds.set([clipId]);
+       }
     }
   }
 
@@ -974,30 +1020,65 @@ export class EditorComponent implements OnInit, OnDestroy {
         this.edlService.patchEdl(this.projectId, {
           cuts: [{ ...newCut, action: 'add' } as any]
         }).subscribe(() => {
-          this.selectedClipId.set(null); // Kesilen klibin seçimini iptal et
+          this.selectedClipIds.set(this.selectedClipIds().filter(id => id !== clip.id));
           this.loadEdl();
         });
      }
   }
 
-  deleteSelectedClip(): void {
-    const selId = this.selectedClipId();
-    if (!selId) return;
-    const clip = this.clips().find(c => c.id === selId);
-    if (!clip || clip.isCut) return; // Zaten kesikse silinmez
+  deleteSelectedClips(): void {
+    const selIds = this.selectedClipIds();
+    if (!selIds.length) return;
+    
+    const selectedClips = this.clips().filter(c => selIds.includes(c.id) && !c.isCut);
+    if (!selectedClips.length) return; // Kalanların hepsi zaten kesikse işlem yapma
 
-    const newCut = { 
-      id: `manual_cut_${Date.now()}`, 
-      start: clip.start, 
-      end: clip.end, 
-      reason: 'Manuel kesim' 
-    };
+    const newCuts = selectedClips.map((clip, idx) => ({
+      id: `manual_cut_${Date.now()}_${idx}`,
+      start: clip.start,
+      end: clip.end,
+      reason: 'Manuel kesim',
+      action: 'add'
+    }));
+
     this.edlService.patchEdl(this.projectId, {
-      cuts: [{ ...newCut, action: 'add' } as any]
+      cuts: newCuts as any
     }).subscribe(() => {
-      this.selectedClipId.set(null);
+      this.selectedClipIds.set([]);
       this.loadEdl();
     });
+  }
+
+  mergeSelectedClips(): void {
+    const selIds = this.selectedClipIds();
+    if (selIds.length < 2) return;
+    
+    const allClips = this.clips();
+    const selectedClips = allClips.filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
+    
+    // Seçili kliplerin arasındaki tüm kesimleri (cuts) bul ve sil
+    const startRange = selectedClips[0].start;
+    const endRange = selectedClips[selectedClips.length - 1].end;
+    
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return;
+    
+    // Bu aralığa denk gelen tüm cut'ları bul
+    const cutsToRemove = edl.cuts.filter(c => c.start >= startRange && c.end <= endRange);
+    if (cutsToRemove.length === 0) {
+       alert('Seçilen klipler arasında birleştirilecek (silinecek) bir kesim bulunamadı.');
+       return;
+    }
+    
+    if (confirm(`Seçili aralıktaki ${cutsToRemove.length} kesim iptal edilerek klipler birleştirilecek. Onaylıyor musunuz?`)) {
+       const patchCuts = cutsToRemove.map(c => ({ id: c.id, start: 0, end: 0, action: 'remove' }));
+       this.edlService.patchEdl(this.projectId, {
+          cuts: patchCuts as any
+       }).subscribe(() => {
+          this.selectedClipIds.set([]); // seçimi temizle
+          this.loadEdl();
+       });
+    }
   }
 
   zoomIn(): void {
@@ -1079,12 +1160,13 @@ export class EditorComponent implements OnInit, OnDestroy {
     let start = this.currentTime();
     let duration = 3.0;
     
-    const selId = this.selectedClipId();
-    if (selId) {
-      const clip = this.clips().find(c => c.id === selId);
-      if (clip) {
-        start = clip.start;
-        duration = Math.max(1.0, clip.duration);
+    const selIds = this.selectedClipIds();
+    if (selIds.length > 0) {
+      const selectedClips = this.clips().filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
+      if (selectedClips.length > 0) {
+        start = selectedClips[0].start;
+        const end = selectedClips[selectedClips.length - 1].end;
+        duration = Math.max(1.0, end - start);
       }
     }
     
@@ -1124,12 +1206,13 @@ export class EditorComponent implements OnInit, OnDestroy {
     let start = this.currentTime();
     let duration = 4.0;
     
-    const selId = this.selectedClipId();
-    if (selId) {
-      const clip = this.clips().find(c => c.id === selId);
-      if (clip) {
-        start = clip.start;
-        duration = Math.max(1.0, clip.duration);
+    const selIds = this.selectedClipIds();
+    if (selIds.length > 0) {
+      const selectedClips = this.clips().filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
+      if (selectedClips.length > 0) {
+        start = selectedClips[0].start;
+        const end = selectedClips[selectedClips.length - 1].end;
+        duration = Math.max(1.0, end - start);
       }
     }
     
@@ -1139,6 +1222,51 @@ export class EditorComponent implements OnInit, OnDestroy {
       type: 'image',
       content: 'Görsel Kaplaması',
       source: 'https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=600',
+      timestamp: parseFloat(start.toFixed(2)),
+      duration: parseFloat(duration.toFixed(2)),
+      positionX: 50,
+      positionY: 45,
+      scale: 1.0,
+      animation: 'fade',
+      action: 'add'
+    };
+
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [newOverlay]
+    }).subscribe({
+      next: () => {
+        this.loadEdl();
+        if (this.videoRef?.nativeElement) {
+          this.videoRef.nativeElement.currentTime = start;
+          this.currentTime.set(start);
+        }
+        this.selectOverlay(newOvId);
+        this.activeTab.set('inspector');
+      },
+      error: (err) => console.error('Görsel eklenemedi:', err)
+    });
+  }
+
+  addImageOverlayFromUrl(url: string): void {
+    let start = this.currentTime();
+    let duration = 4.0;
+    
+    const selIds = this.selectedClipIds();
+    if (selIds.length > 0) {
+      const selectedClips = this.clips().filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
+      if (selectedClips.length > 0) {
+        start = selectedClips[0].start;
+        const end = selectedClips[selectedClips.length - 1].end;
+        duration = Math.max(1.0, end - start);
+      }
+    }
+    
+    const newOvId = `ov_img_${Date.now()}`;
+    const newOverlay: any = {
+      id: newOvId,
+      type: 'image',
+      content: 'Stok Görsel',
+      source: url,
       timestamp: parseFloat(start.toFixed(2)),
       duration: parseFloat(duration.toFixed(2)),
       positionX: 50,
@@ -1270,12 +1398,14 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     let msgText = this.userPrompt.trim();
     
-    // Seçili klip varsa prompt'a context ekle
-    const selId = this.selectedClipId();
-    if (selId) {
-       const clip = this.clips().find(c => c.id === selId);
-       if (clip) {
-          msgText = `[Seçili Klip: ${clip.start.toFixed(1)}s - ${clip.end.toFixed(1)}s arası] ` + msgText;
+    // Seçili klip(ler) varsa prompt'a context ekle
+    const selIds = this.selectedClipIds();
+    if (selIds.length > 0) {
+       const selectedClips = this.clips().filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
+       if (selectedClips.length > 0) {
+          const startRange = selectedClips[0].start;
+          const endRange = selectedClips[selectedClips.length - 1].end;
+          msgText = `[Seçili Aralık: ${startRange.toFixed(1)}s - ${endRange.toFixed(1)}s] ` + msgText;
        }
     }
 
@@ -1553,6 +1683,20 @@ export class EditorComponent implements OnInit, OnDestroy {
      }
   }
 
+  onCanvasResizeStart(event: MouseEvent, overlayId: string): void {
+      event.preventDefault();
+      event.stopPropagation();
+      this.selectOverlay(overlayId);
+      this.isCanvasResizing = true;
+      this.canvasResizeOverlayId = overlayId;
+      this.canvasResizeStartX = event.clientX;
+      const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
+      if (ov) {
+          this.canvasResizeOriginalScale = ov.scale || 1.0;
+          this.canvasResizeOriginalFontSize = ov.fontSize || 48;
+      }
+  }
+
   @HostListener('window:mousemove', ['$event'])
   onGlobalMouseMove(event: MouseEvent): void {
      if (this.isCanvasDragging) {
@@ -1581,6 +1725,31 @@ export class EditorComponent implements OnInit, OnDestroy {
              if (this.inspectorData && this.inspectorData.id === ov.id) {
                  this.inspectorData.positionX = parseFloat(newX.toFixed(2));
                  this.inspectorData.positionY = parseFloat(newY.toFixed(2));
+             }
+         }
+         return;
+     }
+
+     if (this.isCanvasResizing) {
+         const deltaX = event.clientX - this.canvasResizeStartX;
+         const ov = this.activeEdl()?.overlays?.find(o => o.id === this.canvasResizeOverlayId);
+         if (ov) {
+             if (ov.type === 'image') {
+                 let newScale = this.canvasResizeOriginalScale + (deltaX / 100);
+                 if (newScale < 0.2) newScale = 0.2;
+                 if (newScale > 5.0) newScale = 5.0;
+                 ov.scale = newScale;
+                 if (this.inspectorData && this.inspectorData.id === ov.id) {
+                     this.inspectorData.scale = parseFloat(newScale.toFixed(2));
+                 }
+             } else if (ov.type === 'text') {
+                 let newSize = this.canvasResizeOriginalFontSize + deltaX;
+                 if (newSize < 10) newSize = 10;
+                 if (newSize > 400) newSize = 400;
+                 ov.fontSize = newSize;
+                 if (this.inspectorData && this.inspectorData.id === ov.id) {
+                     this.inspectorData.fontSize = Math.round(newSize);
+                 }
              }
          }
          return;
@@ -1661,9 +1830,24 @@ export class EditorComponent implements OnInit, OnDestroy {
              const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
              if (ov) {
                  this.edlService.patchEdl(this.projectId, {
-                     overlays: [{ id: ov.id, positionX: ov.positionX, positionY: ov.positionY, action: 'update' } as any]
+                     overlays: [{ ...ov, action: 'update' } as any]
                  }).subscribe(() => this.loadEdl());
              }
+         }
+         return;
+     }
+     
+     if (this.isCanvasResizing) {
+         this.isCanvasResizing = false;
+         const ovId = this.canvasResizeOverlayId;
+         this.canvasResizeOverlayId = null;
+         if (ovId) {
+            const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
+            if (ov) {
+                this.edlService.patchEdl(this.projectId, {
+                    overlays: [{ ...ov, action: 'update' } as any]
+                }).subscribe(() => this.loadEdl());
+            }
          }
          return;
      }
@@ -1678,7 +1862,7 @@ export class EditorComponent implements OnInit, OnDestroy {
             const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
             if (ov) {
                this.edlService.patchEdl(this.projectId, {
-                  overlays: [{ id: ov.id, timestamp: ov.timestamp, duration: ov.duration, type: ov.type, action: 'update' } as any]
+                  overlays: [{ ...ov, action: 'update' } as any]
                }).subscribe(() => {
                   this.loadEdl();
                });
