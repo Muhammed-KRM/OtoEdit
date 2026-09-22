@@ -19,6 +19,16 @@ import { NavbarComponent } from '../../shared/components/navbar/navbar.component
 import { DurationPipe } from '../../shared/pipes/duration.pipe';
 import { environment } from '../../../environments/environment';
 
+export interface ContextMenuState {
+  visible: boolean;
+  x: number;
+  y: number;
+  type: 'clip' | 'overlay' | 'timeline';
+  targetClip?: any;
+  targetOverlay?: OverlayItem;
+  seekTime?: number;
+}
+
 @Component({
   selector: 'app-editor',
   standalone: true,
@@ -26,996 +36,1122 @@ import { environment } from '../../../environments/environment';
   template: `
     <app-navbar [projectTitle]="project()?.ad"></app-navbar>
 
-    <main class="h-[calc(100vh-65px)] flex flex-col bg-dark-900 text-slate-100 overflow-hidden">
-      <!-- Üst Bar: Zaman, Dışa Aktar ve Simülasyon Durumu -->
-      <div class="px-6 py-2.5 bg-dark-800/90 border-b border-slate-800 flex items-center justify-between z-10">
+    <main class="h-[calc(100vh-65px)] flex flex-col bg-dark-950 text-slate-100 overflow-hidden select-none" (click)="closeContextMenu()">
+      <!-- Üst Bar: Navigasyon, EDL Durumu, Hızlı Bilgi ve Render -->
+      <header class="h-11 px-5 bg-dark-900/95 border-b border-slate-800 flex items-center justify-between shrink-0 z-20">
         <div class="flex items-center gap-4">
-          <a [routerLink]="['/project', projectId]" class="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors">
-            ← Detaya Dön
+          <a [routerLink]="['/project', projectId]" class="text-xs text-slate-400 hover:text-white flex items-center gap-1.5 transition-colors font-medium">
+            <span>←</span>
+            <span>Detaya Dön</span>
           </a>
-          <div class="h-4 w-px bg-slate-700"></div>
+          <div class="h-4 w-px bg-slate-800"></div>
           <div class="flex items-center gap-2">
-            <span class="w-2 h-2 rounded-full bg-brand-cyan"></span>
-            <span class="text-xs font-semibold text-white">Canlı EDL Simülasyonu</span>
-            <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Render Bekletmez</span>
+            <span class="w-2 h-2 rounded-full bg-brand-cyan shadow-glow-sm animate-pulse"></span>
+            <span class="text-xs font-bold text-white tracking-wide">Canlı EDL Simülasyonu</span>
+            <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Render Bekletmez</span>
           </div>
         </div>
 
         <div class="flex items-center gap-3">
+          <!-- Kısayol İpuçları Butonu -->
+          <div class="relative group">
+            <button type="button" class="px-2.5 py-1 rounded-lg bg-dark-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1.5 transition-colors">
+              <span>⌨️</span>
+              <span class="text-[11px] font-semibold">Kısayollar</span>
+            </button>
+            <!-- Popover -->
+            <div class="absolute right-0 top-full mt-2 w-72 p-3 bg-dark-900/98 backdrop-blur-xl border border-slate-700 rounded-xl shadow-2xl opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity z-50 text-[11px] space-y-1.5">
+              <div class="font-bold text-brand-cyan border-b border-slate-800 pb-1 flex items-center justify-between">
+                <span>🎬 CapCut / NLE Kısayolları</span>
+                <span class="text-[9px] text-slate-500">Hızlı Tuşlar</span>
+              </div>
+              <div class="flex justify-between"><span class="text-slate-400">Oynat / Duraklat:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Space</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">İmleçten Böl:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">B</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">Sil (Klip / Katman):</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Del</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">Katmanı Çoğalt:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Ctrl+D</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">Klipleri Birleştir:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">M</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">Geri / İleri:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Ctrl+Z / Ctrl+Y</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">Timeline Yakınlaş:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Ctrl + Tekerlek</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">Yatay Kaydır:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Shift + Tekerlek</kbd></div>
+              <div class="flex justify-between"><span class="text-slate-400">Bağlam Menüsü:</span> <span class="text-brand-yellow font-medium">Sağ Tık</span></div>
+            </div>
+          </div>
+
           <!-- Render / Dışa Aktar Butonu -->
           <button 
             (click)="requestExport()"
             [disabled]="rendering()"
-            class="px-5 py-2 rounded-xl bg-gradient-to-r from-brand-blue via-brand-indigo to-brand-purple hover:from-blue-600 hover:to-purple-600 text-white font-bold text-xs shadow-glow-sm hover:shadow-glow-purple transition-all active:scale-95 flex items-center gap-2">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            class="px-4 py-1.5 rounded-xl bg-gradient-to-r from-brand-blue via-brand-indigo to-brand-purple hover:from-blue-600 hover:to-purple-600 text-white font-bold text-xs shadow-glow-sm hover:shadow-glow-purple transition-all active:scale-95 flex items-center gap-2 cursor-pointer">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
             </svg>
             {{ rendering() ? 'Kuyruğa Alınıyor...' : 'Nihai Videoyu Render Et' }}
           </button>
         </div>
-      </div>
+      </header>
 
-      <!-- Orta Alan: Video Player & Timeline (Üst) ve Alt Paneller (Inspector + AI Chat) -->
-      <div class="flex-1 grid grid-cols-1 lg:grid-cols-12 overflow-hidden">
+      <!-- Üst Alan: 3 Panelli Grid (Sol Kütüphane + Orta Video Monitör + Sağ Inspector) -->
+      <div class="h-[56%] min-h-0 flex flex-row overflow-hidden border-b border-slate-800">
         
-        <!-- Sol Bölüm (8 Kolon): Video Önizleme + Timeline -->
-        <div class="lg:col-span-8 flex flex-col border-r border-slate-800/80 bg-dark-950 p-4 gap-4 overflow-y-auto">
-          
-          <!-- Video Player Alanı -->
-          <div class="relative bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 flex items-center justify-center min-h-[320px] max-h-[460px]">
-            <video 
-              #videoPlayer
-              [src]="videoUrl()"
-              (timeupdate)="onTimeUpdate()"
-              (loadedmetadata)="onMetadataLoaded()"
-              class="w-full h-full object-contain max-h-[440px]"
-              controls>
-              <track *ngIf="vttTrackUrl()" kind="subtitles" [src]="vttTrackUrl()" srclang="tr" label="Türkçe" [default]="showSubtitles()">
-            </video>
-
-              <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
-              <div 
-                *ngFor="let ov of activeOverlays()" 
-                (mousedown)="onCanvasDragStart($event, ov.id)"
-                (click)="$event.stopPropagation(); selectOverlay(ov.id)"
-                [style.top]="getOverlayTop(ov)"
-                [style.left]="getOverlayLeft(ov)"
-                [style.zIndex]="getOverlayZIndex(ov)"
-                class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
-                [ngClass]="[
-                   selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : '',
-                   getOverlayAnimationClass(ov)
-                ]"
-                [style.color]="ov.color || '#FFFFFF'"
-                [style.backgroundColor]="ov.backgroundColor || 'transparent'"
-                [style.fontFamily]="ov.font || 'Inter, sans-serif'">
-                
-                <!-- Metin Kaplaması -->
-                <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize.px]="(ov.fontSize || 48) / 2">
-                  {{ ov.content }}
-                </span>
-
-                <!-- Görsel / B-Roll Kaplaması -->
-                <div *ngIf="ov.type === 'image'" class="relative group">
-                  <img 
-                    *ngIf="ov.source" 
-                    [src]="ov.source" 
-                    [alt]="ov.content || 'Görsel'" 
-                    class="rounded-lg shadow-xl border border-brand-cyan/50 pointer-events-none object-cover"
-                    [style.width.px]="(160 * (ov.scale || 1.0))"
-                    [style.maxHeight.px]="(120 * (ov.scale || 1.0))" />
-                  
-                  <!-- Kaynak yoksa placeholder -->
-                  <div *ngIf="!ov.source" class="px-4 py-3 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-2">
-                    <span>🖼️</span>
-                    <span>{{ ov.content || 'B-Roll Görseli' }}</span>
-                  </div>
-
-                  <span class="absolute -top-2 -right-2 text-[9px] bg-brand-cyan text-slate-900 font-extrabold px-1 rounded shadow">
-                    GÖRSEL
-                  </span>
-                </div>
-
-                <!-- Canvas Resize Handle -->
-                <div *ngIf="selectedOverlayId() === ov.id"
-                     (mousedown)="onCanvasResizeStart($event, ov.id)"
-                     class="absolute -bottom-2 -right-2 w-5 h-5 bg-white border-2 border-brand-cyan rounded-full cursor-nwse-resize z-30 shadow-md hover:scale-125 transition-transform flex items-center justify-center">
-                     <span class="text-[8px] text-brand-cyan">⤡</span>
-                </div>
-              </div>
-
-              <!-- Canlı Taslak (Ghost Layer) Önizlemesi (Yönetmen AI Formu İçin) -->
-              <div 
-                *ngIf="ghostPreview() as ghost" 
-                class="absolute pointer-events-none z-30 -translate-x-1/2 -translate-y-1/2 select-none border-2 border-dashed border-brand-cyan bg-black/70 backdrop-blur-xs px-3 py-1.5 rounded-lg shadow-glow-sm transition-all duration-100"
-                [style.left.%]="ghost.posX"
-                [style.top.%]="ghost.posY"
-                [style.color]="ghost.color"
-                [style.fontFamily]="ghost.font">
-                <span class="font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] text-lg">
-                  {{ ghost.text }}
-                </span>
-                <span class="absolute -top-3 -right-3 text-[9px] bg-brand-cyan text-slate-900 font-extrabold px-1.5 py-0.5 rounded shadow">
-                  📍 Taslak Konum
-                </span>
-              </div>
-
-              <!-- Canlı TikTok / Reels Tarzı Karaoke Altyazı Katmanı -->
-              <div 
-                *ngIf="showSubtitles() && currentSubtitleSegment() as seg" 
-                class="absolute bottom-6 left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center pointer-events-none select-none px-4 py-2 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl transition-all duration-150">
-                <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" [style.fontFamily]="subtitleFont()" [style.color]="subtitleColor()">
-                  <ng-container *ngIf="seg.words && seg.words.length > 0; else plainText">
-                    <span 
-                      *ngFor="let w of seg.words"
-                      class="transition-all duration-100 inline-block px-0.5 rounded"
-                      [ngClass]="isWordActive(w) ? 'text-amber-300 font-black scale-110 bg-amber-400/20 shadow-glow-sm' : 'text-slate-100 font-semibold opacity-90'">
-                      {{ w.word }}
-                    </span>
-                  </ng-container>
-                  <ng-template #plainText>
-                    <span class="font-bold text-slate-100 text-sm md:text-base drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
-                      {{ seg.text }}
-                    </span>
-                  </ng-template>
-                </div>
-              </div>
-          </div>
-
-          <!-- Video Zaman Kontrolleri -->
-          <div class="flex items-center justify-between text-xs font-mono text-slate-400 px-2">
-            <div class="flex items-center gap-4">
-              <span>İzlenen: {{ currentTime() | duration }} / {{ totalDuration() | duration }}</span>
-              <span class="text-brand-cyan font-bold">Net Süre: {{ visibleDuration() | duration }}</span>
-              <button 
-                (click)="toggleSubtitles()" 
-                [ngClass]="showSubtitles() ? 'text-amber-300 bg-amber-400/20 border-amber-400/40' : 'border-slate-700'"
-                class="px-2.5 py-1 rounded border hover:border-slate-500 bg-dark-800 transition-colors flex items-center gap-1.5 text-[11px]"
-                title="Altyazıyı Aç/Kapat (Kısayol: C)">
-                <span>💬</span>
-                <span>{{ showSubtitles() ? 'Altyazı: Açık' : 'Altyazı: Kapalı' }}</span>
-              </button>
-            </div>
-            <div class="flex items-center gap-4">
-              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Korunan</span>
-              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-amber-500"></span> Retake</span>
-              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-rose-500"></span> Jump-Cut</span>
-              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-sky-400"></span> Yazı</span>
-              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-purple-400"></span> Görsel</span>
-            </div>
-          </div>
-
-          <!-- Timeline Viewer (Yatay Şerit) -->
-          <div class="glass-panel rounded-2xl p-4 border border-slate-800 space-y-3">
-            <div class="flex items-center justify-between text-xs mb-1">
-              <h3 class="font-bold text-white uppercase tracking-wider text-[11px]">Etkileşimli Kurgu Timeline'ı</h3>
-              <div class="flex items-center gap-2">
-                <button (click)="undo()" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700" title="Geri Al (Ctrl+Z)">⟲ Geri Al</button>
-                <button (click)="redo()" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700" title="İleri Al (Ctrl+Y)">⟳ İleri</button>
-                <button (click)="zoomIn()" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700" title="Yakınlaş (Zoom In)">🔍 +</button>
-                <button (click)="zoomOut()" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700" title="Uzaklaş (Zoom Out)">🔍 -</button>
-                <button (click)="addSplitMarker()" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-rose-400 border border-slate-700" title="Bulunulan Yerden Böl (B)">✂ Böl (B)</button>
-                <button (click)="rippleAi.set(!rippleAi())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-sky-400 border border-slate-700" title="AI Kesimlerini Sıkıştır/Genişlet">
-                  {{ rippleAi() ? '🤖 AI Sıkıştırılmış' : '🤖 AI Geniş' }}
-                </button>
-                <button (click)="rippleRetake.set(!rippleRetake())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-amber-400 border border-slate-700" title="Retake (Hatalı Tekrar) Kısımlarını Sıkıştır/Genişlet">
-                  {{ rippleRetake() ? '🔄 Retake Sıkıştırılmış' : '🔄 Retake Geniş' }}
-                </button>
-                <button 
-                  *ngIf="retakeCount() > 0" 
-                  (click)="deleteRetakeCuts()" 
-                  class="p-1 px-2.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 font-semibold text-[11px] shadow-glow-sm flex items-center gap-1.5 transition-all" 
-                  title="Tüm Hatalı Tekrar (Retake) Kesimlerini İptal Et ve Sahneyi Geri Yükle">
-                  <span>🔄</span>
-                  <span>{{ retakeCount() }} Retake'i Geri Al</span>
-                </button>
-                <button (click)="rippleManual.set(!rippleManual())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-sky-400 border border-slate-700" title="Manuel Kesimleri Sıkıştır/Genişlet">
-                  {{ rippleManual() ? '🖐 Manuel Sıkıştırılmış' : '🖐 Manuel Geniş' }}
-                </button>
-                <div *ngIf="selectedClipIds().length > 0" class="flex items-center gap-1.5 border-l border-slate-700 pl-2 ml-1">
-                  <span class="text-[10px] font-bold text-amber-300">{{ selectedClipIds().length }} Klip Seçili</span>
-                  <button *ngIf="selectedHasKeep()" (click)="deleteSelectedClips()" class="p-1 px-2.5 rounded bg-rose-600/80 text-white font-bold hover:bg-rose-500 border border-rose-500 shadow-glow-sm flex items-center gap-1" title="Seçili Klipleri Sil / Kes (Kısayol: Del)">
-                    <span>✕</span> Sil (Del)
-                  </button>
-                  <button *ngIf="selectedHasCuts()" (click)="restoreSelectedCuts()" class="p-1 px-2.5 rounded bg-sky-600/80 text-white font-bold hover:bg-sky-500 border border-sky-500 shadow-glow-sm flex items-center gap-1" title="Seçili Kesilen Kısımları İptal Et ve Sahneye Geri Al">
-                    <span>↩</span> Geri Al
-                  </button>
-                  <button *ngIf="selectedClipIds().length > 1" (click)="mergeSelectedClips()" class="p-1 px-2.5 rounded bg-emerald-600/80 text-white font-bold hover:bg-emerald-500 border border-emerald-500 shadow-glow-sm flex items-center gap-1" title="Seçili Klipleri Birleştir (Kısayol: M)">
-                    <span>🔗</span> Birleştir (M)
-                  </button>
-                  <button (click)="selectedClipIds.set([])" class="p-1 px-1.5 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700 text-[10px]" title="Seçimleri Temizle (Esc)">
-                    ✕ Temizle
-                  </button>
-                </div>
-                <button (click)="addTextOverlay()" class="p-1 px-2.5 rounded bg-brand-cyan text-slate-900 font-bold hover:bg-cyan-400 border border-cyan-500 shadow-glow-sm flex items-center gap-1 ml-auto" title="Zaman çizgisine yazı katmanı ekle">
-                  <span class="font-black">T</span>
-                  <span>Yazı Ekle</span>
-                </button>
-                <button (click)="addImageOverlay()" class="p-1 px-2.5 rounded bg-purple-500 text-white font-bold hover:bg-purple-400 border border-purple-400 shadow-glow-sm flex items-center gap-1" title="Zaman çizgisine görsel katmanı ekle">
-                  <span>🖼️</span>
-                  <span>Görsel Ekle</span>
-                </button>
-              </div>
-            </div>
-
-            <!-- Interaktif Timeline Track (Çok Kanallı / Katmanlı Mimari) -->
-            <div class="overflow-x-auto pb-3 w-full scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-dark-900">
-              <div 
-                #timelineTrack
-                (click)="seekTimeline($event)"
-                [style.width.%]="100 * timelineZoom()"
-                class="relative bg-dark-950 rounded-xl overflow-hidden cursor-pointer border border-slate-700/60 select-none min-w-full flex flex-col gap-1 p-2">
-                
-                <!-- Kanal 1: Katmanlar (Yazı / Görsel Track) -->
-                <div class="relative h-8 bg-dark-900/90 rounded-lg border border-slate-800/80 overflow-hidden flex items-center">
-                  <!-- Katman Etiketi -->
-                  <div class="absolute left-2 top-0 bottom-0 flex items-center gap-1 text-[9px] font-bold text-sky-400/70 uppercase tracking-wider pointer-events-none z-10">
-                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
-                    </svg>
-                    Katmanlar
-                  </div>
-
-                  <!-- Katman Yoksa Bilgi -->
-                  <div *ngIf="!activeEdl()?.overlays?.length" class="absolute inset-0 flex items-center justify-center text-[10px] text-slate-500 italic pointer-events-none">
-                    Yazı veya görsel eklemek için yukarıdaki 'T Yazı Ekle' veya '🖼️ Görsel Ekle' butonuna basın
-                  </div>
-
-                  <!-- Katman Öğeleri (Pill'ler) -->
-                  <div 
-                    *ngFor="let ov of activeEdl()?.overlays"
-                    (mousedown)="onOverlayDragStart($event, ov.id)"
-                    (click)="$event.stopPropagation(); selectOverlay(ov.id)"
-                    class="absolute top-1 bottom-1 rounded-md px-2 flex items-center justify-between text-[10px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-md overflow-hidden"
-                    [ngClass]="[
-                       ov.type === 'text' ? 'bg-gradient-to-r from-sky-600 to-cyan-500 text-white border border-sky-300/80' : 'bg-gradient-to-r from-purple-600 to-fuchsia-500 text-white border border-purple-300/80',
-                       selectedOverlayId() === ov.id ? 'ring-2 ring-white shadow-[0_0_10px_rgba(255,255,255,0.9)] z-30 brightness-110' : 'hover:brightness-105'
-                    ]"
-                    [ngStyle]="getOverlayStyle(ov)"
-                    [title]="(ov.type === 'text' ? 'Metin: ' : 'Görsel: ') + (ov.content || ov.source || ov.id)">
-                    
-                    <!-- Sol Boyutlandırma Kolu (Resize Left) -->
-                    <div 
-                      (mousedown)="onOverlayResizeStart($event, ov.id, 'left')"
-                      class="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/60 bg-white/30 rounded-l flex items-center justify-center z-30"
-                      title="Başlangıcı Sürükle">
-                      <div class="w-0.5 h-3 bg-black/60 rounded"></div>
-                    </div>
-
-                    <!-- Katman Başlığı ve İkonu -->
-                    <span class="truncate px-2 pointer-events-none font-medium flex items-center gap-1">
-                      <span>{{ ov.type === 'text' ? 'T' : '🖼️' }}</span>
-                      <span class="truncate">{{ ov.content || (ov.type === 'text' ? 'Metin' : 'Görsel') }}</span>
-                    </span>
-
-                    <!-- Sağ Boyutlandırma Kolu (Resize Right) -->
-                    <div 
-                      (mousedown)="onOverlayResizeStart($event, ov.id, 'right')"
-                      class="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/60 bg-white/30 rounded-r flex items-center justify-center z-30"
-                      title="Bitişi Sürükle">
-                      <div class="w-0.5 h-3 bg-black/60 rounded"></div>
-                    </div>
-                  </div>
-                </div>
-
-                <!-- Kanal 2: Video Klipleri Track -->
-                <div class="relative h-12 bg-dark-900 rounded-lg overflow-hidden border border-slate-800/80 flex">
-                  <!-- Video Etiketi -->
-                  <div class="absolute left-2 top-0 bottom-0 flex items-center gap-1 text-[9px] font-bold text-emerald-400/60 uppercase tracking-wider pointer-events-none z-10">
-                    <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                    Video
-                  </div>
-
-                  <!-- Klipler (Flexbox ile sıralanır) -->
-                  <ng-container *ngFor="let clip of clips()">
-                    <div 
-                      *ngIf="isVisible(clip)"
-                      (click)="selectClip(clip.id, $event)"
-                      (dblclick)="toggleClip(clip, $event)"
-                      class="relative h-full transition-colors border-r border-white/20 box-border group"
-                      [ngClass]="{
-                         'bg-amber-500/80 hover:bg-amber-400': isRetakeClip(clip),
-                         'bg-rose-500/80 hover:bg-rose-400': isManualClip(clip),
-                         'bg-rose-900/80 hover:bg-rose-800': clip.isCut && !isRetakeClip(clip) && !isManualClip(clip),
-                         'bg-emerald-600/40 hover:bg-emerald-500/60': !clip.isCut,
-                         'ring-2 ring-inset ring-brand-yellow shadow-[0_0_10px_rgba(250,204,21,0.5)] z-10': selectedClipIds().includes(clip.id)
-                      }"
-                      [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual() || rippleRetake()) ? visibleDuration() : totalDuration() )) * 100"
-                      [title]="getClipTooltip(clip)">
-                      
-                      <!-- Kırmızı kısımları silme (Gizle modu kapalıyken) -->
-                      <div *ngIf="clip.isCut" class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100">
-                        <span class="text-[10px] text-white font-bold">✕ İptal</span>
-                      </div>
-                    </div>
-                  </ng-container>
-                </div>
-
-                <!-- Ortak Zaman İmleci (Playhead) - Her iki kanalı da dikine keser -->
-                <div 
-                  class="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-40 pointer-events-none"
-                  [style.left.%]="getPlayheadPosition()">
-                  <div class="w-3.5 h-3.5 bg-white rotate-45 -translate-x-[6px] -translate-y-[4px] shadow-lg rounded-sm border border-slate-300"></div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Akıllı Öneri Çipleri (AI Suggestions) -->
-            <div *ngIf="activeEdl()?.suggestions?.length" class="pt-2">
-              <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider block mb-2">AI B-Roll ve Vurgu Önerileri</span>
-              <div class="flex items-center gap-2 overflow-x-auto pb-1">
-                <div 
-                  *ngFor="let sug of activeEdl()?.suggestions"
-                  [ngClass]="sug.status === 'accepted' ? 'border-emerald-500/50 bg-emerald-500/10 text-emerald-300' : (sug.status === 'rejected' ? 'border-rose-500/50 bg-rose-500/10 text-rose-400 line-through' : 'border-slate-700 bg-dark-800 text-slate-200')"
-                  class="shrink-0 text-xs px-3 py-1.5 rounded-lg border flex items-center gap-2">
-                  <span class="font-medium">{{ sug.title }}</span>
-                  <div *ngIf="sug.status === 'pending'" class="flex items-center gap-1">
-                    <button (click)="acceptSuggestion(sug)" title="Onayla" class="p-1 hover:text-emerald-400 text-slate-400">✓</button>
-                    <button (click)="rejectSuggestion(sug)" title="Reddet" class="p-1 hover:text-rose-400 text-slate-400">✕</button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Sağ Bölüm (4 Kolon): AI Chat Paneli & Overlay Inspector -->
-        <div class="lg:col-span-4 flex flex-col h-full bg-dark-900 border-l border-slate-800/80">
-          
-          <!-- Sekme Başlığı -->
-          <div class="flex border-b border-slate-800 bg-dark-800/50">
+        <!-- 1. SOL PANEL: Medya, AI Kurgu Sohbeti, Transkript & Katman Listesi -->
+        <aside class="w-[310px] xl:w-[350px] shrink-0 flex flex-col border-r border-slate-800 bg-dark-950 overflow-hidden">
+          <!-- Sekme Butonları -->
+          <div class="flex border-b border-slate-800 bg-dark-900/90 shrink-0">
+            <button 
+              (click)="activeTab.set('media')"
+              [ngClass]="activeTab() === 'media' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
+              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>📁</span>
+              <span>Medya</span>
+            </button>
             <button 
               (click)="activeTab.set('chat')"
-              [ngClass]="activeTab() === 'chat' ? 'text-brand-cyan border-brand-cyan bg-dark-900/60' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-2">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
-              </svg>
-              AI Kurgu Sohbeti
+              [ngClass]="activeTab() === 'chat' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
+              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>🤖</span>
+              <span>AI Kurgu</span>
+            </button>
+            <button 
+              (click)="activeTab.set('transcript')"
+              [ngClass]="activeTab() === 'transcript' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
+              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>📝</span>
+              <span>Metin</span>
             </button>
             <button 
               (click)="activeTab.set('overlays')"
-              [ngClass]="activeTab() === 'overlays' ? 'text-brand-cyan border-brand-cyan bg-dark-900/60' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-2">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16m-7 6h7" />
-              </svg>
-              Katmanlar ({{ activeEdl()?.overlays?.length || 0 }})
-            </button>
-            <button 
-              (click)="activeTab.set('inspector')"
-              [ngClass]="activeTab() === 'inspector' ? 'text-brand-yellow border-brand-yellow bg-dark-900/60' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-2">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-              Özellikler
-            </button>
-            <button 
-              (click)="activeTab.set('media')"
-              [ngClass]="activeTab() === 'media' ? 'text-brand-cyan border-brand-cyan bg-dark-900/60' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center justify-center gap-2">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-              </svg>
-              Medya
+              [ngClass]="activeTab() === 'overlays' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
+              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              <span>🥞</span>
+              <span>Katman ({{ activeEdl()?.overlays?.length || 0 }})</span>
             </button>
           </div>
 
-          <!-- Sekme 1: AI Chat Paneli -->
-          <div *ngIf="activeTab() === 'chat'" class="flex-1 flex flex-col h-full overflow-hidden">
-            <!-- Mesaj Listesi -->
-            <div #chatMessagesContainer class="flex-1 p-4 overflow-y-auto space-y-4">
-              <div *ngIf="chatMessages().length === 0" class="text-center py-10 text-slate-500 text-xs">
-                <p class="mb-2">💡 AI ile videonuza doğal dilde müdahale edin:</p>
-                <div class="space-y-1.5 text-slate-400">
-                  <p class="p-2 rounded-lg bg-dark-800 cursor-pointer hover:bg-slate-700" (click)="setPrompt('Girişteki sessizlikleri kes')">"Girişteki sessizlikleri kes"</p>
-                  <p class="p-2 rounded-lg bg-dark-800 cursor-pointer hover:bg-slate-700" (click)="setPrompt('10. saniyeye Kanala Abone Ol yazısı koy')">"10. saniyeye Kanala Abone Ol yazısı koy"</p>
-                  <p class="p-2 rounded-lg bg-dark-800 cursor-pointer hover:bg-slate-700" (click)="setPrompt('20. saniyeye kedi görseli ekle')">"20. saniyeye kedi görseli ekle"</p>
-                </div>
+          <!-- Sekme 1: Medya Kütüphanesi & Yükleme -->
+          <div *ngIf="activeTab() === 'media'" class="flex-1 p-3.5 overflow-y-auto space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Proje Varlıkları</span>
+              <span class="text-[10px] font-mono text-brand-cyan">{{ assets().length }} Dosya</span>
+            </div>
+
+            <input #assetFileInput type="file" (change)="onAssetFileSelected($event)" accept="image/*,video/*,audio/*" class="hidden" />
+
+            <div 
+              (click)="triggerAssetUpload()"
+              (dragover)="onAssetDragOver($event)"
+              (dragleave)="onAssetDragLeave($event)"
+              (drop)="onAssetDrop($event)"
+              [ngClass]="isDragOver() ? 'border-brand-cyan bg-brand-cyan/10 scale-[1.02]' : 'border-slate-700 hover:border-slate-500 bg-dark-900/60'"
+              class="p-4 rounded-xl border-2 border-dashed text-center space-y-1.5 cursor-pointer transition-all duration-150">
+              <div *ngIf="isUploadingAsset()" class="py-2 flex flex-col items-center gap-2">
+                <div class="w-5 h-5 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin"></div>
+                <span class="text-xs text-brand-cyan font-bold">Yükleniyor...</span>
               </div>
-
-              <div 
-                *ngFor="let msg of chatMessages()" 
-                [ngClass]="msg.rol === 'user' ? 'flex justify-end' : 'flex justify-start'">
-                <div 
-                  [ngClass]="msg.rol === 'user' ? 'bg-gradient-to-r from-brand-blue to-brand-indigo text-white rounded-2xl rounded-tr-none' : 'bg-dark-800 border border-slate-700/60 text-slate-200 rounded-2xl rounded-tl-none'"
-                  class="max-w-[85%] p-3.5 text-xs shadow-md space-y-1.5 animate-fade-in">
-                  <p class="leading-relaxed">{{ msg.mesaj }}</p>
-                  
-                  <div *ngIf="msg.patchDurumu === 'pending'" class="mt-2 flex gap-2">
-                    <button (click)="previewPatch(msg)" [ngClass]="previewMessageId() === msg.id ? 'bg-sky-500/40 text-sky-300' : 'bg-sky-500/20 text-sky-400'" class="flex-1 py-1.5 hover:bg-sky-500/40 border border-sky-500/50 rounded font-bold transition-colors shadow-glow-sm">
-                      {{ previewMessageId() === msg.id ? '👀 İzleniyor' : '🔍 Önizle' }}
-                    </button>
-                    <button (click)="applyPatch(msg)" class="flex-1 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-400 border border-emerald-500/50 rounded font-bold transition-colors">Onayla</button>
-                    <button (click)="cancelPatch(msg)" class="flex-1 py-1.5 bg-rose-500/20 hover:bg-rose-500/40 text-rose-400 border border-rose-500/50 rounded font-bold transition-colors">İptal Et</button>
-                  </div>
-                  
-                  <!-- Dinamik Form (Clarification - Zengin Renk ve 16:9 Konum Seçici) -->
-                  <div *ngIf="msg.patchDurumu === 'clarification' && msg.formFields" class="mt-3 p-3.5 bg-dark-900 border border-brand-cyan/40 rounded-xl space-y-3.5 shadow-lg">
-                     <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                       <span class="text-[11px] text-brand-cyan font-bold uppercase tracking-wider flex items-center gap-1.5">
-                         <span>⚙️</span> Katman Özelliklerini Belirleyin
-                       </span>
-                       <span class="text-[9px] text-slate-500 font-mono">Yönetmen AI</span>
-                     </div>
-                     
-                     <div *ngFor="let field of msg.formFields" class="space-y-1.5">
-                        <label class="text-[10px] text-slate-300 font-medium flex items-center justify-between">
-                          <span>{{ field.label }}</span>
-                          <span *ngIf="field.required" class="text-rose-400 text-[9px]">*Zorunlu</span>
-                        </label>
-                        
-                        <!-- Metin Girişi (Text) -->
-                        <input *ngIf="field.type === 'text'" type="text"
-                               [ngModel]="msg.formData?.[field.id] || field.defaultValue"
-                               (ngModelChange)="updateFormData(msg, field.id, $event)"
-                               placeholder="Metin giriniz..."
-                               class="w-full bg-dark-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:border-brand-cyan outline-none transition-colors" />
-                               
-                        <!-- Sayısal Giriş (Number) -->
-                        <input *ngIf="field.type === 'number'" type="number"
-                               [ngModel]="msg.formData?.[field.id] || field.defaultValue"
-                               (ngModelChange)="updateFormData(msg, field.id, $event)"
-                               class="w-full bg-dark-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:border-brand-cyan outline-none transition-colors" />
-                               
-                        <!-- Özel Zengin Renk Aracı (Color Palette + Hex + Picker) -->
-                        <div *ngIf="field.type === 'color'" class="space-y-2">
-                          <!-- Hazır Renk Palet Butonları -->
-                          <div class="flex flex-wrap gap-1.5 items-center">
-                            <button 
-                              *ngFor="let c of colorPalette"
-                              type="button"
-                              (click)="updateFormData(msg, field.id, c)"
-                              [style.backgroundColor]="c"
-                              [ngClass]="(msg.formData?.[field.id] || field.defaultValue) === c ? 'ring-2 ring-brand-cyan ring-offset-2 ring-offset-dark-900 scale-110 shadow-glow-sm' : 'opacity-85 hover:opacity-100 hover:scale-105'"
-                              class="w-6 h-6 rounded-full border border-white/20 transition-all shadow-sm"
-                              [title]="c">
-                            </button>
-                          </div>
-                          <!-- Özel Renk ve Hex Kutusu -->
-                          <div class="flex items-center gap-2 bg-dark-800 p-1.5 rounded-lg border border-slate-700/80">
-                            <input 
-                              type="color" 
-                              [ngModel]="msg.formData?.[field.id] || field.defaultValue || '#FACC15'"
-                              (ngModelChange)="updateFormData(msg, field.id, $event)"
-                              class="w-7 h-7 rounded cursor-pointer border-0 bg-transparent p-0" />
-                            <input 
-                              type="text" 
-                              [ngModel]="msg.formData?.[field.id] || field.defaultValue || '#FACC15'"
-                              (ngModelChange)="updateFormData(msg, field.id, $event)"
-                              class="bg-transparent text-xs font-mono text-slate-200 outline-none w-20 uppercase font-semibold" 
-                              maxlength="7" />
-                            <span class="text-[10px] text-slate-400 font-mono ml-auto">Özel Hex</span>
-                          </div>
-                        </div>
-
-                        <!-- 16:9 İnteraktif Konum Seçici (Mini-Sahne + Snap Çapalar) -->
-                        <div *ngIf="field.type === 'position'" class="space-y-1.5">
-                          <div class="flex justify-between items-center text-[10px] text-slate-400 font-mono">
-                            <span>16:9 Video Sahne Alanı</span>
-                            <span class="text-brand-cyan font-bold bg-dark-800 px-1.5 py-0.5 rounded border border-slate-700">
-                              X: %{{ getMarkerPosition(msg, field).x }} | Y: %{{ getMarkerPosition(msg, field).y }}
-                            </span>
-                          </div>
-                          <div 
-                            (click)="onMiniStageClick($event, msg, field.id)"
-                            class="w-full aspect-video bg-dark-950 border border-slate-700/90 rounded-lg relative overflow-hidden cursor-crosshair select-none group shadow-inner">
-                            <!-- Kılavuz Çizgileri (Üçte Bir Kuralı) -->
-                            <div class="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-20">
-                              <div class="border-r border-b border-slate-400"></div>
-                              <div class="border-r border-b border-slate-400"></div>
-                              <div class="border-b border-slate-400"></div>
-                              <div class="border-r border-b border-slate-400"></div>
-                              <div class="border-r border-b border-slate-400"></div>
-                              <div class="border-b border-slate-400"></div>
-                              <div class="border-r border-b border-slate-400"></div>
-                              <div class="border-r border-b border-slate-400"></div>
-                              <div></div>
-                            </div>
-                            
-                            <!-- 9 Hızlı Çapa Butonu -->
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'top-left')" title="Sol Üst" class="absolute top-2 left-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'top-center')" title="Üst Orta" class="absolute top-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'top-right')" title="Sağ Üst" class="absolute top-2 right-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'center-left')" title="Sol Orta" class="absolute top-1/2 -translate-y-1/2 left-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'center')" title="Tam Merkez" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'center-right')" title="Sağ Orta" class="absolute top-1/2 -translate-y-1/2 right-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'bottom-left')" title="Sol Alt" class="absolute bottom-2 left-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'bottom-center')" title="Alt Orta (Altyazı/Başlık)" class="absolute bottom-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'bottom-right')" title="Sağ Alt" class="absolute bottom-2 right-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
-
-                            <!-- Konum Göstergesi (Pin Marker) -->
-                            <div 
-                              class="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-all duration-75 flex flex-col items-center"
-                              [style.left.%]="getMarkerPosition(msg, field).x"
-                              [style.top.%]="getMarkerPosition(msg, field).y">
-                              <div class="w-3.5 h-3.5 rounded-full bg-brand-cyan border-2 border-white shadow-glow-sm animate-pulse"></div>
-                              <span class="text-[9px] font-bold text-brand-cyan -mt-0.5 select-none drop-shadow">📍</span>
-                            </div>
-                          </div>
-                          <p class="text-[9px] text-slate-400 italic">Kutuya tıklayarak konumu belirleyin. Video oynatıcı üzerinde canlı taslak önizlenir.</p>
-                        </div>
-                        
-                        <!-- Font / Animasyon Seçim Dropdown'ları -->
-                        <select *ngIf="field.type === 'select'"
-                                [ngModel]="msg.formData?.[field.id] || field.defaultValue"
-                                (ngModelChange)="updateFormData(msg, field.id, $event)"
-                                class="w-full bg-dark-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:border-brand-cyan outline-none transition-colors">
-                            <option *ngFor="let opt of field.options" [value]="getOptValue(opt)">
-                              {{ getOptLabel(opt) }}
-                            </option>
-                        </select>
-                     </div>
-                     
-                     <button (click)="submitForm(msg)" class="w-full py-2 bg-gradient-to-r from-brand-cyan to-cyan-500 hover:from-cyan-400 hover:to-cyan-600 text-slate-950 font-bold rounded-lg transition-all shadow-md active:scale-98 flex items-center justify-center gap-1.5 mt-2">
-                        <span>✨</span>
-                        <span>Seçimleri Onayla ve Ekle</span>
-                     </button>
-                  </div>
-                  <div *ngIf="msg.patchDurumu === 'applied'" class="mt-1 text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
-                    <span>✓ Uygulandı</span>
-                  </div>
-                  <div *ngIf="msg.patchDurumu === 'rejected'" class="mt-1 text-[10px] text-rose-400 font-semibold flex items-center gap-1">
-                    <span>✕ Reddedildi</span>
-                  </div>
-
-                  <span class="text-[10px] opacity-60 block text-right mt-1">
-                    {{ msg.olusturulmaZamani | date:'HH:mm' }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- AI Typing -->
-              <div *ngIf="chatLoading()" class="flex items-center gap-2 text-slate-400 text-xs p-3">
-                <span class="w-2 h-2 rounded-full bg-brand-cyan animate-ping"></span>
-                <span>AI komutunuzu çözüyor ve EDL kararlarını güncelliyor...</span>
+              <div *ngIf="!isUploadingAsset()">
+                <span class="text-2xl block mb-1">📤</span>
+                <p class="text-xs text-slate-200 font-medium">
+                  <span class="text-brand-cyan font-bold">Dosya Seçin</span> veya buraya sürükleyin
+                </p>
+                <p class="text-[9px] text-slate-500">PNG, JPG, MP4, MP3 (Maks 50MB)</p>
               </div>
             </div>
 
-            <!-- Mesaj Gönderme Kutusu -->
-            <div class="p-3 bg-dark-800 border-t border-slate-800">
-              <form (ngSubmit)="sendChatMessage()" class="flex items-center gap-2">
+            <!-- Yüklenen Dosyalar -->
+            <div *ngIf="assets().length > 0" class="space-y-1.5 pt-1">
+              <div class="grid grid-cols-2 gap-2">
+                <div 
+                  *ngFor="let asset of assets()"
+                  class="aspect-video bg-dark-900 border border-slate-700/80 rounded-lg overflow-hidden relative group hover:border-brand-cyan transition-all">
+                  <img *ngIf="asset.mimeTuru.startsWith('image/')" [src]="asset.url" [alt]="asset.dosyaAdi" class="w-full h-full object-cover" />
+                  <div *ngIf="!asset.mimeTuru.startsWith('image/')" class="w-full h-full flex flex-col items-center justify-center bg-dark-800 p-1 text-center">
+                    <span class="text-lg">{{ asset.mimeTuru.startsWith('audio/') ? '🎵' : '🎬' }}</span>
+                    <span class="text-[8px] text-slate-300 truncate w-full mt-1">{{ asset.dosyaAdi }}</span>
+                  </div>
+
+                  <!-- Hover Kontrolleri -->
+                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
+                    <button 
+                      *ngIf="selectedOverlay()?.type === 'image'"
+                      (click)="$event.stopPropagation(); assignAssetToSelectedOverlay(asset)"
+                      class="px-2 py-0.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded w-full">
+                      🎯 Seçiliye Ata
+                    </button>
+                    <button 
+                      (click)="$event.stopPropagation(); addAssetOverlay(asset)"
+                      class="px-2 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[9px] rounded w-full">
+                      + Katman Ekle
+                    </button>
+                    <button 
+                      (click)="$event.stopPropagation(); deleteAsset(asset.id)"
+                      class="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-[8px] rounded w-full">
+                      Sil
+                    </button>
+                  </div>
+                  <div class="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-xs px-1 py-0.5 truncate text-[8px] text-slate-300">
+                    {{ asset.dosyaAdi }}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Örnek Stok Görseller -->
+            <div class="pt-2 border-t border-slate-800/80">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Pexels Stok (Örnek)</span>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group hover:border-brand-cyan">
+                  <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
+                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
+                    <button (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım')" class="px-2 py-0.5 bg-brand-cyan text-slate-950 text-[9px] rounded font-bold w-full">+ Katman</button>
+                  </div>
+                </div>
+                <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group hover:border-brand-cyan">
+                  <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
+                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
+                    <button (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Ekip')" class="px-2 py-0.5 bg-brand-cyan text-slate-950 text-[9px] rounded font-bold w-full">+ Katman</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sekme 2: AI Kurgu Sohbeti -->
+          <div *ngIf="activeTab() === 'chat'" class="flex-1 flex flex-col h-full overflow-hidden">
+            <div #chatMessagesContainer class="flex-1 p-3 overflow-y-auto space-y-3">
+              <div *ngIf="chatMessages().length === 0" class="text-center py-6 text-slate-500 text-xs">
+                <p class="mb-2 font-medium">💡 AI ile videonuzu düzenleyin:</p>
+                <div class="space-y-1.5 text-slate-300 text-[11px]">
+                  <p class="p-2 rounded-lg bg-dark-900 border border-slate-800 cursor-pointer hover:border-brand-cyan/60 transition-colors" (click)="setPrompt('Girişteki sessizlikleri kes')">"Girişteki sessizlikleri kes"</p>
+                  <p class="p-2 rounded-lg bg-dark-900 border border-slate-800 cursor-pointer hover:border-brand-cyan/60 transition-colors" (click)="setPrompt('10. saniyeye Kanala Abone Ol yazısı koy')">"10. saniyeye Kanala Abone Ol yazısı koy"</p>
+                  <p class="p-2 rounded-lg bg-dark-900 border border-slate-800 cursor-pointer hover:border-brand-cyan/60 transition-colors" (click)="setPrompt('20. saniyeye kedi görseli ekle')">"20. saniyeye kedi görseli ekle"</p>
+                </div>
+              </div>
+
+              <div *ngFor="let msg of chatMessages()" [ngClass]="msg.rol === 'user' ? 'flex justify-end' : 'flex justify-start'">
+                <div 
+                  [ngClass]="msg.rol === 'user' ? 'bg-gradient-to-r from-brand-blue to-brand-indigo text-white rounded-2xl rounded-tr-none' : 'bg-dark-900 border border-slate-700/60 text-slate-200 rounded-2xl rounded-tl-none'"
+                  class="max-w-[90%] p-3 text-xs shadow-md space-y-1.5">
+                  <p class="leading-relaxed">{{ msg.mesaj }}</p>
+                  
+                  <div *ngIf="msg.patchDurumu === 'pending'" class="mt-2 flex gap-1.5">
+                    <button (click)="previewPatch(msg)" [ngClass]="previewMessageId() === msg.id ? 'bg-sky-500/40 text-sky-300' : 'bg-sky-500/20 text-sky-400'" class="flex-1 py-1 text-[10px] hover:bg-sky-500/40 border border-sky-500/50 rounded font-bold">
+                      {{ previewMessageId() === msg.id ? '👀 İzleniyor' : '🔍 Önizle' }}
+                    </button>
+                    <button (click)="applyPatch(msg)" class="flex-1 py-1 text-[10px] bg-emerald-500/20 hover:bg-emerald-500/40 text-emerald-400 border border-emerald-500/50 rounded font-bold">Onayla</button>
+                    <button (click)="cancelPatch(msg)" class="flex-1 py-1 text-[10px] bg-rose-500/20 hover:bg-rose-500/40 text-rose-400 border border-rose-500/50 rounded font-bold">İptal</button>
+                  </div>
+
+                  <!-- Dinamik Clarification Formu -->
+                  <div *ngIf="msg.patchDurumu === 'clarification' && msg.formFields" class="mt-2 p-2.5 bg-dark-950 border border-brand-cyan/40 rounded-xl space-y-2.5 shadow-lg">
+                     <span class="text-[10px] text-brand-cyan font-bold uppercase tracking-wider block border-b border-slate-800 pb-1">
+                       ⚙️ Katman Özelliklerini Belirleyin
+                     </span>
+                     <div *ngFor="let field of msg.formFields" class="space-y-1">
+                        <label class="text-[10px] text-slate-300 font-medium flex justify-between">
+                          <span>{{ field.label }}</span>
+                          <span *ngIf="field.required" class="text-rose-400 text-[9px]">*Zorunlu</span>
+                        </label>
+                        <input *ngIf="field.type === 'text'" type="text" [ngModel]="msg.formData?.[field.id] || field.defaultValue" (ngModelChange)="updateFormData(msg, field.id, $event)" placeholder="Metin giriniz..." class="w-full bg-dark-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none" />
+                        <input *ngIf="field.type === 'number'" type="number" [ngModel]="msg.formData?.[field.id] || field.defaultValue" (ngModelChange)="updateFormData(msg, field.id, $event)" class="w-full bg-dark-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none" />
+                        
+                        <!-- Renk Seçici -->
+                        <div *ngIf="field.type === 'color'" class="space-y-1.5">
+                          <div class="flex flex-wrap gap-1 items-center">
+                            <button *ngFor="let c of colorPalette" type="button" (click)="updateFormData(msg, field.id, c)" [style.backgroundColor]="c" [ngClass]="(msg.formData?.[field.id] || field.defaultValue) === c ? 'ring-2 ring-brand-cyan scale-110' : 'opacity-80 hover:opacity-100'" class="w-5 h-5 rounded-full border border-white/20 transition-all"></button>
+                          </div>
+                          <div class="flex items-center gap-2 bg-dark-900 p-1 rounded border border-slate-700">
+                            <input type="color" [ngModel]="msg.formData?.[field.id] || field.defaultValue || '#FACC15'" (ngModelChange)="updateFormData(msg, field.id, $event)" class="w-6 h-6 rounded cursor-pointer border-0 bg-transparent p-0" />
+                            <input type="text" [ngModel]="msg.formData?.[field.id] || field.defaultValue || '#FACC15'" (ngModelChange)="updateFormData(msg, field.id, $event)" class="bg-transparent text-[11px] font-mono text-slate-200 outline-none w-16 uppercase font-semibold" maxlength="7" />
+                          </div>
+                        </div>
+
+                        <!-- 16:9 Mini Stage Konum Seçici -->
+                        <div *ngIf="field.type === 'position'" class="space-y-1">
+                          <div (click)="onMiniStageClick($event, msg, field.id)" class="w-full aspect-video bg-black border border-slate-700 rounded relative overflow-hidden cursor-crosshair select-none">
+                            <div class="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-20">
+                              <div class="border-r border-b border-slate-400"></div><div class="border-r border-b border-slate-400"></div><div class="border-b border-slate-400"></div>
+                              <div class="border-r border-b border-slate-400"></div><div class="border-r border-b border-slate-400"></div><div class="border-b border-slate-400"></div>
+                            </div>
+                            <div class="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none flex flex-col items-center" [style.left.%]="getMarkerPosition(msg, field).x" [style.top.%]="getMarkerPosition(msg, field).y">
+                              <div class="w-3 h-3 rounded-full bg-brand-cyan border-2 border-white animate-pulse"></div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <select *ngIf="field.type === 'select'" [ngModel]="msg.formData?.[field.id] || field.defaultValue" (ngModelChange)="updateFormData(msg, field.id, $event)" class="w-full bg-dark-900 border border-slate-700 rounded p-1.5 text-xs text-white outline-none">
+                          <option *ngFor="let opt of field.options" [value]="getOptValue(opt)">{{ getOptLabel(opt) }}</option>
+                        </select>
+                     </div>
+                     <button (click)="submitForm(msg)" class="w-full py-1.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold rounded text-xs transition-all flex items-center justify-center gap-1">
+                       <span>✨</span>
+                       <span>Onayla ve Ekle</span>
+                     </button>
+                  </div>
+
+                  <span class="text-[9px] opacity-60 block text-right">{{ msg.olusturulmaZamani | date:'HH:mm' }}</span>
+                </div>
+              </div>
+
+              <div *ngIf="chatLoading()" class="flex items-center gap-2 text-slate-400 text-xs p-2">
+                <span class="w-2 h-2 rounded-full bg-brand-cyan animate-ping"></span>
+                <span>AI kararları işliyor...</span>
+              </div>
+            </div>
+
+            <!-- Chat Gönderme Kutusu -->
+            <div class="p-2.5 bg-dark-900 border-t border-slate-800">
+              <form (ngSubmit)="sendChatMessage()" class="flex items-center gap-1.5">
                 <input 
                   type="text" 
                   [(ngModel)]="userPrompt" 
                   name="prompt"
                   placeholder="Komut yazın (Enter)..."
                   [disabled]="chatLoading()"
-                  class="flex-1 px-4 py-2.5 rounded-xl bg-dark-900 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-brand-blue text-xs transition-all" />
+                  class="flex-1 px-3 py-2 rounded-lg bg-dark-950 border border-slate-700 text-white placeholder-slate-500 focus:outline-none focus:border-brand-cyan text-xs transition-all" />
                 <button 
                   type="submit"
                   [disabled]="!userPrompt.trim() || chatLoading()"
-                  class="px-4 py-2.5 rounded-xl bg-brand-blue hover:bg-blue-600 text-white text-xs font-bold disabled:opacity-40 transition-all shadow-glow-sm">
+                  class="px-3.5 py-2 rounded-lg bg-brand-blue hover:bg-blue-600 text-white text-xs font-bold disabled:opacity-40 transition-all shadow-glow-sm">
                   Gönder
                 </button>
               </form>
             </div>
           </div>
 
-          <!-- Sekme 2: Overlay Inspector (Katmanlar) -->
-          <div *ngIf="activeTab() === 'overlays'" class="flex-1 p-4 overflow-y-auto space-y-3">
-            <div *ngIf="!activeEdl()?.overlays?.length" class="text-center py-12 text-slate-500 text-xs">
-              Henüz eklenmiş bir yazı veya görsel katmanı bulunmuyor.
+          <!-- Sekme 3: Transkript ve Tıklanabilir Metin Akışı -->
+          <div *ngIf="activeTab() === 'transcript'" class="flex-1 p-3 overflow-y-auto space-y-2.5">
+            <!-- Arama Kutusu -->
+            <div class="sticky top-0 bg-dark-950 pb-1 z-10">
+              <input 
+                type="text" 
+                [ngModel]="transcriptSearchQuery()" 
+                (ngModelChange)="transcriptSearchQuery.set($event)"
+                placeholder="Transkriptte kelime ara..."
+                class="w-full bg-dark-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:border-brand-cyan outline-none" />
+            </div>
+
+            <div *ngIf="!filteredTranscriptSegments()?.length" class="text-center py-10 text-slate-500 text-xs">
+              Transkript verisi bulunamadı veya eşleşen sonuç yok.
+            </div>
+
+            <div 
+              *ngFor="let seg of filteredTranscriptSegments()"
+              (click)="seekToTranscript(seg.start)"
+              class="p-2 rounded-lg border border-slate-800 bg-dark-900/60 hover:bg-dark-800 hover:border-brand-cyan/50 cursor-pointer transition-all space-y-1 group">
+              <div class="flex items-center justify-between text-[10px] font-mono text-slate-400">
+                <span class="text-brand-cyan font-bold group-hover:underline">⏱ {{ seg.start | duration }}</span>
+                <span class="opacity-60">{{ (seg.end - seg.start).toFixed(1) }}s</span>
+              </div>
+              <p class="text-xs text-slate-200 leading-relaxed">{{ seg.text }}</p>
+            </div>
+          </div>
+
+          <!-- Sekme 4: Katmanlar Listesi (Overlays) -->
+          <div *ngIf="activeTab() === 'overlays'" class="flex-1 p-3 overflow-y-auto space-y-2">
+            <div *ngIf="!activeEdl()?.overlays?.length" class="text-center py-10 text-slate-500 text-xs">
+              Henüz eklenmiş katman bulunmuyor.
             </div>
 
             <div 
               *ngFor="let ov of activeEdl()?.overlays"
               (click)="selectOverlay(ov.id)"
-              class="p-3.5 rounded-xl border flex items-start justify-between gap-3 cursor-pointer transition-colors"
-              [ngClass]="selectedOverlayId() === ov.id ? 'bg-dark-700 border-brand-cyan shadow-[0_0_10px_rgba(6,182,212,0.3)]' : 'bg-dark-800 border-slate-700 hover:bg-dark-750'">
-              <div class="flex-1">
-                <div class="flex items-center gap-2 mb-1">
-                  <span 
-                    [ngClass]="ov.type === 'text' ? 'bg-sky-500/20 text-sky-400' : 'bg-purple-500/20 text-purple-400'"
-                    class="px-2 py-0.5 rounded text-[10px] font-bold uppercase">
+              class="p-2.5 rounded-lg border flex items-start justify-between gap-2 cursor-pointer transition-all"
+              [ngClass]="selectedOverlayId() === ov.id ? 'bg-dark-800 border-brand-cyan shadow-glow-sm' : 'bg-dark-900 border-slate-800 hover:bg-dark-850'">
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1.5 mb-1">
+                  <span [ngClass]="ov.type === 'text' ? 'bg-sky-500/20 text-sky-400' : 'bg-purple-500/20 text-purple-400'" class="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase">
                     {{ ov.type }}
                   </span>
-                  <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-800 text-brand-cyan border border-slate-700">
-                    Katman #{{ ov.trackId || 1 }}
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-800 text-brand-cyan">
+                    T{{ ov.trackId || 1 }}
                   </span>
-                  <span class="text-xs font-mono text-slate-400">{{ ov.timestamp | number:'1.1-1' }}s - {{ (ov.timestamp + ov.duration) | number:'1.1-1' }}s</span>
+                  <span class="text-[10px] font-mono text-slate-400">{{ ov.timestamp | number:'1.1-1' }}s</span>
                 </div>
-                <p class="text-xs font-medium text-white line-clamp-2">
-                  {{ ov.content || ov.source || ov.id }}
-                </p>
-                <div class="text-[10px] text-slate-400 mt-1">
-                  <span>Animasyon: {{ ov.animation || 'fade' }}</span> • 
-                  <span>Konum: {{ ov.position?.join(', ') || 'merkez' }}</span>
+                <p class="text-xs font-medium text-white truncate">{{ ov.content || ov.source || ov.id }}</p>
+              </div>
+
+              <div class="flex items-center gap-1 shrink-0">
+                <button (click)="$event.stopPropagation(); bringOverlayForward(ov.id)" title="Öne Getir" class="text-slate-400 hover:text-white p-1 rounded text-xs">🔼</button>
+                <button (click)="$event.stopPropagation(); sendOverlayBackward(ov.id)" title="Arkaya Gönder" class="text-slate-400 hover:text-white p-1 rounded text-xs">🔽</button>
+                <button (click)="$event.stopPropagation(); removeOverlay(ov.id)" title="Sil" class="text-slate-500 hover:text-rose-400 p-1 rounded text-xs">✕</button>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- 2. ORTA PANEL: Video Önizleme Monitörü + CapCut Oynatma Barı -->
+        <section class="flex-1 flex flex-col bg-black/95 relative items-center justify-between p-3 min-w-0 overflow-hidden">
+          <!-- Monitör Sahnesi -->
+          <div class="relative w-full flex-1 max-w-[860px] bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800/80 flex items-center justify-center min-h-0">
+            <video 
+              #videoPlayer
+              [src]="videoUrl()"
+              (timeupdate)="onTimeUpdate()"
+              (loadedmetadata)="onMetadataLoaded()"
+              (play)="isPlaying.set(true)"
+              (pause)="isPlaying.set(false)"
+              class="w-full h-full object-contain max-h-[460px]">
+              <track *ngIf="vttTrackUrl()" kind="subtitles" [src]="vttTrackUrl()" srclang="tr" label="Türkçe" [default]="showSubtitles()">
+            </video>
+
+            <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
+            <div 
+              *ngFor="let ov of activeOverlays()" 
+              (mousedown)="onCanvasDragStart($event, ov.id)"
+              (click)="$event.stopPropagation(); selectOverlay(ov.id)"
+              (contextmenu)="openOverlayContextMenu($event, ov)"
+              [style.top]="getOverlayTop(ov)"
+              [style.left]="getOverlayLeft(ov)"
+              [style.zIndex]="getOverlayZIndex(ov)"
+              class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
+              [ngClass]="[
+                 selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : '',
+                 getOverlayAnimationClass(ov)
+              ]"
+              [style.color]="ov.color || '#FFFFFF'"
+              [style.backgroundColor]="ov.backgroundColor || 'transparent'"
+              [style.fontFamily]="ov.font || 'Inter, sans-serif'">
+              
+              <!-- Metin Kaplaması -->
+              <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize.px]="(ov.fontSize || 48) / 2">
+                {{ ov.content }}
+              </span>
+
+              <!-- Görsel / B-Roll Kaplaması -->
+              <div *ngIf="ov.type === 'image'" class="relative group">
+                <img 
+                  *ngIf="ov.source" 
+                  [src]="ov.source" 
+                  [alt]="ov.content || 'Görsel'" 
+                  class="rounded-lg shadow-xl border border-brand-cyan/50 pointer-events-none object-cover"
+                  [style.width.px]="(160 * (ov.scale || 1.0))"
+                  [style.maxHeight.px]="(120 * (ov.scale || 1.0))" />
+                
+                <div *ngIf="!ov.source" class="px-3 py-2 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-1.5">
+                  <span>🖼️</span>
+                  <span>{{ ov.content || 'B-Roll Görseli' }}</span>
                 </div>
               </div>
 
-              <div class="flex flex-col items-end gap-1">
-                <div class="flex items-center gap-0.5 bg-dark-900 rounded p-0.5 border border-slate-700/60">
-                  <button 
-                    (click)="$event.stopPropagation(); bringOverlayForward(ov.id)" 
-                    title="Öne Getir (Z-Index +1)"
-                    class="text-slate-400 hover:text-brand-cyan hover:bg-slate-700 p-1 rounded text-xs transition-colors cursor-pointer">
-                    🔼
-                  </button>
-                  <button 
-                    (click)="$event.stopPropagation(); sendOverlayBackward(ov.id)" 
-                    title="Arkaya Gönder (Z-Index -1)"
-                    class="text-slate-400 hover:text-brand-cyan hover:bg-slate-700 p-1 rounded text-xs transition-colors cursor-pointer">
-                    🔽
-                  </button>
+              <!-- Canvas Resize Handle -->
+              <div *ngIf="selectedOverlayId() === ov.id"
+                   (mousedown)="onCanvasResizeStart($event, ov.id)"
+                   class="absolute -bottom-2 -right-2 w-5 h-5 bg-white border-2 border-brand-cyan rounded-full cursor-nwse-resize z-30 shadow-md hover:scale-125 transition-transform flex items-center justify-center">
+                   <span class="text-[8px] text-brand-cyan font-bold">⤡</span>
+              </div>
+            </div>
+
+            <!-- Canlı Taslak (Ghost Layer) -->
+            <div 
+              *ngIf="ghostPreview() as ghost" 
+              class="absolute pointer-events-none z-30 -translate-x-1/2 -translate-y-1/2 select-none border-2 border-dashed border-brand-cyan bg-black/70 backdrop-blur-xs px-3 py-1.5 rounded-lg shadow-glow-sm"
+              [style.left.%]="ghost.posX"
+              [style.top.%]="ghost.posY"
+              [style.color]="ghost.color"
+              [style.fontFamily]="ghost.font">
+              <span class="font-bold whitespace-nowrap block drop-shadow text-base">{{ ghost.text }}</span>
+              <span class="absolute -top-3 -right-3 text-[8px] bg-brand-cyan text-slate-900 font-extrabold px-1 rounded">📍 Taslak</span>
+            </div>
+
+            <!-- TikTok / Reels Karaoke Altyazı -->
+            <div 
+              *ngIf="showSubtitles() && currentSubtitleSegment() as seg" 
+              class="absolute bottom-5 left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center pointer-events-none select-none px-4 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl">
+              <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" [style.fontFamily]="subtitleFont()" [style.color]="subtitleColor()">
+                <ng-container *ngIf="seg.words && seg.words.length > 0; else plainText">
+                  <span 
+                    *ngFor="let w of seg.words"
+                    class="transition-all duration-100 inline-block px-0.5 rounded text-sm md:text-base"
+                    [ngClass]="isWordActive(w) ? 'text-amber-300 font-black scale-110 bg-amber-400/20 shadow-glow-sm' : 'text-slate-100 font-semibold opacity-90'">
+                    {{ w.word }}
+                  </span>
+                </ng-container>
+                <ng-template #plainText>
+                  <span class="font-bold text-slate-100 text-sm md:text-base drop-shadow">{{ seg.text }}</span>
+                </ng-template>
+              </div>
+            </div>
+          </div>
+
+          <!-- CapCut Stili Monitör Alt Kontrol / Transport Barı -->
+          <div class="h-11 w-full max-w-[860px] bg-dark-900/90 border border-slate-800 rounded-xl px-4 flex items-center justify-between select-none shadow-lg mt-2 shrink-0">
+            <!-- Sol: Zaman Göstergesi -->
+            <div class="flex items-center gap-2.5 font-mono text-xs text-slate-400">
+              <span class="text-white font-semibold">{{ currentTime() | duration }}</span>
+              <span class="text-slate-600">/</span>
+              <span>{{ totalDuration() | duration }}</span>
+              <span class="text-brand-cyan font-bold text-[11px] ml-1.5 px-2 py-0.5 rounded bg-brand-cyan/10 border border-brand-cyan/20">
+                Net: {{ visibleDuration() | duration }}
+              </span>
+            </div>
+
+            <!-- Orta: Oynatma Kontrolleri -->
+            <div class="flex items-center gap-3">
+              <button 
+                (click)="skipSeconds(-5)" 
+                class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-dark-800 transition-colors flex items-center gap-0.5 text-xs font-mono" 
+                title="5 Saniye Geri">
+                <span>⏮</span>
+                <span class="text-[10px]">5s</span>
+              </button>
+              <button 
+                (click)="togglePlayPause()" 
+                class="w-9 h-9 rounded-full bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-black flex items-center justify-center shadow-glow-sm hover:scale-105 active:scale-95 transition-all text-sm cursor-pointer"
+                title="Oynat / Duraklat (Space)">
+                <span>{{ isPlaying() ? '⏸' : '▶' }}</span>
+              </button>
+              <button 
+                (click)="skipSeconds(5)" 
+                class="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-dark-800 transition-colors flex items-center gap-0.5 text-xs font-mono" 
+                title="5 Saniye İleri">
+                <span class="text-[10px]">5s</span>
+                <span>⏭</span>
+              </button>
+            </div>
+
+            <!-- Sağ: Altyazı ve Tam Ekran -->
+            <div class="flex items-center gap-2">
+              <button 
+                (click)="toggleSubtitles()" 
+                [ngClass]="showSubtitles() ? 'text-amber-300 bg-amber-400/20 border-amber-400/40' : 'text-slate-400 border-slate-700 bg-dark-800'"
+                class="px-2.5 py-1 rounded border hover:border-slate-500 transition-colors flex items-center gap-1.5 text-[11px] font-semibold cursor-pointer"
+                title="Altyazıyı Aç/Kapat (C)">
+                <span>💬</span>
+                <span>Altyazı</span>
+              </button>
+              <button 
+                (click)="toggleFullscreen()" 
+                class="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-dark-800 border border-slate-800 transition-colors text-xs cursor-pointer" 
+                title="Tam Ekran Monitör">
+                <span>⛶</span>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. SAĞ PANEL: Context-Aware Inspector (Özellikler) -->
+        <aside class="w-[290px] xl:w-[330px] shrink-0 flex flex-col border-l border-slate-800 bg-dark-900 overflow-y-auto p-4 space-y-4">
+          <!-- 1. Durum: Katman Seçili -->
+          <div *ngIf="selectedOverlay()" class="space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Katman Özellikleri</h3>
+              <span [ngClass]="inspectorData.type === 'text' ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30'" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase border">
+                {{ inspectorData.type === 'text' ? 'Metin Katmanı' : 'Görsel Katmanı' }}
+              </span>
+            </div>
+
+            <!-- İçerik -->
+            <div class="space-y-1">
+              <label class="text-[10px] text-slate-400 uppercase font-semibold">
+                {{ inspectorData.type === 'image' ? 'Görsel Başlığı / Açıklaması' : 'Metin İçeriği' }}
+              </label>
+              <textarea 
+                [(ngModel)]="inspectorData.content" 
+                (ngModelChange)="onInspectorChange()"
+                class="w-full bg-dark-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none"
+                rows="2"></textarea>
+            </div>
+
+            <!-- Görsel Kaynağı (Image ise) -->
+            <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
+              <div class="flex items-center justify-between">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Görsel URL / Stok</label>
+                <button type="button" (click)="activeTab.set('media')" class="text-[10px] font-bold text-brand-cyan hover:underline cursor-pointer">📁 Medyadan Seç</button>
+              </div>
+              <input type="text" [(ngModel)]="inspectorData.source" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan focus:outline-none" placeholder="https://..." />
+            </div>
+
+            <!-- Ölçek (Image ise) -->
+            <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
+              <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
+                <span>Ölçek / Boyut</span>
+                <span class="text-brand-cyan font-bold">{{ inspectorData.scale || 1.0 }}x</span>
+              </div>
+              <input type="range" min="0.2" max="2.5" step="0.05" [(ngModel)]="inspectorData.scale" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan cursor-pointer" />
+            </div>
+
+            <!-- Zamanlar -->
+            <div class="grid grid-cols-2 gap-2.5">
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Başlangıç (sn)</label>
+                <input type="number" step="0.1" [(ngModel)]="inspectorData.timestamp" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan font-mono" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Süre (sn)</label>
+                <input type="number" step="0.1" [(ngModel)]="inspectorData.duration" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan font-mono" />
+              </div>
+            </div>
+
+            <!-- Tipografi & Renk (Text ise) -->
+            <div class="grid grid-cols-2 gap-2.5" *ngIf="inspectorData.type === 'text'">
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Rengi</label>
+                <div class="flex items-center gap-1.5">
+                  <input type="color" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="w-7 h-7 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                  <input type="text" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="flex-1 bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
                 </div>
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Boyut (px)</label>
+                <input type="number" [(ngModel)]="inspectorData.fontSize" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
+              </div>
+            </div>
+
+            <div class="space-y-1" *ngIf="inspectorData.type === 'text'">
+              <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font)</label>
+              <select [(ngModel)]="inspectorData.font" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
+                <option value="Bebas Neue">Bebas Neue (Büyük & Vurucu)</option>
+                <option value="Montserrat">Montserrat (Modern Kalın)</option>
+                <option value="Anton">Anton (Dikkat Çekici)</option>
+                <option value="Poppins">Poppins (Temiz & Yuvarlak)</option>
+                <option value="Outfit">Outfit (Fütüristik Sans)</option>
+                <option value="Inter">Inter (Ultra Okunabilir UI)</option>
+                <option value="Arial">Arial (Sade & Klasik)</option>
+                <option value="Cinzel">Cinzel (Sinematik Serif)</option>
+              </select>
+            </div>
+
+            <!-- Pozisyon X & Y -->
+            <div class="grid grid-cols-2 gap-2.5">
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">X Konum (%)</label>
+                <input type="number" step="0.5" [(ngModel)]="inspectorData.positionX" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Y Konum (%)</label>
+                <input type="number" step="0.5" [(ngModel)]="inspectorData.positionY" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
+              </div>
+            </div>
+
+            <!-- Katman Sırası / Track Kanalı -->
+            <div class="p-2.5 bg-dark-950 rounded-xl border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-slate-400 uppercase font-semibold">🥞 Katman Kanalı</span>
+                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan">
+                  T{{ inspectorData.trackId || 1 }}
+                </span>
+              </div>
+              <div class="flex items-center gap-1 flex-wrap">
                 <button 
-                  (click)="$event.stopPropagation(); removeOverlay(ov.id)" 
-                  title="Katmanı Sil"
-                  class="text-slate-500 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-500/10 transition-colors text-xs cursor-pointer">
-                  ✕
+                  *ngFor="let t of overlayTrackNumbers()" 
+                  type="button"
+                  (click)="setOverlayTrack(selectedOverlayId()!, t)"
+                  [ngClass]="(inspectorData.trackId || 1) === t ? 'bg-sky-500 text-white font-bold border-sky-400' : 'bg-dark-800 text-slate-400 hover:text-white border-slate-700'"
+                  class="px-2 py-0.5 rounded text-[10px] border transition-all cursor-pointer font-mono">
+                  T{{ t }}
+                </button>
+                <button type="button" (click)="addTrackLane()" class="px-2 py-0.5 rounded text-[10px] bg-dark-800 text-sky-400 border border-slate-700 font-semibold cursor-pointer">+ Yeni</button>
+              </div>
+            </div>
+
+            <!-- Animasyonlar -->
+            <div class="grid grid-cols-2 gap-2.5">
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Giriş</label>
+                <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                  <option value="none">Yok</option>
+                  <option value="fade">Fade In</option>
+                  <option value="pop-up">Pop Up</option>
+                  <option value="slide-up">Slide Up</option>
+                </select>
+              </div>
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Çıkış</label>
+                <select [(ngModel)]="inspectorData.exitAnimation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                  <option value="none">Yok</option>
+                  <option value="fade">Fade Out</option>
+                  <option value="scale-out">Scale Out</option>
+                  <option value="slide-down">Slide Down</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Butonlar -->
+            <div class="pt-2 border-t border-slate-800 flex flex-col gap-1.5">
+              <button (click)="saveInspector()" class="w-full py-2 bg-brand-cyan hover:bg-cyan-400 text-slate-900 font-bold rounded-lg transition-colors shadow-glow-sm cursor-pointer text-xs">
+                Kaydet
+              </button>
+              <div class="flex gap-2">
+                <button (click)="duplicateOverlay(selectedOverlayId()!)" class="flex-1 py-1.5 bg-dark-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold cursor-pointer">
+                  Çoğalt (Ctrl+D)
+                </button>
+                <button (click)="removeOverlay(selectedOverlayId()!)" class="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-600/40 rounded-lg text-xs font-semibold cursor-pointer">
+                  Sil (Del)
                 </button>
               </div>
             </div>
           </div>
 
-          <!-- Sekme 3: Özellikler (Inspector) -->
-          <div *ngIf="activeTab() === 'inspector'" class="flex-1 p-5 overflow-y-auto space-y-4">
-             <!-- Hiçbir katman seçili değilse -->
-             <div *ngIf="!selectedOverlay()" class="text-center py-16 text-slate-500 text-xs space-y-3">
-                <div class="text-3xl">📝</div>
-                <p class="font-bold text-slate-300">Hiçbir Katman Seçili Değil</p>
-                <p class="text-[11px] text-slate-400 max-w-xs mx-auto">
-                  Düzenlemek istediğiniz yazı veya görsele video ekranından veya timeline katman kanalından tıklayın.
-                </p>
-                <div class="pt-2 flex justify-center gap-2">
-                  <button (click)="addTextOverlay()" class="px-3 py-1.5 rounded-lg bg-brand-cyan text-slate-900 font-bold text-xs hover:bg-cyan-400 transition-colors shadow-glow-sm">
-                    + Yeni Yazı Ekle
-                  </button>
-                </div>
-             </div>
+          <!-- 2. Durum: Klip Seçili -->
+          <div *ngIf="!selectedOverlay() && selectedClipIds().length > 0" class="space-y-3.5">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Klip Özellikleri</h3>
+              <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                {{ selectedClipIds().length }} Klip Seçili
+              </span>
+            </div>
 
-             <!-- Seçili katman varsa düzenleme paneli -->
-             <div *ngIf="selectedOverlay()" class="space-y-4">
-                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-                  <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Katman Özellikleri</h3>
-                  <span 
-                    [ngClass]="inspectorData.type === 'text' ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30'"
-                    class="px-2 py-0.5 rounded text-[10px] font-bold uppercase border">
-                    {{ inspectorData.type === 'text' ? 'Metin Katmanı' : 'Görsel Katmanı' }}
-                  </span>
-                </div>
-                
-                <!-- Content Edit -->
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase font-semibold">
-                     {{ inspectorData.type === 'image' ? 'Görsel Başlığı / Açıklaması' : 'Metin İçeriği' }}
-                   </label>
-                   <textarea 
-                      [(ngModel)]="inspectorData.content" 
-                      (ngModelChange)="onInspectorChange()"
-                      class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2.5 text-xs text-white focus:border-brand-cyan focus:outline-none transition-all"
-                      rows="2"
-                      placeholder="Ekranda görünecek metni yazın..."></textarea>
-                </div>
+            <div class="p-3 bg-dark-950 rounded-xl border border-slate-800 space-y-2 text-xs">
+              <div class="flex justify-between text-slate-400">
+                <span>Durum:</span>
+                <span class="font-bold text-white">{{ selectedHasKeep() ? 'Korunan Sahne' : 'Kesilen Bölge' }}</span>
+              </div>
+              <div class="flex justify-between text-slate-400">
+                <span>İşlem Kısayolları:</span>
+                <span class="font-mono text-brand-cyan">Del / B / M</span>
+              </div>
+            </div>
 
-                <!-- Görsel URL / Kaynak (Image ise) -->
-                <div class="space-y-1.5" *ngIf="inspectorData.type === 'image'">
-                   <div class="flex items-center justify-between">
-                     <label class="text-[10px] text-slate-400 uppercase font-semibold">Görsel Kaynağı (URL veya Stok Yolu)</label>
-                     <button 
-                       type="button" 
-                       (click)="activeTab.set('media')" 
-                       class="text-[10px] font-bold text-brand-cyan hover:underline flex items-center gap-1 cursor-pointer">
-                       <span>🖼️</span> Medyadan Seç
-                     </button>
-                   </div>
-                   <input 
-                      type="text" 
-                      [(ngModel)]="inspectorData.source" 
-                      (ngModelChange)="onInspectorChange()"
-                      class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none"
-                      placeholder="https://images.pexels.com/..." />
-                </div>
-
-                <!-- Görsel Ölçek / Boyut (Image ise) -->
-                <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
-                   <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
-                     <span>Ölçek / Boyut</span>
-                     <span class="text-brand-cyan font-bold">{{ inspectorData.scale || 1.0 }}x</span>
-                   </div>
-                   <input 
-                      type="range" 
-                      min="0.2" 
-                      max="2.0" 
-                      step="0.05" 
-                      [(ngModel)]="inspectorData.scale" 
-                      (ngModelChange)="onInspectorChange()"
-                      class="w-full accent-brand-cyan cursor-pointer" />
-                </div>
-
-                <!-- Times -->
-                <div class="grid grid-cols-2 gap-3">
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Başlangıç (sn)</label>
-                      <input type="number" step="0.1" [(ngModel)]="inspectorData.timestamp" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
-                   </div>
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Süre (sn)</label>
-                      <input type="number" step="0.1" [(ngModel)]="inspectorData.duration" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
-                   </div>
-                </div>
-
-                <!-- Appearance -->
-                <div class="grid grid-cols-2 gap-3" *ngIf="inspectorData.type === 'text'">
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Rengi</label>
-                      <div class="flex items-center gap-2">
-                        <input type="color" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="w-8 h-8 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
-                        <input type="text" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none font-mono" placeholder="#FFFFFF" />
-                      </div>
-                   </div>
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Boyut (px)</label>
-                      <input type="number" [(ngModel)]="inspectorData.fontSize" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
-                   </div>
-                </div>
-
-                <div class="space-y-1" *ngIf="inspectorData.type === 'text'">
-                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font & Tipografi)</label>
-                   <select [(ngModel)]="inspectorData.font" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
-                     <optgroup label="🔥 YouTube & Sosyal Medya Başlık">
-                       <option value="Bebas Neue">Bebas Neue (Büyük & Vurucu)</option>
-                       <option value="Montserrat">Montserrat (Modern & Kalın)</option>
-                       <option value="Anton">Anton (Ağır & Dikkat Çekici)</option>
-                       <option value="Oswald">Oswald (Dar & Yüksek Başlık)</option>
-                       <option value="Impact">Impact (Klasik Meme/YouTube)</option>
-                     </optgroup>
-                     <optgroup label="✨ Modern & Geometrik Sans">
-                       <option value="Poppins">Poppins (Temiz & Yuvarlak)</option>
-                       <option value="Outfit">Outfit (Fütüristik Sans)</option>
-                       <option value="Inter">Inter (Ultra Okunabilir UI)</option>
-                       <option value="Roboto">Roboto (Google Standart)</option>
-                       <option value="Arial">Arial (Sade & Klasik)</option>
-                     </optgroup>
-                     <optgroup label="🎨 Yaratıcı & Tematik">
-                       <option value="Syne">Syne (Özgün Sanatsal Başlık)</option>
-                       <option value="Bangers">Bangers (Çizgi Roman / Enerjik)</option>
-                       <option value="Cinzel">Cinzel (Sinematik Serif / Tarih)</option>
-                       <option value="Playfair Display">Playfair Display (Zarif Serif)</option>
-                       <option value="Fira Code">Fira Code (Kod / Teknoloji)</option>
-                       <option value="Comic Sans MS">Comic Sans (Eğlenceli)</option>
-                     </optgroup>
-                   </select>
-                </div>
-
-                <!-- Animation & Position -->
-                <div class="grid grid-cols-2 gap-3">
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">X Konumu (%)</label>
-                      <input type="number" step="0.5" [(ngModel)]="inspectorData.positionX" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
-                   </div>
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Y Konumu (%)</label>
-                      <input type="number" step="0.5" [(ngModel)]="inspectorData.positionY" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
-                   </div>
-                </div>
-
-                <!-- Katman Sırası / Hiyerarşi (Z-Index) -->
-                <div class="p-3 bg-dark-950/70 rounded-xl border border-slate-800 space-y-2">
-                   <div class="flex items-center justify-between">
-                     <span class="text-[10px] text-slate-400 uppercase font-semibold flex items-center gap-1.5">
-                       <span>🥞</span> Katman Hiyerarşisi (Z-Index)
-                     </span>
-                     <span class="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30">
-                       Katman #{{ inspectorData.trackId || 1 }}
-                     </span>
-                   </div>
-                   <div class="grid grid-cols-2 gap-2">
-                     <button 
-                       type="button"
-                       (click)="bringOverlayForward(selectedOverlayId()!)"
-                       class="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-slate-700 text-xs text-white font-semibold border border-slate-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer">
-                       <span>🔼</span> Öne Getir (+1)
-                     </button>
-                     <button 
-                       type="button"
-                       (click)="sendOverlayBackward(selectedOverlayId()!)"
-                       class="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-slate-700 text-xs text-white font-semibold border border-slate-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer">
-                       <span>🔽</span> Arkaya Gönder (-1)
-                     </button>
-                   </div>
-                   <div class="flex items-center gap-2 pt-1 text-[10px] text-slate-400">
-                     <span>Özel Katman No:</span>
-                     <input 
-                       type="number" 
-                       min="1" 
-                       max="99" 
-                       [(ngModel)]="inspectorData.trackId" 
-                       (ngModelChange)="onInspectorChange()" 
-                       class="w-16 bg-dark-900 border border-slate-700 rounded p-1 text-xs text-center text-white focus:border-brand-cyan focus:outline-none font-mono" />
-                     <span class="text-[9px] text-slate-500 italic">(Daha büyük = Daha üstte)</span>
-                   </div>
-                </div>
-                
-                <!-- Animasyon Kontrolleri (Giriş ve Çıkış) -->
-                <div class="grid grid-cols-2 gap-3">
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Giriş Animasyonu</label>
-                      <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
-                        <option value="none">Yok (Doğrudan Göster)</option>
-                        <option value="fade">Fade In (Yumuşak Geçiş)</option>
-                        <option value="pop-up">Pop Up (Büyüyerek Çık)</option>
-                        <option value="slide-up">Slide Up (Aşağıdan Yukarı)</option>
-                      </select>
-                   </div>
-                   <div class="space-y-1">
-                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Çıkış Animasyonu</label>
-                      <select [(ngModel)]="inspectorData.exitAnimation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
-                        <option value="none">Yok (Aniden Kaybol)</option>
-                        <option value="fade">Fade Out (Sönerek Çık)</option>
-                        <option value="scale-out">Scale Out (Küçülerek Çık)</option>
-                        <option value="slide-down">Slide Down (Aşağıya İterek)</option>
-                        <option value="slide-up">Slide Up (Yukarıya Uçarak)</option>
-                      </select>
-                   </div>
-                </div>
-
-                <!-- Actions -->
-                <div class="pt-4 border-t border-slate-800 flex gap-2">
-                   <button (click)="saveInspector()" class="flex-1 py-2 bg-brand-cyan hover:bg-cyan-400 text-slate-900 font-bold rounded-lg transition-colors shadow-glow-sm">
-                     Kaydet
-                   </button>
-                   <button (click)="removeOverlay(selectedOverlayId()!)" class="px-3 py-2 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-600/40 font-bold rounded-lg transition-colors" title="Katmanı Sil">
-                     Sil
-                   </button>
-                   <button (click)="cancelInspector()" class="px-3 py-2 bg-dark-800 hover:bg-dark-700 text-slate-300 border border-slate-700 font-bold rounded-lg transition-colors">
-                     Kapat
-                   </button>
-                </div>
-             </div>
+            <div class="space-y-2 pt-1">
+              <button *ngIf="selectedHasKeep()" (click)="deleteSelectedClips()" class="w-full py-2 bg-rose-600/80 hover:bg-rose-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm">
+                <span>✕</span> Bu Klipleri Kes / Çıkar (Del)
+              </button>
+              <button *ngIf="selectedHasCuts()" (click)="restoreSelectedCuts()" class="w-full py-2 bg-sky-600/80 hover:bg-sky-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm">
+                <span>↩</span> Kesimi İptal Et ve Geri Al
+              </button>
+              <button *ngIf="selectedClipIds().length > 1" (click)="mergeSelectedClips()" class="w-full py-2 bg-emerald-600/80 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm">
+                <span>🔗</span> Seçili Klipleri Birleştir (M)
+              </button>
+              <button (click)="selectedClipIds.set([])" class="w-full py-1.5 bg-dark-800 text-slate-400 hover:text-white rounded-lg text-xs border border-slate-700">
+                Seçimi Temizle (Esc)
+              </button>
+            </div>
           </div>
 
-          <!-- Sekme 4: Medya (Assets & Sürükle-Bırak) -->
-          <div *ngIf="activeTab() === 'media'" class="flex-1 p-5 overflow-y-auto space-y-4">
-             <div class="flex items-center justify-between mb-1">
-               <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                 <span>📁</span> Medya Kütüphanesi
-               </h3>
-               <span class="text-[10px] text-slate-400 font-mono">{{ assets().length }} Dosya</span>
-             </div>
+          <!-- 3. Durum: Hiçbir Şey Seçili Değil -->
+          <div *ngIf="!selectedOverlay() && selectedClipIds().length === 0" class="text-center py-8 space-y-4">
+            <div class="w-12 h-12 rounded-2xl bg-dark-800 border border-slate-700/80 flex items-center justify-center mx-auto text-xl shadow-inner">
+              ⚙️
+            </div>
+            <div>
+              <p class="font-bold text-slate-200 text-xs">Özellikler Paneli</p>
+              <p class="text-[11px] text-slate-400 mt-1 max-w-[220px] mx-auto">
+                Düzenlemek için video veya zaman çizelgesindeki bir klip veya katmana tıklayın.
+              </p>
+            </div>
 
-             <!-- Gizli File Input -->
-             <input 
-               #assetFileInput 
-               type="file" 
-               (change)="onAssetFileSelected($event)" 
-               accept="image/*,video/*,audio/*" 
-               class="hidden" />
-             
-             <!-- İnteraktif Yükleme & Sürükle-Bırak Alanı -->
-             <div 
-               (click)="triggerAssetUpload()"
-               (dragover)="onAssetDragOver($event)"
-               (dragleave)="onAssetDragLeave($event)"
-               (drop)="onAssetDrop($event)"
-               [ngClass]="isDragOver() ? 'border-brand-cyan bg-brand-cyan/10 scale-[1.02] shadow-glow-sm' : 'border-slate-700 hover:border-slate-500 bg-dark-800/80'"
-               class="p-5 rounded-xl border-2 border-dashed text-center space-y-2.5 cursor-pointer transition-all duration-150 relative select-none">
-               
-               <div *ngIf="isUploadingAsset()" class="py-3 flex flex-col items-center gap-2">
-                 <div class="w-6 h-6 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin"></div>
-                 <span class="text-xs text-brand-cyan font-bold">MinIO'ya Yükleniyor...</span>
-               </div>
+            <div class="pt-2 flex flex-col gap-2">
+              <button (click)="addTextOverlay()" class="w-full py-2 rounded-lg bg-brand-cyan text-slate-900 font-bold text-xs hover:bg-cyan-400 transition-colors shadow-glow-sm flex items-center justify-center gap-1.5">
+                <span class="font-black">T</span> + Yeni Yazı Ekle
+              </button>
+              <button (click)="addImageOverlay()" class="w-full py-2 rounded-lg bg-purple-600 text-white font-bold text-xs hover:bg-purple-500 transition-colors shadow-glow-sm flex items-center justify-center gap-1.5">
+                <span>🖼️</span> + Yeni Görsel Ekle
+              </button>
+            </div>
 
-               <div *ngIf="!isUploadingAsset()">
-                 <svg class="w-8 h-8 mx-auto text-slate-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-                 </svg>
-                 <p class="text-xs text-slate-300 font-medium">
-                   <span class="text-brand-cyan font-bold">Dosya Seçin</span> veya buraya sürükleyip bırakın
-                 </p>
-                 <p class="text-[10px] text-slate-500">PNG, JPG, WEBP, MP4, MP3 (Maks 50MB)</p>
-               </div>
-             </div>
+            <div class="pt-3 border-t border-slate-800/80 text-left space-y-1.5 text-[10px] text-slate-400">
+              <span class="font-bold text-slate-300 uppercase tracking-wider block mb-1">Hızlı İpuçları</span>
+              <p>• Zaman çizgisinde <kbd class="px-1 bg-dark-800 rounded font-mono text-slate-300">Sağ Tık</kbd> ile gelişmiş bağlam menüsüne erişin.</p>
+              <p>• <kbd class="px-1 bg-dark-800 rounded font-mono text-slate-300">Ctrl + Tekerlek</kbd> ile timeline'a yakınlaşın.</p>
+              <p>• Çift tıklayarak sahneleri anında kesip geri yükleyebilirsiniz.</p>
+            </div>
+          </div>
+        </aside>
+      </div>
 
-              <!-- Seçili Katman Bilgisi / Hızlı Değiştirme Bildirimi -->
-              <div *ngIf="selectedOverlay()?.type === 'image'" class="p-2.5 rounded-xl bg-purple-950/60 border border-purple-500/40 flex items-center justify-between text-xs mt-3">
-                <div class="flex items-center gap-2 truncate">
-                  <span class="text-sm">🎯</span>
-                  <div class="truncate">
-                    <span class="text-purple-300 font-bold block">Seçili Görsel Katmanı</span>
-                    <span class="text-[10px] text-slate-400 truncate">{{ selectedOverlay()?.content || selectedOverlay()?.id }}</span>
-                  </div>
-                </div>
-                <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-purple-900/80 text-purple-300 border border-purple-600/50">
-                  Katman #{{ selectedOverlay()?.trackId || 1 }}
-                </span>
-              </div>
+      <!-- Alt Alan: Tam Genişlik Çok Kanallı NLE Zaman Çizelgesi (CapCut Tarzı) -->
+      <section class="h-[44%] min-h-[220px] shrink-0 flex flex-col bg-dark-950 select-none">
+        
+        <!-- Timeline Üst Araç Çubuğu (Toolbar) -->
+        <div class="h-10 px-4 bg-dark-900/95 border-b border-slate-800 flex items-center justify-between shrink-0 select-none">
+          <!-- Sol: Temel Araçlar -->
+          <div class="flex items-center gap-1.5">
+            <button (click)="addSplitMarker()" class="px-2.5 py-1 rounded bg-dark-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" title="Bulunulan Yerden Böl (B)">
+              <span class="text-rose-400 font-bold">✂</span>
+              <span>Böl (B)</span>
+            </button>
+            <button 
+              *ngIf="selectedClipIds().length > 0 || selectedOverlayId()"
+              (click)="deleteSelectedItems()" 
+              class="px-2.5 py-1 rounded bg-rose-600/20 text-rose-300 hover:bg-rose-600/40 border border-rose-500/40 text-xs font-semibold flex items-center gap-1 transition-colors shadow-glow-sm cursor-pointer" 
+              title="Seçili Klip veya Katmanı Sil (Del)">
+              <span>🗑</span>
+              <span>Sil (Del)</span>
+            </button>
+            <div class="h-4 w-px bg-slate-700 mx-1"></div>
+            <button (click)="undo()" class="p-1 px-2.5 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700 text-xs transition-colors cursor-pointer" title="Geri Al (Ctrl+Z)">
+              ⟲ Geri
+            </button>
+            <button (click)="redo()" class="p-1 px-2.5 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700 text-xs transition-colors cursor-pointer" title="İleri Al (Ctrl+Y)">
+              ⟳ İleri
+            </button>
+            <button 
+              *ngIf="selectedClipIds().length > 1" 
+              (click)="mergeSelectedClips()" 
+              class="px-2.5 py-1 rounded bg-emerald-600/30 text-emerald-300 hover:bg-emerald-600/50 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1 shadow-glow-sm transition-colors cursor-pointer" 
+              title="Seçili Klipleri Birleştir (M)">
+              <span>🔗</span> Birleştir (M)
+            </button>
+            <button 
+              *ngIf="retakeCount() > 0" 
+              (click)="deleteRetakeCuts()" 
+              class="px-2.5 py-1 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 font-semibold text-xs shadow-glow-sm flex items-center gap-1.5 transition-all cursor-pointer" 
+              title="Hatalı Tekrar (Retake) Kesimlerini İptal Et">
+              <span>🔄</span>
+              <span>{{ retakeCount() }} Retake'i Geri Al</span>
+            </button>
+          </div>
 
-             <!-- Kullanıcının Yüklediği Medyalar -->
-             <div *ngIf="assets().length > 0" class="space-y-2 mt-2">
-               <h4 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Yüklenen Dosyalar</h4>
-               <div class="grid grid-cols-2 gap-2">
-                 <div 
-                   *ngFor="let asset of assets()"
-                   class="aspect-video bg-dark-900 border border-slate-700/80 rounded-lg overflow-hidden relative group hover:border-brand-cyan transition-all shadow-sm">
-                   
-                   <!-- Görsel İse Thumbnail -->
-                   <img 
-                     *ngIf="asset.mimeTuru.startsWith('image/')" 
-                     [src]="asset.url" 
-                     [alt]="asset.dosyaAdi" 
-                     class="w-full h-full object-cover" />
+          <!-- Orta: Görünüm Filtreleri -->
+          <div class="flex items-center gap-1 text-[11px]">
+            <button (click)="rippleAi.set(!rippleAi())" [ngClass]="rippleAi() ? 'bg-sky-500/20 text-sky-300 border-sky-500/40' : 'bg-dark-800 text-slate-400 border-slate-700'" class="px-2 py-0.5 rounded border transition-colors cursor-pointer" title="AI Kesimlerini Sıkıştır/Genişlet">
+              🤖 AI {{ rippleAi() ? 'Sıkışık' : 'Açık' }}
+            </button>
+            <button (click)="rippleRetake.set(!rippleRetake())" [ngClass]="rippleRetake() ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-dark-800 text-slate-400 border-slate-700'" class="px-2 py-0.5 rounded border transition-colors cursor-pointer" title="Retake Kesimlerini Sıkıştır/Genişlet">
+              🔄 Retake {{ rippleRetake() ? 'Sıkışık' : 'Açık' }}
+            </button>
+            <button (click)="rippleManual.set(!rippleManual())" [ngClass]="rippleManual() ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-dark-800 text-slate-400 border-slate-700'" class="px-2 py-0.5 rounded border transition-colors cursor-pointer" title="Manuel Kesimleri Sıkıştır/Genişlet">
+              🖐 Manuel {{ rippleManual() ? 'Sıkışık' : 'Açık' }}
+            </button>
+          </div>
 
-                   <!-- Video / Ses İse İkon -->
-                   <div *ngIf="!asset.mimeTuru.startsWith('image/')" class="w-full h-full flex flex-col items-center justify-center bg-dark-800 p-2 text-center">
-                     <span class="text-xl">{{ asset.mimeTuru.startsWith('audio/') ? '🎵' : '🎬' }}</span>
-                     <span class="text-[9px] text-slate-300 truncate w-full mt-1">{{ asset.dosyaAdi }}</span>
-                   </div>
+          <!-- Sağ: Zoom Slider ve Hızlı Ekleme -->
+          <div class="flex items-center gap-2">
+            <div class="flex items-center gap-1.5 bg-dark-800 px-2 py-0.5 rounded-lg border border-slate-700">
+              <button (click)="zoomOut()" class="text-slate-400 hover:text-white text-xs px-1 cursor-pointer">🔍-</button>
+              <input 
+                type="range" 
+                min="1" 
+                max="6" 
+                step="0.2" 
+                [ngModel]="timelineZoom()" 
+                (ngModelChange)="timelineZoom.set($event)" 
+                class="w-20 h-1 accent-brand-cyan cursor-pointer" 
+                title="Ctrl + Tekerlek ile de yakınlaşabilirsiniz" />
+              <button (click)="zoomIn()" class="text-slate-400 hover:text-white text-xs px-1 cursor-pointer">🔍+</button>
+              <span class="text-[10px] font-mono text-slate-400 ml-1">{{ timelineZoom().toFixed(1) }}x</span>
+            </div>
 
-                   <!-- Hover Kontrolleri -->
-                   <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2">
-                     <button 
-                       *ngIf="selectedOverlay()?.type === 'image'"
-                       (click)="$event.stopPropagation(); assignAssetToSelectedOverlay(asset)"
-                       class="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded shadow transition-colors w-full flex items-center justify-center gap-1 cursor-pointer">
-                       <span>🎯</span>
-                       <span>Seçili Katmana Ata</span>
-                     </button>
-                     <button 
-                       (click)="$event.stopPropagation(); addAssetOverlay(asset)"
-                       class="px-2.5 py-1 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[10px] rounded shadow-md transition-colors w-full flex items-center justify-center gap-1">
-                       <span>+</span>
-                       <span>Katmana Ekle</span>
-                     </button>
-                     <button 
-                       (click)="$event.stopPropagation(); deleteAsset(asset.id)"
-                       class="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-[9px] rounded border border-rose-500/30 transition-colors w-full">
-                       Sil
-                     </button>
-                   </div>
+            <div class="h-4 w-px bg-slate-700 mx-0.5"></div>
 
-                   <!-- Başlık Çubuğu -->
-                   <div class="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-xs px-1.5 py-0.5 truncate text-[9px] text-slate-200">
-                     {{ asset.dosyaAdi }}
-                   </div>
-                 </div>
-               </div>
-             </div>
-             
-             <!-- Örnek Stok Görseller -->
-             <div class="mt-4 pt-4 border-t border-slate-800">
-               <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-2">Pexels Stok Görseller (Örnek)</h4>
-               <div class="grid grid-cols-2 gap-2">
-                 <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
-                  <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
-                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1.5">
-                    <button 
-                      *ngIf="selectedOverlay()?.type === 'image'"
-                      (click)="$event.stopPropagation(); assignUrlToSelectedOverlay('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım & Teknoloji')"
-                      class="px-1.5 py-0.5 bg-purple-600 hover:bg-purple-500 text-white text-[9px] rounded font-bold w-full cursor-pointer">
-                      🎯 Seçiliye Ata
-                    </button>
-                    <button 
-                      (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım & Teknoloji')"
-                      class="px-1.5 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 text-[9px] rounded font-bold w-full cursor-pointer">
-                      + Katman Ekle
-                    </button>
-                  </div>
-                </div>
-                <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
-                  <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
-                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1.5">
-                    <button 
-                      *ngIf="selectedOverlay()?.type === 'image'"
-                      (click)="$event.stopPropagation(); assignUrlToSelectedOverlay('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Toplantı & Ekip')"
-                      class="px-1.5 py-0.5 bg-purple-600 hover:bg-purple-500 text-white text-[9px] rounded font-bold w-full cursor-pointer">
-                      🎯 Seçiliye Ata
-                    </button>
-                    <button 
-                      (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Toplantı & Ekip')"
-                      class="px-1.5 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 text-[9px] rounded font-bold w-full cursor-pointer">
-                      + Katman Ekle
-                    </button>
-                  </div>
-                </div>
-               </div>
-             </div>
+            <button (click)="addTrackLane()" class="px-2 py-1 rounded bg-dark-800 text-slate-300 hover:text-white border border-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer" title="Yeni Boş Katman Kanalı Ekle">
+              <span>+</span>
+              <span>Katman</span>
+            </button>
+            <button (click)="addTextOverlay()" class="px-2.5 py-1 rounded bg-brand-cyan text-slate-900 font-bold hover:bg-cyan-400 border border-cyan-500 shadow-glow-sm text-xs flex items-center gap-1 transition-all cursor-pointer" title="Zaman çizgisine yazı katmanı ekle (T)">
+              <span class="font-black">T</span>
+              <span>Yazı</span>
+            </button>
+            <button (click)="addImageOverlay()" class="px-2.5 py-1 rounded bg-purple-500 text-white font-bold hover:bg-purple-400 border border-purple-400 shadow-glow-sm text-xs flex items-center gap-1 transition-all cursor-pointer" title="Zaman çizgisine görsel katmanı ekle">
+              <span>🖼️</span>
+              <span>Görsel</span>
+            </button>
           </div>
         </div>
+
+        <!-- Çok Kanallı Zaman Çizelgesi Gövdesi (Sol Sabit Başlıklar + Sağ Kaydırılabilir Alan) -->
+        <div class="flex-1 flex overflow-hidden relative">
+          
+          <!-- 1. SOL SABİT KATMAN BAŞLIKLARI (Track Headers Panel) -->
+          <div class="w-32 md:w-36 shrink-0 bg-dark-900 border-r border-slate-800 flex flex-col z-30 select-none shadow-lg">
+            <!-- Cetvel Köşesi -->
+            <div class="h-7 border-b border-slate-800/90 px-2.5 flex items-center justify-between bg-dark-950 text-[10px] font-mono text-slate-400">
+              <span class="font-bold text-slate-300 flex items-center gap-1">
+                <span>🎬</span> KANALLAR
+              </span>
+              <button (click)="addTrackLane()" class="px-1.5 py-0.5 rounded bg-dark-800 hover:bg-slate-700 text-sky-400 border border-slate-700 hover:text-white transition-colors text-[9px] font-bold cursor-pointer" title="Yeni Katman Kanalı Ekle">
+                + Katman
+              </button>
+            </div>
+
+            <!-- Overlay Katman Başlıkları (T3, T2, T1) -->
+            <div 
+              *ngFor="let trackNum of overlayTrackNumbers()" 
+              class="h-10 border-b border-slate-800/70 px-2.5 flex items-center justify-between text-xs bg-dark-900/90 hover:bg-dark-800/60 transition-colors">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-black shrink-0 bg-sky-500/20 text-sky-300 border border-sky-500/30">
+                  T{{ trackNum }}
+                </span>
+                <span class="text-[11px] font-semibold text-slate-300 truncate">Katman #{{ trackNum }}</span>
+              </div>
+              <span *ngIf="getOverlaysForTrack(trackNum).length > 0" class="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
+                {{ getOverlaysForTrack(trackNum).length }}
+              </span>
+            </div>
+
+            <!-- Video Kanalı Başlığı (V1) -->
+            <div class="h-14 px-2.5 flex items-center justify-between text-xs bg-dark-900/95 border-t border-slate-800">
+              <div class="flex items-center gap-1.5">
+                <span class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                  V1
+                </span>
+                <div class="flex flex-col">
+                  <span class="text-[11px] font-bold text-emerald-400">Ana Video</span>
+                  <span class="text-[9px] text-slate-500 font-mono">{{ clips().length }} Klip</span>
+                </div>
+              </div>
+              <span class="text-xs text-emerald-500/70" title="Ses Dalga Formu Aktif">🔊</span>
+            </div>
+          </div>
+
+          <!-- 2. SAĞ KAYDIRILABİLİR ZAMAN ÇİZELGESİ (Scrollable Timeline Canvas) -->
+          <div 
+            #timelineScrollContainer
+            (wheel)="onTimelineWheel($event)"
+            class="flex-1 overflow-x-auto overflow-y-auto relative pb-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-dark-900">
+            <div 
+              #timelineTrack
+              (click)="seekTimeline($event)"
+              (contextmenu)="openTimelineContextMenu($event)"
+              [style.width.%]="100 * timelineZoom()"
+              class="relative min-w-full flex flex-col select-none cursor-pointer bg-dark-950 min-h-full">
+              
+              <!-- Zaman Cetveli (Timecode Ruler with Ticks) -->
+              <div class="relative h-7 bg-dark-950 border-b border-slate-800 overflow-hidden select-none">
+                <div class="absolute inset-0 bg-[linear-gradient(to_right,#334155_1px,transparent_1px)] bg-[size:10px_100%] opacity-20"></div>
+                <ng-container *ngFor="let mark of timelineRulerMarks()">
+                  <div class="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none -translate-x-1/2" [style.left.%]="mark.percent">
+                    <span class="text-[9px] font-mono text-slate-400 font-semibold pt-0.5 tracking-tight">{{ mark.label }}</span>
+                    <div class="w-px flex-1 bg-slate-700/80 mt-0.5"></div>
+                  </div>
+                </ng-container>
+              </div>
+
+              <!-- Katman Şeritleri (T3, T2, T1) -->
+              <div 
+                *ngFor="let trackNum of overlayTrackNumbers()" 
+                class="relative h-10 bg-dark-900/40 border-b border-slate-800/60 overflow-hidden flex items-center hover:bg-dark-900/70 transition-colors">
+                <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
+
+                <div *ngIf="getOverlaysForTrack(trackNum).length === 0" class="absolute inset-0 flex items-center justify-center text-[10px] text-slate-600/40 italic pointer-events-none select-none">
+                  Katman #{{ trackNum }} (Boş)
+                </div>
+
+                <!-- Katman Öğeleri (Pill'ler) -->
+                <div 
+                  *ngFor="let ov of getOverlaysForTrack(trackNum)"
+                  (mousedown)="onOverlayDragStart($event, ov.id)"
+                  (click)="$event.stopPropagation(); selectOverlay(ov.id)"
+                  (contextmenu)="openOverlayContextMenu($event, ov)"
+                  class="absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[70px] border"
+                  [ngClass]="[
+                     ov.type === 'text' 
+                       ? 'bg-gradient-to-r from-[#ba5748] to-[#994033] text-white border-[#e07567]/70 hover:brightness-110 shadow-rose-950/50' 
+                       : 'bg-gradient-to-r from-purple-700 to-indigo-700 text-white border-purple-400/70 hover:brightness-110 shadow-purple-950/50',
+                     selectedOverlayId() === ov.id 
+                       ? 'ring-2 ring-white shadow-[0_0_12px_rgba(255,255,255,0.95)] z-30 brightness-115 scale-[1.01]' 
+                       : ''
+                  ]"
+                  [ngStyle]="getOverlayStyle(ov)"
+                  [title]="(ov.type === 'text' ? 'Metin: ' : 'Görsel: ') + (ov.content || ov.source || ov.id) + ' (Katman #' + trackNum + ')'">
+                  
+                  <!-- Sol Boyutlandırma Kolu -->
+                  <div (mousedown)="onOverlayResizeStart($event, ov.id, 'left')" class="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-l flex items-center justify-center z-30 transition-opacity">
+                    <div class="w-0.5 h-3.5 bg-white/90 rounded"></div>
+                  </div>
+
+                  <!-- İçerik -->
+                  <div class="truncate px-2 pointer-events-none font-semibold flex items-center gap-1.5 drop-shadow-sm">
+                    <span class="w-4 h-4 rounded text-[9px] font-black flex items-center justify-center bg-black/30 border border-white/20">
+                      {{ ov.type === 'text' ? 'T' : '🖼️' }}
+                    </span>
+                    <span class="truncate">{{ ov.content || (ov.type === 'text' ? 'Metin' : 'Görsel') }}</span>
+                    <span class="text-[9px] font-mono opacity-80 font-normal ml-1">({{ ov.duration }}s)</span>
+                  </div>
+
+                  <!-- Sağ Boyutlandırma Kolu -->
+                  <div (mousedown)="onOverlayResizeStart($event, ov.id, 'right')" class="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-r flex items-center justify-center z-30 transition-opacity">
+                    <div class="w-0.5 h-3.5 bg-white/90 rounded"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Video Klipleri Şeridi (V1 - Ana Video Kanalı & Gerçek Ses Dalgası) -->
+              <div class="relative h-14 bg-dark-950 flex overflow-hidden border-b border-slate-800">
+                <!-- Gerçek Ses Dalga Formu (Web Audio API Waveform SVG Arka Planı) -->
+                <div *ngIf="audioPeaks()?.length" class="absolute inset-0 flex items-center pointer-events-none z-0">
+                  <svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 1000 56">
+                    <defs>
+                      <linearGradient id="waveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.85" />
+                        <stop offset="50%" stop-color="#06b6d4" stop-opacity="0.95" />
+                        <stop offset="100%" stop-color="#0284c7" stop-opacity="0.85" />
+                      </linearGradient>
+                    </defs>
+                    <path [attr.d]="getWaveformPath()" fill="url(#waveGradient)" />
+                    <line x1="0" y1="28" x2="1000" y2="28" stroke="#0ea5e9" stroke-opacity="0.3" stroke-width="1" />
+                  </svg>
+                </div>
+
+                <!-- Klipler (Flexbox ile ardışık dizilir) -->
+                <ng-container *ngFor="let clip of clips()">
+                  <div 
+                    *ngIf="isVisible(clip)"
+                    (click)="selectClip(clip.id, $event)"
+                    (dblclick)="toggleClip(clip, $event)"
+                    (contextmenu)="openClipContextMenu($event, clip)"
+                    class="relative h-full transition-all border-r border-white/20 box-border group flex flex-col justify-between p-1 select-none z-10 cursor-pointer"
+                    [ngClass]="{
+                       'bg-amber-500/70 hover:bg-amber-500/80 backdrop-blur-xs': isRetakeClip(clip),
+                       'bg-rose-500/70 hover:bg-rose-500/80 backdrop-blur-xs': isManualClip(clip),
+                       'bg-rose-950/75 hover:bg-rose-900/85 backdrop-blur-xs': clip.isCut && !isRetakeClip(clip) && !isManualClip(clip),
+                       'bg-emerald-600/20 hover:bg-emerald-500/35': !clip.isCut,
+                       'ring-2 ring-inset ring-brand-yellow shadow-[0_0_12px_rgba(250,204,21,0.6)] z-20': selectedClipIds().includes(clip.id)
+                    }"
+                    [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual() || rippleRetake()) ? visibleDuration() : totalDuration() )) * 100"
+                    [title]="getClipTooltip(clip)">
+                    
+                    <!-- Üst Klip Başlığı -->
+                    <div class="flex items-center justify-between text-[9px] text-white/90 font-mono truncate pointer-events-none">
+                      <span class="truncate font-semibold flex items-center gap-1">
+                        <span *ngIf="clip.isCut" class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                        <span>{{ clip.isCut ? (isRetakeClip(clip) ? '🔁 Retake' : '✕ Kesilen') : 'Klip' }}</span>
+                      </span>
+                      <span class="text-[8px] opacity-80">{{ clip.duration.toFixed(1) }}s</span>
+                    </div>
+
+                    <!-- Kesilen Alan Rozeti -->
+                    <div *ngIf="clip.isCut" class="my-auto self-center pointer-events-none">
+                      <span class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-rose-900/90 text-rose-200 border border-rose-600/50 shadow-sm">
+                        {{ isRetakeClip(clip) ? 'TEKRAR' : 'SESSİZLİK' }}
+                      </span>
+                    </div>
+
+                    <!-- Çift Tıkla İade İpucu -->
+                    <div *ngIf="clip.isCut" class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-rose-950/90 transition-opacity z-20">
+                      <span class="text-[10px] text-white font-bold">↩ Geri Yükle</span>
+                    </div>
+                  </div>
+                </ng-container>
+              </div>
+
+              <!-- Ortak Zaman İmleci (Playhead) -->
+              <div 
+                class="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-40 pointer-events-none"
+                [style.left.%]="getPlayheadPosition()">
+                <div class="w-3.5 h-3.5 bg-white rotate-45 -translate-x-[6px] -translate-y-[2px] shadow-lg rounded-sm border border-slate-300"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- CapCut Stili Kayan Sağ Tık Bağlam Menüsü (Floating Context Menu) -->
+      <div 
+        *ngIf="contextMenu() as menu"
+        (click)="$event.stopPropagation()"
+        [style.left.px]="menu.x"
+        [style.top.px]="menu.y"
+        class="fixed z-50 min-w-[210px] bg-dark-900/95 backdrop-blur-xl border border-slate-700 rounded-xl shadow-2xl py-1.5 text-xs text-slate-200 select-none">
+        
+        <!-- Klip Menüsü -->
+        <ng-container *ngIf="menu.type === 'clip'">
+          <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 flex items-center justify-between">
+            <span>🎬 Klip İşlemleri</span>
+            <span class="font-mono text-[9px] text-brand-cyan">{{ menu.targetClip?.duration?.toFixed(1) }}s</span>
+          </div>
+          <button 
+            (click)="splitClipAtPlayhead(menu.targetClip)"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>✂</span> Bu Noktadan Böl</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">B</kbd>
+          </button>
+          <button 
+            *ngIf="!menu.targetClip?.isCut"
+            (click)="deleteClip(menu.targetClip)"
+            class="w-full px-3 py-2 text-left hover:bg-rose-500/20 hover:text-rose-400 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>🗑</span> Klibi Kes / Çıkar</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Del</kbd>
+          </button>
+          <button 
+            *ngIf="menu.targetClip?.isCut"
+            (click)="restoreClip(menu.targetClip)"
+            class="w-full px-3 py-2 text-left hover:bg-emerald-500/20 hover:text-emerald-400 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>↩</span> Kesimi İptal Et (Geri Al)</span>
+            <span class="text-[10px] text-slate-500">Restore</span>
+          </button>
+          <button 
+            *ngIf="selectedClipIds().length > 1"
+            (click)="mergeSelectedClips(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-sky-500/20 hover:text-sky-300 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>🔗</span> Seçili Klipleri Birleştir</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">M</kbd>
+          </button>
+        </ng-container>
+
+        <!-- Katman (Overlay) Menüsü -->
+        <ng-container *ngIf="menu.type === 'overlay'">
+          <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 flex items-center justify-between">
+            <span>🥞 Katman (#{{ menu.targetOverlay?.trackId || 1 }})</span>
+            <span class="font-mono text-[9px] text-amber-400">{{ menu.targetOverlay?.type === 'text' ? 'Metin' : 'Görsel' }}</span>
+          </div>
+          <button 
+            (click)="selectOverlay(menu.targetOverlay!.id); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-amber-500/20 hover:text-amber-300 flex items-center gap-2 transition-colors cursor-pointer">
+            <span>📝</span> Özellikleri Düzenle
+          </button>
+          <button 
+            (click)="duplicateOverlay(menu.targetOverlay!.id); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📋</span> Katmanı Çoğalt</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+D</kbd>
+          </button>
+          <button 
+            (click)="splitOverlayAtPlayhead(menu.targetOverlay!); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-sky-500/20 hover:text-sky-300 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>✂</span> İmleçte İkiye Böl</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">B</kbd>
+          </button>
+          <div class="h-px bg-slate-800 my-1"></div>
+          <button 
+            (click)="bringOverlayForward(menu.targetOverlay!.id); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-slate-800 hover:text-white flex items-center gap-2 transition-colors cursor-pointer">
+            <span>🔼</span> Bir Üst Katmana Çık (+1)
+          </button>
+          <button 
+            (click)="sendOverlayBackward(menu.targetOverlay!.id); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-slate-800 hover:text-white flex items-center gap-2 transition-colors cursor-pointer">
+            <span>🔽</span> Bir Alt Katmana İn (-1)
+          </button>
+          <div class="h-px bg-slate-800 my-1"></div>
+          <button 
+            (click)="removeOverlay(menu.targetOverlay!.id); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-rose-500/20 hover:text-rose-400 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>🗑</span> Katmanı Sil</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Del</kbd>
+          </button>
+        </ng-container>
+
+        <!-- Boş Zaman Çizelgesi Menüsü -->
+        <ng-container *ngIf="menu.type === 'timeline'">
+          <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
+            ⏱ Zaman Çizgisi
+          </div>
+          <button 
+            (click)="addSplitMarker(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>✂</span> Buradan Böl</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">B</kbd>
+          </button>
+          <button 
+            (click)="addTextOverlay(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span class="font-bold">T</span> Metin Ekle</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">T</kbd>
+          </button>
+          <button 
+            (click)="addImageOverlay(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-purple-500/20 hover:text-purple-300 flex items-center gap-2 transition-colors cursor-pointer">
+            <span>🖼️</span> Görsel / B-Roll Ekle
+          </button>
+          <button 
+            (click)="addTrackLane(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-sky-500/20 hover:text-sky-300 flex items-center gap-2 transition-colors cursor-pointer">
+            <span>➕</span> Yeni Katman Kanalı Ekle
+          </button>
+          <div class="h-px bg-slate-800 my-1"></div>
+          <button 
+            (click)="undo(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-slate-800 hover:text-white flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>⟲</span> Geri Al</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+Z</kbd>
+          </button>
+          <button 
+            (click)="redo(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-slate-800 hover:text-white flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>⟳</span> İleri Al</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+Y</kbd>
+          </button>
+        </ng-container>
       </div>
     </main>
   `
@@ -1034,6 +1170,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   @ViewChild('videoPlayer') videoRef!: ElementRef<HTMLVideoElement>;
   @ViewChild('chatMessagesContainer') chatContainer!: ElementRef<HTMLDivElement>;
   @ViewChild('timelineTrack') timelineTrackRef!: ElementRef<HTMLDivElement>;
+  @ViewChild('timelineScrollContainer') timelineScrollContainerRef?: ElementRef<HTMLDivElement>;
   @ViewChild('assetFileInput') assetFileInput?: ElementRef<HTMLInputElement>;
 
   readonly assets = signal<ProjectAssetDto[]>([]);
@@ -1046,6 +1183,13 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly videoUrl = signal<string>('');
   readonly currentTime = signal<number>(0);
   readonly totalDuration = signal<number>(100);
+
+  // Ses Dalga Formu (Web Audio API Waveform)
+  readonly audioPeaks = signal<number[] | null>(null);
+  readonly isWaveformLoading = signal<boolean>(false);
+
+  // Oynatma Durumu
+  readonly isPlaying = signal<boolean>(false);
 
   // Altyazı & Karaoke State
   readonly showSubtitles = signal<boolean>(true);
@@ -1075,16 +1219,20 @@ export class EditorComponent implements OnInit, OnDestroy {
     const blob = new Blob([vttContent], { type: 'text/vtt' });
     return URL.createObjectURL(blob);
   });
+
   readonly activeOverlays = computed(() => {
     const t = this.currentTime();
     const overlays = this.activeEdl()?.overlays || [];
     return overlays.filter(ov => t >= ov.timestamp && t <= (ov.timestamp + ov.duration));
   });
-  readonly activeTab = signal<'chat' | 'overlays' | 'inspector' | 'media'>('chat');
+
+  // Sol Panel Aktif Sekmesi
+  readonly activeTab = signal<'chat' | 'overlays' | 'inspector' | 'media' | 'transcript'>('chat');
   readonly rendering = signal<boolean>(false);
-  readonly rippleAi = signal<boolean>(true); // Varsayılan: AI kısımları Sıkıştırılmış
-  readonly rippleManual = signal<boolean>(true); // Varsayılan: Manuel kısımlar Sıkıştırılmış
-  readonly rippleRetake = signal<boolean>(true); // Varsayılan: Retake kısımları Sıkıştırılmış
+  readonly rippleAi = signal<boolean>(true);
+  readonly rippleManual = signal<boolean>(true);
+  readonly rippleRetake = signal<boolean>(true);
+
   readonly retakeCount = computed(() => {
     const edl = this.activeEdl();
     if (!edl || !edl.cuts) return 0;
@@ -1093,6 +1241,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       return r.includes('retake') || r.includes('tekrar');
     }).length;
   });
+
   readonly timelineZoom = signal<number>(1);
   readonly splitMarkers = signal<number[]>([]);
   readonly selectedClipIds = signal<string[]>([]);
@@ -1105,7 +1254,60 @@ export class EditorComponent implements OnInit, OnDestroy {
     return this.clips().some(c => selIds.includes(c.id) && !c.isCut);
   });
   readonly selectedOverlayId = signal<string | null>(null);
-  
+
+  // Çok Kanallı (Multi-Track) Katman Mimarisi
+  readonly customTrackCount = signal<number>(3);
+  readonly overlayTrackNumbers = computed<number[]>(() => {
+    const overlays = this.activeEdl()?.overlays || [];
+    const maxTrackInOverlays = overlays.reduce((max, o) => Math.max(max, Number(o.trackId) || 1), 1);
+    const totalTracks = Math.max(this.customTrackCount(), maxTrackInOverlays);
+    
+    const tracks: number[] = [];
+    for (let i = totalTracks; i >= 1; i--) {
+      tracks.push(i);
+    }
+    return tracks;
+  });
+
+  // Dinamik Zaman Cetveli İşaretleri
+  readonly timelineRulerMarks = computed<{ time: number; label: string; percent: number; isMajor: boolean }[]>(() => {
+    const dur = Math.max(1, this.totalDuration() || 60);
+    const zoom = Math.max(1, this.timelineZoom() || 1);
+    
+    let step = 10;
+    if (dur <= 30) step = 2;
+    else if (dur <= 60) step = 5;
+    else if (dur <= 180) step = 10;
+    else if (dur <= 600) step = 20;
+    else if (dur <= 1800) step = 30;
+    else step = 60;
+    
+    if (zoom >= 4) step = Math.max(1, Math.round(step / 4));
+    else if (zoom >= 2) step = Math.max(2, Math.round(step / 2));
+    
+    const marks: { time: number; label: string; percent: number; isMajor: boolean }[] = [];
+    for (let t = 0; t <= dur; t += step) {
+      const mins = Math.floor(t / 60);
+      const secs = Math.floor(t % 60);
+      const label = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      const percent = (t / dur) * 100;
+      marks.push({ time: t, label, percent, isMajor: true });
+    }
+    return marks;
+  });
+
+  // Transkript Arama
+  readonly transcriptSearchQuery = signal<string>('');
+  readonly filteredTranscriptSegments = computed(() => {
+    const segs = this.activeEdl()?.transcript?.segments || [];
+    const q = this.transcriptSearchQuery().trim().toLowerCase();
+    if (!q) return segs;
+    return segs.filter(s => s.text.toLowerCase().includes(q));
+  });
+
+  // Context Menu State
+  readonly contextMenu = signal<ContextMenuState | null>(null);
+
   // Inspector Data State
   inspectorData: any = {};
   
@@ -1114,8 +1316,10 @@ export class EditorComponent implements OnInit, OnDestroy {
   isResizingOverlay = false;
   resizeEdge: 'left' | 'right' | null = null;
   dragStartX = 0;
+  dragStartY = 0;
   dragOverlayOriginalStart = 0;
   dragOverlayOriginalDuration = 0;
+  dragOverlayOriginalTrack = 1;
   
   // Canvas Drag & Drop State
   isCanvasDragging = false;
@@ -1133,7 +1337,6 @@ export class EditorComponent implements OnInit, OnDestroy {
   canvasResizeOriginalScale = 1;
   canvasResizeOriginalFontSize = 48;
   
-  
   readonly selectedOverlay = computed(() => {
     const id = this.selectedOverlayId();
     if (!id) return null;
@@ -1145,7 +1348,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly previewMessageId = signal<string | null>(null);
   readonly activeEdl = computed(() => this.previewEdl() || this.edl());
 
-  // Canlı Taslak (Ghost Layer) - Yönetmen AI soru formunu doldururken ekranda canlı gösterilir
+  // Canlı Taslak (Ghost Layer)
   readonly ghostPreview = computed(() => {
     const msgs = this.chatMessages();
     const clarMsg = [...msgs].reverse().find(m => m.patchDurumu === 'clarification' && m.formFields);
@@ -1172,14 +1375,13 @@ export class EditorComponent implements OnInit, OnDestroy {
     return { text: String(text), color: String(color), font: String(font), posX, posY };
   });
 
-  // Clips (Parçalar) hesaplaması
+  // Clips hesaplaması
   readonly clips = computed(() => {
     const total = this.totalDuration();
     const edl = this.activeEdl();
     const cuts = edl?.cuts || [];
     const splits = [...this.splitMarkers(), total].sort((a,b) => a-b);
     
-    // Bütün sınır noktalarını (cut başı/sonu, split noktaları) topla
     let allPoints = new Set<number>();
     allPoints.add(0);
     allPoints.add(total);
@@ -1195,7 +1397,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     for (let i = 0; i < sortedPoints.length - 1; i++) {
       const start = sortedPoints[i];
       const end = sortedPoints[i+1];
-      if (end - start < 0.05) continue; // çok küçük fragmanları (artifact) atla
+      if (end - start < 0.05) continue;
       
       const mid = (start + end) / 2;
       const cut = cuts.find(c => mid >= c.start && mid <= c.end);
@@ -1227,16 +1429,16 @@ export class EditorComponent implements OnInit, OnDestroy {
     const startStr = clip.start.toFixed(1);
     const endStr = clip.end.toFixed(1);
     if (!clip.isCut) {
-      return `Klip (${startStr}s - ${endStr}s) - Kesmek için çift tıkla`;
+      return `Klip (${startStr}s - ${endStr}s) - Kesmek için çift tıkla / Sağ tık`;
     }
     if (this.isRetakeClip(clip)) {
       const desc = clip.cutObj?.command || clip.cutObj?.reason || 'Hatalı Tekrar';
-      return `🔁 Hatalı Tekrar (Retake) [${startStr}s - ${endStr}s]: ${desc} - İptal edip geri almak için çift tıkla`;
+      return `🔁 Hatalı Tekrar (Retake) [${startStr}s - ${endStr}s]: ${desc} - İptal için çift tıkla`;
     }
     if (this.isManualClip(clip)) {
-      return `🖐 Manuel Kesim [${startStr}s - ${endStr}s] - İptal edip geri almak için çift tıkla`;
+      return `🖐 Manuel Kesim [${startStr}s - ${endStr}s] - İptal için çift tıkla`;
     }
-    return `🤖 AI Jump-Cut [${startStr}s - ${endStr}s]: ${clip.cutObj?.reason || 'Sessizlik'} - İptal edip geri almak için çift tıkla`;
+    return `🤖 AI Jump-Cut [${startStr}s - ${endStr}s]: ${clip.cutObj?.reason || 'Sessizlik'} - İptal için çift tıkla`;
   }
 
   isVisible(clip: any): boolean {
@@ -1310,14 +1512,19 @@ export class EditorComponent implements OnInit, OnDestroy {
   loadVideo(): void {
     this.videoService.getVideo(this.projectId).subscribe({
       next: (v) => {
+        let streamUrl = '';
         if (v.streamUrl) {
-          this.videoUrl.set(v.streamUrl);
+          streamUrl = v.streamUrl;
         } else if (v.id) {
           const apiKey = environment.apiKey || 'SUPER_SECRET_OTOEDIT_KEY_123!';
-          this.videoUrl.set(`${environment.apiUrl}/videos/${v.id}/stream?apiKey=${apiKey}`);
+          streamUrl = `${environment.apiUrl}/videos/${v.id}/stream?apiKey=${apiKey}`;
         }
         
-        // v.sure is a string "hh:mm:ss.fff" from C# TimeSpan
+        if (streamUrl) {
+          this.videoUrl.set(streamUrl);
+          this.loadAudioWaveform(streamUrl);
+        }
+        
         if (v.sure) {
           const parts = v.sure.split(':');
           if (parts.length >= 3) {
@@ -1337,12 +1544,21 @@ export class EditorComponent implements OnInit, OnDestroy {
   loadEdl(): void {
     this.edlService.getEdl(this.projectId).subscribe({
       next: (res) => {
+        if (res.edl.overlays && res.edl.overlays.length > 0) {
+          const { overlays, changed } = this.autoAssignOverlayTracks(res.edl.overlays);
+          res.edl.overlays = overlays;
+          if (changed) {
+            this.edlService.patchEdl(this.projectId, {
+              overlays: overlays.map(o => ({ id: o.id, trackId: o.trackId, action: 'update' } as any))
+            }).subscribe({
+              error: (err) => console.warn('Katman ayrıştırma kaydedilemedi:', err)
+            });
+          }
+        }
         this.edl.set(res.edl);
-        // EDL'den gelen duration 0 veya çok küçükse video metasını ezmesini engelle
         if (res.edl.duration && res.edl.duration > 5) {
           this.totalDuration.set(res.edl.duration);
         }
-        // Seçili katman varsa verilerini yenilenen EDL ile senkronize et
         const selId = this.selectedOverlayId();
         if (selId) {
           const ov = res.edl.overlays?.find(o => o.id === selId);
@@ -1350,11 +1566,417 @@ export class EditorComponent implements OnInit, OnDestroy {
             this.inspectorData = { ...this.inspectorData, ...ov };
           }
         }
+        // Eğer waveform henüz yüklenmediyse ve transcript varsa fallback üret
+        if (!this.audioPeaks()) {
+          this.generateFallbackWaveform();
+        }
       },
       error: (err) => console.error('EDL yüklenemedi:', err)
     });
   }
 
+  // --- GERÇEK SES DALGASI (WEB AUDIO API) ---
+  loadAudioWaveform(url: string): void {
+    if (!url) return;
+    this.isWaveformLoading.set(true);
+
+    fetch(url)
+      .then(res => {
+        if (!res.ok) throw new Error('Audio stream fetch error: ' + res.status);
+        return res.arrayBuffer();
+      })
+      .then(arrayBuffer => {
+        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextClass) throw new Error('AudioContext not supported in this browser');
+        const audioCtx = new AudioContextClass();
+        return audioCtx.decodeAudioData(arrayBuffer);
+      })
+      .then(audioBuffer => {
+        const raw = audioBuffer.getChannelData(0);
+        const dur = Math.max(1, audioBuffer.duration || this.totalDuration() || 60);
+        const totalPoints = Math.min(800, Math.max(160, Math.round(dur * 6)));
+        const blockSize = Math.floor(raw.length / totalPoints);
+        const peaks: number[] = [];
+
+        for (let i = 0; i < totalPoints; i++) {
+          const start = i * blockSize;
+          let max = 0;
+          let sum = 0;
+          const step = Math.max(1, Math.floor(blockSize / 20));
+          let count = 0;
+          for (let j = 0; j < blockSize; j += step) {
+            const val = Math.abs(raw[start + j] || 0);
+            if (val > max) max = val;
+            sum += val * val;
+            count++;
+          }
+          const rms = Math.sqrt(sum / (count || 1));
+          const peak = Math.min(0.95, Math.max(0.05, max * 0.7 + rms * 1.6));
+          peaks.push(parseFloat(peak.toFixed(3)));
+        }
+        this.audioPeaks.set(peaks);
+        this.isWaveformLoading.set(false);
+      })
+      .catch(err => {
+        console.warn('[Waveform] Real decode fallback:', err);
+        this.generateFallbackWaveform();
+        this.isWaveformLoading.set(false);
+      });
+  }
+
+  generateFallbackWaveform(): void {
+    const dur = Math.max(1, this.totalDuration() || 60);
+    const totalPoints = Math.min(600, Math.max(120, Math.round(dur * 4)));
+    const edl = this.activeEdl();
+    const cuts = edl?.cuts || [];
+    const segments = edl?.transcript?.segments || [];
+    const peaks: number[] = [];
+
+    for (let i = 0; i < totalPoints; i++) {
+      const time = (i / totalPoints) * dur;
+      const isCut = cuts.some(c => time >= c.start && time <= c.end);
+      const isSpeech = segments.some(s => time >= s.start && time <= s.end);
+
+      if (isCut) {
+        peaks.push(0.04 + Math.random() * 0.03);
+      } else if (isSpeech) {
+        const seed = Math.sin(i * 0.8) * Math.cos(i * 0.3);
+        const val = 0.35 + Math.abs(seed) * 0.55 + Math.random() * 0.1;
+        peaks.push(parseFloat(Math.min(0.95, val).toFixed(3)));
+      } else {
+        peaks.push(0.12 + Math.random() * 0.1);
+      }
+    }
+    this.audioPeaks.set(peaks);
+  }
+
+  getWaveformPath(): string {
+    const peaks = this.audioPeaks();
+    if (!peaks || peaks.length === 0) return '';
+    
+    const width = 1000;
+    const height = 56;
+    const midY = height / 2;
+    const numPoints = peaks.length;
+    const dx = width / (numPoints - 1);
+    
+    let topPath = `M 0 ${midY}`;
+    for (let i = 0; i < numPoints; i++) {
+      const x = i * dx;
+      const peakH = peaks[i] * (height / 2 - 3);
+      const y = midY - peakH;
+      topPath += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }
+    
+    let bottomPath = '';
+    for (let i = numPoints - 1; i >= 0; i--) {
+      const x = i * dx;
+      const peakH = peaks[i] * (height / 2 - 3);
+      const y = midY + peakH;
+      bottomPath += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+    }
+    
+    return `${topPath} ${bottomPath} Z`;
+  }
+
+  // --- OYNATMA & TRANSPORT İŞLEMLERİ ---
+  togglePlayPause(): void {
+    const video = this.videoRef?.nativeElement;
+    if (!video) return;
+    if (video.paused) {
+      video.play().then(() => this.isPlaying.set(true)).catch(e => console.warn(e));
+    } else {
+      video.pause();
+      this.isPlaying.set(false);
+    }
+  }
+
+  skipSeconds(seconds: number): void {
+    const video = this.videoRef?.nativeElement;
+    if (!video) return;
+    const newTime = Math.max(0, Math.min(this.totalDuration(), video.currentTime + seconds));
+    video.currentTime = newTime;
+    this.currentTime.set(newTime);
+  }
+
+  toggleFullscreen(): void {
+    const video = this.videoRef?.nativeElement;
+    if (!video) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      video.requestFullscreen().catch(e => console.warn(e));
+    }
+  }
+
+  seekToTranscript(time: number): void {
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.currentTime = time;
+    }
+    this.currentTime.set(time);
+  }
+
+  // --- GERİ AL & İLERİ AL (UNDO / REDO) ---
+  undo(): void {
+    this.edlService.undoEdl(this.projectId).subscribe({
+      next: () => this.loadEdl(),
+      error: (err) => console.warn('Undo:', err)
+    });
+  }
+
+  redo(): void {
+    this.edlService.redoEdl(this.projectId).subscribe({
+      next: () => this.loadEdl(),
+      error: (err) => console.warn('Redo:', err)
+    });
+  }
+
+  // --- SAĞ TIK BAĞLAM MENÜSÜ (CONTEXT MENU) ---
+  openClipContextMenu(event: MouseEvent, clip: any): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.contextMenu.set({
+      visible: true,
+      x: Math.min(window.innerWidth - 220, event.clientX),
+      y: Math.min(window.innerHeight - 250, event.clientY),
+      type: 'clip',
+      targetClip: clip
+    });
+  }
+
+  openOverlayContextMenu(event: MouseEvent, ov: OverlayItem): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.selectedOverlayId.set(ov.id);
+    this.contextMenu.set({
+      visible: true,
+      x: Math.min(window.innerWidth - 220, event.clientX),
+      y: Math.min(window.innerHeight - 280, event.clientY),
+      type: 'overlay',
+      targetOverlay: ov
+    });
+  }
+
+  openTimelineContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const time = this.getTimeAtClientX(event.clientX);
+    this.contextMenu.set({
+      visible: true,
+      x: Math.min(window.innerWidth - 220, event.clientX),
+      y: Math.min(window.innerHeight - 260, event.clientY),
+      type: 'timeline',
+      seekTime: time
+    });
+  }
+
+  closeContextMenu(): void {
+    this.contextMenu.set(null);
+  }
+
+  splitClipAtPlayhead(clip: any): void {
+    const t = this.currentTime();
+    this.splitMarkers.update(m => [...m, t]);
+    this.closeContextMenu();
+  }
+
+  deleteClip(clip: any): void {
+    const newCut = { 
+      id: `manual_cut_${Date.now()}`, 
+      start: clip.start, 
+      end: clip.end, 
+      reason: 'Manuel kesim',
+      action: 'add'
+    };
+    this.edlService.patchEdl(this.projectId, {
+      cuts: [newCut as any]
+    }).subscribe(() => {
+      this.loadEdl();
+      this.closeContextMenu();
+    });
+  }
+
+  restoreClip(clip: any): void {
+    if (clip.cutObj?.id) {
+      this.edlService.patchEdl(this.projectId, {
+        cuts: [{ id: clip.cutObj.id, start: 0, end: 0, action: 'remove' } as any]
+      }).subscribe(() => {
+        this.loadEdl();
+        this.closeContextMenu();
+      });
+    }
+  }
+
+  duplicateOverlay(overlayId: string): void {
+    const currentOverlays = this.activeEdl()?.overlays || [];
+    const ov = currentOverlays.find(o => o.id === overlayId);
+    if (!ov) return;
+    
+    const newId = `ov_${ov.type}_${Date.now()}`;
+    const newStart = parseFloat(Math.min(this.totalDuration() - 1, ov.timestamp + 1.0).toFixed(2));
+    
+    const duplicated: any = {
+      ...ov,
+      id: newId,
+      timestamp: newStart,
+      content: ov.type === 'text' ? `${ov.content || 'Metin'} (Kopya)` : ov.content,
+      action: 'add'
+    };
+    
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [duplicated]
+    }).subscribe({
+      next: () => {
+        this.loadEdl();
+        this.selectOverlay(newId);
+      },
+      error: (err) => console.error('Katman kopyalanamadı:', err)
+    });
+  }
+
+  splitOverlayAtPlayhead(ov: OverlayItem): void {
+    const t = this.currentTime();
+    if (t <= ov.timestamp || t >= (ov.timestamp + ov.duration)) {
+      alert('Zaman imleci katmanın sınırları içinde olmalıdır.');
+      return;
+    }
+    const part1Duration = parseFloat((t - ov.timestamp).toFixed(2));
+    const part2Duration = parseFloat(((ov.timestamp + ov.duration) - t).toFixed(2));
+    
+    const updatedPart1 = {
+      ...ov,
+      duration: part1Duration,
+      action: 'update'
+    };
+    const newPart2 = {
+      ...ov,
+      id: `ov_${ov.type}_${Date.now()}`,
+      timestamp: parseFloat(t.toFixed(2)),
+      duration: part2Duration,
+      action: 'add'
+    };
+    
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [updatedPart1 as any, newPart2 as any]
+    }).subscribe(() => {
+      this.loadEdl();
+    });
+  }
+
+  deleteSelectedItems(): void {
+    if (this.selectedOverlayId()) {
+      this.removeOverlay(this.selectedOverlayId()!);
+      this.selectedOverlayId.set(null);
+      return;
+    }
+    if (this.selectedClipIds().length > 0) {
+      this.deleteSelectedClips();
+    }
+  }
+
+  // --- MOUSE TEKERLEĞİ İLE ZOOM & SCROLL ---
+  onTimelineWheel(event: WheelEvent): void {
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      if (event.deltaY < 0) {
+        this.zoomIn();
+      } else {
+        this.zoomOut();
+      }
+    } else if (event.shiftKey) {
+      const container = this.timelineScrollContainerRef?.nativeElement;
+      if (container) {
+        container.scrollLeft += event.deltaY;
+      }
+    }
+  }
+
+  // --- KLAVYE KISAYOLLARI (HOSTLISTENER) ---
+  @HostListener('window:keydown', ['$event'])
+  onGlobalKeyDown(event: KeyboardEvent): void {
+    const target = event.target as HTMLElement;
+    if (target) {
+      const tag = target.tagName?.toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable) {
+        return;
+      }
+    }
+
+    if (event.code === 'Escape') {
+      if (this.contextMenu()) {
+        this.closeContextMenu();
+        return;
+      }
+      if (this.selectedOverlayId()) {
+        this.selectedOverlayId.set(null);
+        return;
+      }
+      if (this.selectedClipIds().length > 0) {
+        this.selectedClipIds.set([]);
+        return;
+      }
+    }
+
+    if (event.code === 'Space') {
+      event.preventDefault();
+      this.togglePlayPause();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.code === 'KeyZ') {
+      event.preventDefault();
+      this.undo();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && (event.code === 'KeyY' || (event.shiftKey && event.code === 'KeyZ'))) {
+      event.preventDefault();
+      this.redo();
+      return;
+    }
+
+    if (event.code === 'KeyB') {
+      event.preventDefault();
+      this.addSplitMarker();
+      return;
+    }
+
+    if ((event.ctrlKey || event.metaKey) && event.code === 'KeyD') {
+      event.preventDefault();
+      const ovId = this.selectedOverlayId();
+      if (ovId) {
+        this.duplicateOverlay(ovId);
+      }
+      return;
+    }
+
+    if (event.code === 'Delete' || event.code === 'Backspace') {
+      this.deleteSelectedItems();
+      return;
+    }
+
+    if (event.code === 'KeyM') {
+      if (this.selectedClipIds().length > 1) {
+        event.preventDefault();
+        this.mergeSelectedClips();
+        return;
+      }
+    }
+
+    if (event.code === 'KeyC') {
+      event.preventDefault();
+      this.toggleSubtitles();
+      return;
+    }
+
+    if (event.code === 'KeyT' && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      this.addTextOverlay();
+      return;
+    }
+  }
+
+  // --- MEDYA YÖNETİMİ ---
   loadChatHistory(): void {
     this.chatService.getHistory(this.projectId).subscribe({
       next: (msgs) => this.chatMessages.set(msgs),
@@ -1433,8 +2055,15 @@ export class EditorComponent implements OnInit, OnDestroy {
     const isVideo = asset.mimeTuru.startsWith('video/');
     const t = Math.max(0, this.currentTime());
     const currentOverlays = this.activeEdl()?.overlays || [];
-    const maxTrack = currentOverlays.reduce((max, o) => Math.max(max, o.trackId || 1), 0);
-    const nextTrack = maxTrack + 1;
+    const overlapping = currentOverlays.filter(ov => {
+       const ovEnd = ov.timestamp + ov.duration;
+       return (t < ovEnd && (t + 5.0) > ov.timestamp);
+    });
+    let nextTrack = 1;
+    if (overlapping.length > 0) {
+       const usedTracks = overlapping.map(o => Number(o.trackId) || 1);
+       nextTrack = Math.max(...usedTracks) + 1;
+    }
 
     const newOverlay: any = {
       id: `asset_${Date.now()}`,
@@ -1460,10 +2089,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  /**
-   * CANLI EDL SİMÜLASYONU:
-   * Video oynarken kesilen (cut) bir bölgeye girerse beklemeden cut.end konumuna atlar.
-   */
+  // --- CANLI EDL SİMÜLASYONU ---
   onTimeUpdate(): void {
     const video = this.videoRef?.nativeElement;
     if (!video) return;
@@ -1471,11 +2097,9 @@ export class EditorComponent implements OnInit, OnDestroy {
     const t = video.currentTime;
     this.currentTime.set(t);
 
-    // 1. Cut atlama kontrolü (Skip logic)
     const cuts = this.activeEdl()?.cuts || [];
     for (const cut of cuts) {
       if (t >= cut.start && t < cut.end) {
-        console.log(`[EDL Simülasyonu] Kesilen bölge atlanıyor: ${cut.start}s -> ${cut.end}s`);
         video.currentTime = cut.end;
         return;
       }
@@ -1486,6 +2110,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     const video = this.videoRef?.nativeElement;
     if (video && video.duration && !isNaN(video.duration)) {
       this.totalDuration.set(video.duration);
+    }
+    if (!this.audioPeaks()) {
+      const url = this.videoUrl();
+      if (url) this.loadAudioWaveform(url);
     }
   }
 
@@ -1563,10 +2191,8 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   selectClip(clipId: string, event: MouseEvent): void {
     event.stopPropagation();
-    
     const current = this.selectedClipIds();
     
-    // Ctrl (Windows) veya Cmd (Mac) basılıysa çoklu seçim yap (Toggle)
     if (event.ctrlKey || event.metaKey) {
        if (current.includes(clipId)) {
           this.selectedClipIds.set(current.filter(id => id !== clipId));
@@ -1574,7 +2200,6 @@ export class EditorComponent implements OnInit, OnDestroy {
           this.selectedClipIds.set([...current, clipId]);
        }
     } else if (event.shiftKey && current.length > 0) {
-       // Shift basılıysa: Son seçilen klip ile bu klip arasındaki tüm klipleri aralık olarak seç (Range Selection)
        const allClips = this.clips();
        const lastSelectedId = current[current.length - 1];
        const lastIdx = allClips.findIndex(c => c.id === lastSelectedId);
@@ -1589,7 +2214,6 @@ export class EditorComponent implements OnInit, OnDestroy {
           this.selectedClipIds.set([clipId]);
        }
     } else {
-       // Düz tıklama: Tekli seçim (zaten tek seçiliyse kaldır, değilse sadece bunu seç)
        if (current.length === 1 && current[0] === clipId) {
           this.selectedClipIds.set([]);
        } else {
@@ -1627,7 +2251,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!selIds.length) return;
     
     const selectedClips = this.clips().filter(c => selIds.includes(c.id) && !c.isCut);
-    if (!selectedClips.length) return; // Kalanların hepsi zaten kesikse işlem yapma
+    if (!selectedClips.length) return;
 
     const newCuts = selectedClips.map((clip, idx) => ({
       id: `manual_cut_${Date.now()}_${idx}`,
@@ -1674,17 +2298,15 @@ export class EditorComponent implements OnInit, OnDestroy {
     const allClips = this.clips();
     const selectedClips = allClips.filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
     
-    // Seçili kliplerin arasındaki tüm kesimleri (cuts) bul ve sil
     const startRange = selectedClips[0].start;
     const endRange = selectedClips[selectedClips.length - 1].end;
     
     const edl = this.activeEdl();
     if (!edl || !edl.cuts) return;
     
-    // Bu aralığa denk gelen tüm cut'ları bul
     const cutsToRemove = edl.cuts.filter(c => c.start >= (startRange - 0.05) && c.end <= (endRange + 0.05));
     if (cutsToRemove.length === 0) {
-       alert('Seçilen klipler arasında birleştirilecek (silinecek) bir kesim bulunamadı.');
+       alert('Seçilen klipler arasında birleştirilecek bir kesim bulunamadı.');
        return;
     }
     
@@ -1693,18 +2315,18 @@ export class EditorComponent implements OnInit, OnDestroy {
        this.edlService.patchEdl(this.projectId, {
           cuts: patchCuts as any
        }).subscribe(() => {
-          this.selectedClipIds.set([]); // seçimi temizle
+          this.selectedClipIds.set([]);
           this.loadEdl();
        });
     }
   }
 
   zoomIn(): void {
-    this.timelineZoom.update(z => z + 0.5);
+    this.timelineZoom.update(z => Math.min(8, parseFloat((z + 0.25).toFixed(2))));
   }
 
   zoomOut(): void {
-    this.timelineZoom.update(z => Math.max(1, z - 0.5));
+    this.timelineZoom.update(z => Math.max(1, parseFloat((z - 0.25).toFixed(2))));
   }
 
   addSplitMarker(): void {
@@ -1724,80 +2346,82 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (ov.positionX !== undefined && ov.positionX !== null) return `${ov.positionX}%`;
     const hPos = ov.position?.[0] || 'center';
     if (hPos === 'left') return '10%';
-    if (hPos === 'right') return '70%';
-    return '35%';
+    if (hPos === 'right') return '90%';
+    return '50%';
   }
 
   getOverlayZIndex(ov: OverlayItem): number {
-    if (this.selectedOverlayId() === ov.id) {
-      return 50; // Seçili eleman her zaman en üstte yer alır (kulp ve sürükleme engellenemez)
-    }
-    return 20 + (ov.trackId ?? 1);
-  }
-
-  isOverlayExiting(ov: OverlayItem): boolean {
-    const remaining = (ov.timestamp + ov.duration) - this.currentTime();
-    return remaining > 0 && remaining <= 0.45;
+    return 20 + (Number(ov.trackId) || 1);
   }
 
   getOverlayAnimationClass(ov: OverlayItem): string {
-    if (this.isOverlayExiting(ov)) {
-      const exitAnim = ov.exitAnimation || 'fade';
-      switch (exitAnim) {
-        case 'fade': return 'animate-fade-out';
-        case 'pop-up':
-        case 'scale-out': return 'animate-scale-out';
-        case 'slide-down': return 'animate-slide-down-out';
-        case 'slide-up': return 'animate-slide-up-out';
-        case 'none': return '';
-        default: return 'animate-fade-out';
+    const t = this.currentTime();
+    const anim = ov.animation || 'fade';
+    const exitAnim = ov.exitAnimation || 'fade';
+    
+    if (t < ov.timestamp + 0.5) {
+      if (anim === 'fade') return 'animate-fade-in';
+      if (anim === 'pop-up') return 'animate-pop-up';
+      if (anim === 'slide-up') return 'animate-slide-up';
+      return '';
+    }
+    
+    if (t > (ov.timestamp + ov.duration - 0.5)) {
+      if (exitAnim === 'fade') return 'animate-fade-out';
+      if (exitAnim === 'scale-out') return 'animate-scale-out';
+      if (exitAnim === 'slide-down') return 'animate-slide-down';
+      return '';
+    }
+    
+    return '';
+  }
+
+  autoAssignOverlayTracks(overlays: OverlayItem[]): { overlays: OverlayItem[]; changed: boolean } {
+    if (!overlays || overlays.length === 0) return { overlays: [], changed: false };
+    
+    let changed = false;
+    const sorted = [...overlays].sort((a, b) => a.timestamp - b.timestamp);
+    const trackIntervals = new Map<number, { start: number; end: number }[]>();
+    
+    for (const ov of sorted) {
+      const ovStart = ov.timestamp;
+      const ovEnd = ov.timestamp + Math.max(0.5, ov.duration || 3);
+      
+      const hasCollision = (tId: number) => {
+        const intervals = trackIntervals.get(tId) || [];
+        return intervals.some(inv => ovStart < inv.end && ovEnd > inv.start);
+      };
+      
+      let targetTrack = Number(ov.trackId);
+      if (!targetTrack || targetTrack < 1) {
+        targetTrack = 1;
       }
+      
+      if (hasCollision(targetTrack)) {
+        let candidate = 1;
+        while (hasCollision(candidate)) {
+          candidate++;
+        }
+        targetTrack = candidate;
+      }
+      
+      if (ov.trackId !== targetTrack) {
+        ov.trackId = targetTrack;
+        changed = true;
+      }
+      
+      if (!trackIntervals.has(targetTrack)) {
+        trackIntervals.set(targetTrack, []);
+      }
+      trackIntervals.get(targetTrack)!.push({ start: ovStart, end: ovEnd });
     }
-
-    const enterAnim = ov.animation || 'none';
-    switch (enterAnim) {
-      case 'fade': return 'animate-fade-in';
-      case 'pop-up': return 'scale-in';
-      case 'slide-up': return 'translate-y-4 opacity-0 animate-slide-up-forwards';
-      case 'none': return '';
-      default: return '';
-    }
+    
+    return { overlays: sorted, changed };
   }
 
-  bringOverlayForward(ovId: string): void {
-    const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
-    if (!ov) return;
-    const currentTrack = ov.trackId ?? 1;
-    const newTrack = currentTrack + 1;
-    ov.trackId = newTrack;
-    if (this.selectedOverlayId() === ovId && this.inspectorData) {
-      this.inspectorData.trackId = newTrack;
-    }
-    this.edl.update(e => e ? { ...e } : null);
-    this.edlService.patchEdl(this.projectId, {
-      overlays: [{ id: ovId, trackId: newTrack, action: 'update' } as any]
-    }).subscribe({
-      next: () => this.loadEdl(),
-      error: (err) => console.error('Katman sırası öne alınamadı:', err)
-    });
-  }
-
-  sendOverlayBackward(ovId: string): void {
-    const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
-    if (!ov) return;
-    const currentTrack = ov.trackId ?? 1;
-    const newTrack = Math.max(1, currentTrack - 1);
-    ov.trackId = newTrack;
-    if (this.selectedOverlayId() === ovId && this.inspectorData) {
-      this.inspectorData.trackId = newTrack;
-    }
-    this.edl.update(e => e ? { ...e } : null);
-    this.edlService.patchEdl(this.projectId, {
-      overlays: [{ id: ovId, trackId: newTrack, action: 'update' } as any]
-    }).subscribe({
-      next: () => this.loadEdl(),
-      error: (err) => console.error('Katman sırası arkaya alınamadı:', err)
-    });
+  addTrackLane(): void {
+    const currentMax = this.overlayTrackNumbers()[0] || 1;
+    this.customTrackCount.set(currentMax + 1);
   }
 
   assignAssetToSelectedOverlay(asset: ProjectAssetDto): void {
@@ -1816,7 +2440,6 @@ export class EditorComponent implements OnInit, OnDestroy {
         overlays: [{ id: selId, source: asset.url, content: asset.dosyaAdi, action: 'update' } as any]
       }).subscribe(() => {
         this.loadEdl();
-        this.activeTab.set('inspector');
       });
     }
   }
@@ -1837,13 +2460,12 @@ export class EditorComponent implements OnInit, OnDestroy {
         overlays: [{ id: selId, source: url, content: name, action: 'update' } as any]
       }).subscribe(() => {
         this.loadEdl();
-        this.activeTab.set('inspector');
       });
     }
   }
   
   onCanvasDragStart(event: MouseEvent, overlayId: string): void {
-     event.preventDefault(); // Prevent text selection
+     event.preventDefault();
      event.stopPropagation();
      if (this.selectedOverlayId() !== overlayId) {
         this.selectOverlay(overlayId);
@@ -1858,7 +2480,6 @@ export class EditorComponent implements OnInit, OnDestroy {
         if (ov.positionX !== undefined && ov.positionX !== null) {
            this.canvasDragOriginalX = ov.positionX;
         } else {
-           // Parse current string pos to approximate percentage
            this.canvasDragOriginalX = parseFloat(this.getOverlayLeft(ov));
         }
         
@@ -1871,10 +2492,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlayStyle(ov: any): any {
+     const totalDur = Math.max(1, this.totalDuration());
      if (!this.rippleAi() && !this.rippleManual()) {
         return {
-           left: `${(ov.timestamp / this.totalDuration()) * 100}%`,
-           width: `${(ov.duration / this.totalDuration()) * 100}%`
+           left: `${(ov.timestamp / totalDur) * 100}%`,
+           width: `${Math.max(1.0, (ov.duration / totalDur) * 100)}%`
         };
      }
 
@@ -1886,7 +2508,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      
      return {
         left: `${(startVis / visDur) * 100}%`,
-        width: `${Math.max(0.6, ((endVis - startVis) / visDur) * 100)}%`
+        width: `${Math.max(1.0, ((endVis - startVis) / visDur) * 100)}%`
      };
   }
 
@@ -1906,8 +2528,15 @@ export class EditorComponent implements OnInit, OnDestroy {
     
     const newOvId = `ov_txt_${Date.now()}`;
     const currentOverlays = this.activeEdl()?.overlays || [];
-    const maxTrack = currentOverlays.reduce((max, o) => Math.max(max, o.trackId || 1), 0);
-    const nextTrack = maxTrack + 1;
+    const overlapping = currentOverlays.filter(ov => {
+       const ovEnd = ov.timestamp + ov.duration;
+       return (start < ovEnd && (start + duration) > ov.timestamp);
+    });
+    let nextTrack = 1;
+    if (overlapping.length > 0) {
+       const usedTracks = overlapping.map(o => Number(o.trackId) || 1);
+       nextTrack = Math.max(...usedTracks) + 1;
+    }
 
     const newOverlay: any = {
       id: newOvId,
@@ -1936,7 +2565,6 @@ export class EditorComponent implements OnInit, OnDestroy {
           this.currentTime.set(start);
         }
         this.selectOverlay(newOvId);
-        this.activeTab.set('inspector');
       },
       error: (err) => console.error('Metin eklenemedi:', err)
     });
@@ -1949,7 +2577,6 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.addAssetOverlay(latestAsset);
       return;
     }
-    // Yüklenmiş görsel yoksa kullanıcıyı dosya yüklemesi / seçmesi için Medya sekmesine yönlendir
     this.activeTab.set('media');
   }
 
@@ -1969,8 +2596,15 @@ export class EditorComponent implements OnInit, OnDestroy {
     
     const newOvId = `ov_img_${Date.now()}`;
     const currentOverlays = this.activeEdl()?.overlays || [];
-    const maxTrack = currentOverlays.reduce((max, o) => Math.max(max, o.trackId || 1), 0);
-    const nextTrack = maxTrack + 1;
+    const overlapping = currentOverlays.filter(ov => {
+       const ovEnd = ov.timestamp + ov.duration;
+       return (start < ovEnd && (start + duration) > ov.timestamp);
+    });
+    let nextTrack = 1;
+    if (overlapping.length > 0) {
+       const usedTracks = overlapping.map(o => Number(o.trackId) || 1);
+       nextTrack = Math.max(...usedTracks) + 1;
+    }
 
     const newOverlay: any = {
       id: newOvId,
@@ -1998,13 +2632,11 @@ export class EditorComponent implements OnInit, OnDestroy {
           this.currentTime.set(start);
         }
         this.selectOverlay(newOvId);
-        this.activeTab.set('inspector');
       },
       error: (err) => console.error('Görsel eklenemedi:', err)
     });
   }
 
-  // Geriye dönük uyumluluk için alias'lar
   addOverlayToSelected(): void {
     this.addTextOverlay();
   }
@@ -2034,9 +2666,7 @@ export class EditorComponent implements OnInit, OnDestroy {
           scale: ov.scale ?? 1.0,
           trackId: ov.trackId ?? 1
         };
-        this.activeTab.set('inspector');
         
-        // Zaman imleci katmanın dışındaysa, ekranda görünmesi için oraya git
         const t = this.currentTime();
         if (t < ov.timestamp || t > (ov.timestamp + ov.duration)) {
            if (this.videoRef?.nativeElement) {
@@ -2103,7 +2733,6 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   cancelInspector(): void {
      this.selectedOverlayId.set(null);
-     this.activeTab.set('overlays');
      this.loadEdl();
   }
 
@@ -2116,7 +2745,6 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     let msgText = this.userPrompt.trim();
     
-    // Seçili klip(ler) varsa prompt'a context ekle
     const selIds = this.selectedClipIds();
     if (selIds.length > 0) {
        const selectedClips = this.clips().filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
@@ -2129,7 +2757,6 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     this.userPrompt = '';
 
-    // Kullanıcı mesajını anında UI'a ekle
     this.chatMessages.update(msgs => [
       ...msgs,
       {
@@ -2145,7 +2772,6 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.chatService.sendMessage(this.projectId, msgText).subscribe({
       next: (res) => {
         this.chatLoading.set(false);
-        // Asistan yanıtını ekle
         this.chatMessages.update(msgs => [
           ...msgs,
           {
@@ -2161,8 +2787,6 @@ export class EditorComponent implements OnInit, OnDestroy {
             id: res.id
           }
         ]);
-
-        // EDL'i yenile
         this.loadEdl();
       },
       error: (err) => {
@@ -2213,17 +2837,14 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  // B.1 HitL Patch Uygulama
   previewPatch(msg: ChatMessageDto): void {
     if (!msg.pendingEdlPatch) return;
     if (this.previewMessageId() === msg.id) {
-       // Kapat
        this.previewEdl.set(null);
        this.previewMessageId.set(null);
        return;
     }
 
-    // Önizleme mantığı: edl()'i JSON kopyala, pendingEdlPatch'i frontend'de manuel uygula
     const currentEdlStr = JSON.stringify(this.edl());
     if (!currentEdlStr) return;
     const simulated = JSON.parse(currentEdlStr) as EdlContent;
@@ -2248,9 +2869,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.previewEdl.set(simulated);
     this.previewMessageId.set(msg.id || null);
     
-    // Geri sarıp göstersin
     if (this.videoRef?.nativeElement) {
-      // Eğer patch'te belirli bir timestamp varsa, oraya sarsın (kabaca ilk elemanın süresi)
       let seekTo = 0;
       if (patch.cuts && patch.cuts.length > 0) {
         seekTo = Math.max(0, patch.cuts[0].start - 2);
@@ -2264,7 +2883,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   applyPatch(msg: ChatMessageDto): void {
     if (!msg.id) return;
-    this.previewEdl.set(null); // Preview temizle
+    this.previewEdl.set(null);
     this.previewMessageId.set(null);
     this.chatService.applyPendingPatch(this.projectId, msg.id).subscribe({
       next: () => {
@@ -2285,91 +2904,76 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   // --- Dynamic Clarification Form & 16:9 Stage Methods ---
   readonly colorPalette = [
-    '#FFFFFF', // Beyaz
-    '#FACC15', // Canlı Sarı
-    '#06B6D4', // Turkuaz / Cyan
-    '#EF4444', // Vurgu Kırmızı
-    '#10B981', // Neon Yeşil
-    '#A855F7', // Mor
-    '#F97316', // Turuncu
-    '#000000'  // Siyah
+    '#FFFFFF',
+    '#FACC15',
+    '#06B6D4',
+    '#EF4444',
+    '#10B981',
+    '#8B5CF6',
+    '#F97316',
+    '#EC4899',
+    '#000000'
   ];
 
-  getPresetCoords(preset: string): { x: number; y: number } {
-    switch (preset) {
-      case 'top-left': return { x: 18, y: 15 };
-      case 'top-center': return { x: 50, y: 15 };
-      case 'top-right': return { x: 82, y: 15 };
-      case 'center-left': return { x: 18, y: 50 };
-      case 'center': return { x: 50, y: 50 };
-      case 'center-right': return { x: 82, y: 50 };
-      case 'bottom-left': return { x: 18, y: 85 };
-      case 'bottom-center': return { x: 50, y: 85 };
-      case 'bottom-right': return { x: 82, y: 85 };
-      default: return { x: 50, y: 85 };
-    }
-  }
-
   getMarkerPosition(msg: ChatMessageDto, field: FormFieldDto): { x: number; y: number } {
-    if (msg.formData?.['positionX'] !== undefined && msg.formData?.['positionY'] !== undefined) {
-      return { x: Number(msg.formData['positionX']), y: Number(msg.formData['positionY']) };
-    }
-    const pos = msg.formData?.[field.id] || field.defaultValue || 'bottom-center';
-    return this.getPresetCoords(String(pos));
+     const data = msg.formData || {};
+     if (data['positionX'] !== undefined && data['positionY'] !== undefined) {
+        return { x: Number(data['positionX']), y: Number(data['positionY']) };
+     }
+     const posVal = data[field.id] || field.defaultValue || 'bottom-center';
+     return this.getPresetCoords(String(posVal));
   }
 
   onMiniStageClick(event: MouseEvent, msg: ChatMessageDto, fieldId: string): void {
-    const target = event.currentTarget as HTMLElement;
-    if (!target) return;
-    const rect = target.getBoundingClientRect();
-    const clickX = event.clientX - rect.left;
-    const clickY = event.clientY - rect.top;
-    const posX = Math.max(5, Math.min(95, Math.round((clickX / rect.width) * 100)));
-    const posY = Math.max(5, Math.min(95, Math.round((clickY / rect.height) * 100)));
-
-    if (!msg.formData) msg.formData = {};
-    msg.formData[fieldId] = `X: %${posX}, Y: %${posY}`;
-    msg.formData['positionX'] = posX;
-    msg.formData['positionY'] = posY;
-    this.chatMessages.update(msgs => [...msgs]);
+     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+     const x = Math.round(((event.clientX - rect.left) / rect.width) * 100);
+     const y = Math.round(((event.clientY - rect.top) / rect.height) * 100);
+     
+     msg.formData = msg.formData || {};
+     msg.formData['positionX'] = x;
+     msg.formData['positionY'] = y;
+     msg.formData[fieldId] = 'custom';
   }
 
   setPresetPosition(msg: ChatMessageDto, fieldId: string, preset: string): void {
-    const coords = this.getPresetCoords(preset);
-    if (!msg.formData) msg.formData = {};
-    msg.formData[fieldId] = preset;
-    msg.formData['positionX'] = coords.x;
-    msg.formData['positionY'] = coords.y;
-    this.chatMessages.update(msgs => [...msgs]);
+     msg.formData = msg.formData || {};
+     const coords = this.getPresetCoords(preset);
+     msg.formData['positionX'] = coords.x;
+     msg.formData['positionY'] = coords.y;
+     msg.formData[fieldId] = preset;
+  }
+
+  getPresetCoords(preset: string): { x: number; y: number } {
+     switch (preset) {
+        case 'top-left': return { x: 15, y: 15 };
+        case 'top-center': return { x: 50, y: 15 };
+        case 'top-right': return { x: 85, y: 15 };
+        case 'center-left': return { x: 15, y: 50 };
+        case 'center': return { x: 50, y: 50 };
+        case 'center-right': return { x: 85, y: 50 };
+        case 'bottom-left': return { x: 15, y: 85 };
+        case 'bottom-center': return { x: 50, y: 85 };
+        case 'bottom-right': return { x: 85, y: 85 };
+        default: return { x: 50, y: 85 };
+     }
+  }
+
+  updateFormData(msg: ChatMessageDto, fieldId: string, val: any): void {
+     msg.formData = msg.formData || {};
+     msg.formData[fieldId] = val;
   }
 
   getOptValue(opt: any): string {
-    if (typeof opt === 'string') return opt;
-    return opt?.value ?? opt?.label ?? String(opt);
+     return typeof opt === 'string' ? opt : (opt.value || opt.label || '');
   }
 
   getOptLabel(opt: any): string {
-    if (typeof opt === 'string') return opt;
-    return opt?.label ?? opt?.value ?? String(opt);
+     return typeof opt === 'string' ? opt : (opt.label || opt.value || '');
   }
-  
-  updateFormData(msg: ChatMessageDto, fieldId: string, value: any): void {
-     if (!msg.formData) {
-        msg.formData = {};
-        if (msg.formFields) {
-           msg.formFields.forEach(f => {
-              msg.formData[f.id] = f.defaultValue;
-           });
-        }
-     }
-     msg.formData[fieldId] = value;
-     this.chatMessages.update(msgs => [...msgs]);
-  }
-  
+
   submitForm(msg: ChatMessageDto): void {
      if (!msg.formFields) return;
      
-     // Varsayılan değerleri tanımla
      if (!msg.formData) msg.formData = {};
      msg.formFields.forEach(f => {
          if (msg.formData[f.id] === undefined) {
@@ -2377,7 +2981,6 @@ export class EditorComponent implements OnInit, OnDestroy {
          }
      });
      
-     // Kullanıcı yanıtını oluştur
      let responseText = "Belirttiğim özellikler ile katmanı ekle:\n";
      msg.formFields.forEach(f => {
          responseText += `- ${f.label}: ${msg.formData[f.id]}\n`;
@@ -2387,80 +2990,24 @@ export class EditorComponent implements OnInit, OnDestroy {
      }
      
      this.userPrompt = responseText;
-     
-     // Formu cevaplandı olarak işaretle
      msg.patchDurumu = 'answered';
      this.chatMessages.update(msgs => [...msgs]);
-     
      this.sendChatMessage();
   }
 
-  // B.1 Undo / Redo (Basit)& Shortcuts
-  @HostListener('window:keydown', ['$event'])
-  handleKeyboardEvent(event: KeyboardEvent) {
-    const target = event.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
-
-    if (event.ctrlKey && event.key.toLowerCase() === 'z') {
-      event.preventDefault();
-      this.undo();
-    } else if (event.ctrlKey && event.key.toLowerCase() === 'y') {
-      event.preventDefault();
-      this.redo();
-    } else if (event.key.toLowerCase() === 'b') {
-      event.preventDefault();
-      this.addSplitMarker();
-    } else if (event.key === 'Delete' || event.key === 'Backspace') {
-      if (this.selectedClipIds().length > 0) {
-         event.preventDefault();
-         this.deleteSelectedClips();
-      }
-    } else if (event.key.toLowerCase() === 'c') {
-      event.preventDefault();
-      this.toggleSubtitles();
-    }
-  }
-
-  undo(): void {
-    this.edlService.undoEdl(this.projectId).subscribe({
-      next: (res) => { 
-        this.edl.set(res.edl); 
-        console.log('Geri alındı (Undo)'); 
-      },
-      error: (err) => console.log('Geri alınacak işlem yok veya hata: ', err)
-    });
-  }
-
-  redo(): void {
-    this.edlService.redoEdl(this.projectId).subscribe({
-      next: (res) => { 
-        this.edl.set(res.edl); 
-        console.log('İleri alındı (Redo)'); 
-      },
-      error: (err) => console.log('İleri alınacak işlem yok veya hata: ', err)
-    });
-  }
-
-
-
-  removeCut(cutId: string): void {
-    if (confirm('Bu kesimi iptal edip sahneyi geri getirmek istiyor musunuz?')) {
-      this.edlService.patchEdl(this.projectId, {
-        cuts: [{ id: cutId, start: 0, end: 0, action: 'remove' } as any]
-      }).subscribe(() => this.loadEdl());
-    }
-  }
-
-  // --- Drag & Drop Methods ---
-
+  // --- TIMELINE & CANVAS DRAG & RESIZE ---
   onOverlayDragStart(event: MouseEvent, overlayId: string): void {
      event.stopPropagation();
      this.selectOverlay(overlayId);
      this.isDraggingOverlay = true;
      this.dragStartX = event.clientX;
+     this.dragStartY = event.clientY;
+     
      const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
      if (ov) {
         this.dragOverlayOriginalStart = ov.timestamp;
+        this.dragOverlayOriginalDuration = ov.duration;
+        this.dragOverlayOriginalTrack = Number(ov.trackId) || 1;
      }
   }
 
@@ -2470,6 +3017,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      this.isResizingOverlay = true;
      this.resizeEdge = edge;
      this.dragStartX = event.clientX;
+     
      const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
      if (ov) {
         this.dragOverlayOriginalStart = ov.timestamp;
@@ -2478,93 +3026,70 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   onCanvasResizeStart(event: MouseEvent, overlayId: string): void {
-      event.preventDefault();
-      event.stopPropagation();
-      if (this.selectedOverlayId() !== overlayId) {
-        this.selectOverlay(overlayId);
-      }
-      this.isCanvasResizing = true;
-      this.canvasResizeOverlayId = overlayId;
-      this.canvasResizeStartX = event.clientX;
-      this.canvasResizeStartY = event.clientY;
-      const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
-      if (ov) {
-          this.canvasResizeOriginalScale = ov.scale || 1.0;
-          this.canvasResizeOriginalFontSize = ov.fontSize || 48;
-      }
+     event.preventDefault();
+     event.stopPropagation();
+     this.isCanvasResizing = true;
+     this.canvasResizeOverlayId = overlayId;
+     this.canvasResizeStartX = event.clientX;
+     this.canvasResizeStartY = event.clientY;
+     
+     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
+     if (ov) {
+        this.canvasResizeOriginalScale = ov.scale || 1.0;
+        this.canvasResizeOriginalFontSize = ov.fontSize || 48;
+     }
   }
 
-  @HostListener('window:keydown', ['$event'])
-  onGlobalKeyDown(event: KeyboardEvent): void {
-    // Input, textarea veya select odaklıysa genel kısayolları engelle
-    const target = event.target as HTMLElement;
-    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
-      return;
+  bringOverlayForward(overlayId: string): void {
+    const overlays = this.activeEdl()?.overlays || [];
+    const ov = overlays.find(o => o.id === overlayId);
+    if (!ov) return;
+    
+    const newTrack = (Number(ov.trackId) || 1) + 1;
+    ov.trackId = newTrack;
+    if (this.inspectorData && this.inspectorData.id === overlayId) {
+       this.inspectorData.trackId = newTrack;
     }
+    
+    this.edlService.patchEdl(this.projectId, {
+       overlays: [{ id: ov.id, trackId: newTrack, action: 'update' } as any]
+    }).subscribe(() => this.loadEdl());
+  }
 
-    // Del veya Backspace: Seçili klipleri veya seçili katmanı sil
-    if (event.key === 'Delete' || event.key === 'Backspace') {
-      if (this.selectedClipIds().length > 0) {
-        event.preventDefault();
-        this.deleteSelectedClips();
-      } else if (this.selectedOverlayId()) {
-        event.preventDefault();
-        this.removeOverlay(this.selectedOverlayId()!);
-      }
-      return;
+  sendOverlayBackward(overlayId: string): void {
+    const overlays = this.activeEdl()?.overlays || [];
+    const ov = overlays.find(o => o.id === overlayId);
+    if (!ov) return;
+    
+    const newTrack = Math.max(1, (Number(ov.trackId) || 1) - 1);
+    ov.trackId = newTrack;
+    if (this.inspectorData && this.inspectorData.id === overlayId) {
+       this.inspectorData.trackId = newTrack;
     }
+    
+    this.edlService.patchEdl(this.projectId, {
+       overlays: [{ id: ov.id, trackId: newTrack, action: 'update' } as any]
+    }).subscribe(() => this.loadEdl());
+  }
 
-    // 'm' veya 'M': Seçili klipleri birleştir
-    if ((event.key === 'm' || event.key === 'M') && !event.ctrlKey && !event.metaKey) {
-      if (this.selectedClipIds().length > 1) {
-        event.preventDefault();
-        this.mergeSelectedClips();
-      }
-      return;
+  setOverlayTrack(overlayId: string, trackId: number): void {
+    const overlays = this.activeEdl()?.overlays || [];
+    const ov = overlays.find(o => o.id === overlayId);
+    if (!ov) return;
+    
+    ov.trackId = trackId;
+    if (this.inspectorData && this.inspectorData.id === overlayId) {
+       this.inspectorData.trackId = trackId;
     }
+    
+    this.edlService.patchEdl(this.projectId, {
+       overlays: [{ id: ov.id, trackId: trackId, action: 'update' } as any]
+    }).subscribe(() => this.loadEdl());
+  }
 
-    // 'b' veya 'B': Zaman çizgisini bulunulan yerden böl (Split)
-    if ((event.key === 'b' || event.key === 'B') && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      this.addSplitMarker();
-      return;
-    }
-
-    // 'c' veya 'C': Altyazıyı aç/kapat
-    if ((event.key === 'c' || event.key === 'C') && !event.ctrlKey && !event.metaKey) {
-      event.preventDefault();
-      this.toggleSubtitles();
-      return;
-    }
-
-    // Escape: Seçimleri temizle
-    if (event.key === 'Escape') {
-      this.selectedClipIds.set([]);
-      this.selectedOverlayId.set(null);
-      return;
-    }
-
-    // Ctrl+A / Cmd+A: Kesilmemiş tüm video kliplerini seç
-    if ((event.ctrlKey || event.metaKey) && (event.key === 'a' || event.key === 'A')) {
-      event.preventDefault();
-      const allNonCutIds = this.clips().filter(c => !c.isCut).map(c => c.id);
-      this.selectedClipIds.set(allNonCutIds);
-      return;
-    }
-
-    // Boşluk (Space): Oynat / Duraklat
-    if (event.code === 'Space') {
-      event.preventDefault();
-      const video = this.videoRef?.nativeElement;
-      if (video) {
-        if (video.paused) {
-          video.play();
-        } else {
-          video.pause();
-        }
-      }
-      return;
-    }
+  getOverlaysForTrack(trackNum: number): OverlayItem[] {
+    const overlays = this.activeEdl()?.overlays || [];
+    return overlays.filter(o => (Number(o.trackId) || 1) === trackNum);
   }
 
   @HostListener('window:mousemove', ['$event'])
@@ -2577,7 +3102,6 @@ export class EditorComponent implements OnInit, OnDestroy {
          const deltaX = event.clientX - this.canvasDragStartX;
          const deltaY = event.clientY - this.canvasDragStartY;
          
-         // Convert pixels to percentage of the video container
          const deltaXPercent = (deltaX / rect.width) * 100;
          const deltaYPercent = (deltaY / rect.height) * 100;
          
@@ -2603,7 +3127,6 @@ export class EditorComponent implements OnInit, OnDestroy {
      if (this.isCanvasResizing) {
          const deltaX = event.clientX - this.canvasResizeStartX;
          const deltaY = event.clientY - this.canvasResizeStartY;
-         // En baskın çekme eksenini (yatay, dikey veya çapraz) algıla:
          const delta = Math.abs(deltaX) >= Math.abs(deltaY) ? deltaX : deltaY;
 
          const ov = this.activeEdl()?.overlays?.find(o => o.id === this.canvasResizeOverlayId);
@@ -2644,7 +3167,7 @@ export class EditorComponent implements OnInit, OnDestroy {
            if (!track) return;
            const rect = track.getBoundingClientRect();
            const pixelsPerSec = rect.width / this.totalDuration();
-           const deltaSec = (event.clientX - this.dragStartX) / (pixelsPerSec * this.timelineZoom());
+           const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
            let newStart = Math.max(0, this.dragOverlayOriginalStart + deltaSec);
            ov.timestamp = parseFloat(newStart.toFixed(2));
         } else {
@@ -2657,8 +3180,15 @@ export class EditorComponent implements OnInit, OnDestroy {
            ov.timestamp = parseFloat(newStart.toFixed(2));
         }
         
+        const deltaTrack = Math.round((this.dragStartY - event.clientY) / 40);
+        const newTrack = Math.max(1, this.dragOverlayOriginalTrack + deltaTrack);
+        if (ov.trackId !== newTrack) {
+           ov.trackId = newTrack;
+        }
+
         if (this.inspectorData && this.inspectorData.id === ovId) {
             this.inspectorData.timestamp = ov.timestamp;
+            this.inspectorData.trackId = ov.trackId;
         }
      } else if (this.isResizingOverlay) {
         const mouseRawTime = this.getTimeAtClientX(event.clientX);
@@ -2693,7 +3223,6 @@ export class EditorComponent implements OnInit, OnDestroy {
   onGlobalMouseUp(event: MouseEvent): void {
      if (this.isCanvasDragging) {
          this.isCanvasDragging = false;
-         
          const ovId = this.canvasDragOverlayId;
          this.canvasDragOverlayId = null;
          

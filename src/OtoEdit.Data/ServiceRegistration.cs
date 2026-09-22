@@ -14,7 +14,10 @@ public static class ServiceRegistration
     {
         // Add DbContext
         services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString, b => b.MigrationsAssembly("OtoEdit.Data")));
+        {
+            options.UseNpgsql(connectionString, b => b.MigrationsAssembly("OtoEdit.Data"));
+            options.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+        });
 
         // Add Repositories
         services.AddScoped(typeof(IRepository<>), typeof(GenericRepository<>));
