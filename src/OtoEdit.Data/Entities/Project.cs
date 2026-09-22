@@ -25,4 +25,5 @@ public class Project
     public ICollection<ChatMessage> ChatMessages { get; set; } = new List<ChatMessage>();
     public ICollection<RenderJob> RenderJobs { get; set; } = new List<RenderJob>();
     public ICollection<PipelineLog> PipelineLogs { get; set; } = new List<PipelineLog>();
+    public ICollection<ProjectAsset> Assets { get; set; } = new List<ProjectAsset>();
 }

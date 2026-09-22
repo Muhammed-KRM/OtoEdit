@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,10 @@ public class EdlManager : IEdlService
     private readonly ILogger<EdlManager> _logger;
 
     private const string CachePrefix = "edl:";
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
 
     public EdlManager(AppDbContext context, ICacheService cacheService, ILogger<EdlManager> logger)
     {
@@ -47,11 +52,46 @@ public class EdlManager : IEdlService
         }
 
         using var doc = JsonDocument.Parse(edl.EdlJson);
+        var rootElement = doc.RootElement.Clone();
+
+        // Eğer EDL dokümanında transcript alanı yoksa veya boşsa, VideoTranscripts tablosundan otomatik besle
+        var hasTranscript = rootElement.TryGetProperty("transcript", out var tProp) &&
+                            tProp.ValueKind == JsonValueKind.Object &&
+                            tProp.TryGetProperty("segments", out var segs) &&
+                            segs.ValueKind == JsonValueKind.Array &&
+                            segs.GetArrayLength() > 0;
+
+        if (!hasTranscript)
+        {
+            var vt = await _context.VideoTranscripts
+                .AsNoTracking()
+                .FirstOrDefaultAsync(t => t.Video.ProjectId == projectId, cancellationToken);
+
+            if (vt != null && !string.IsNullOrWhiteSpace(vt.ZamanDamgalari))
+            {
+                try
+                {
+                    var rootNode = JsonNode.Parse(edl.EdlJson)?.AsObject();
+                    if (rootNode != null)
+                    {
+                        var transcriptNode = JsonNode.Parse(vt.ZamanDamgalari);
+                        rootNode["transcript"] = transcriptNode;
+                        using var enrichedDoc = JsonDocument.Parse(rootNode.ToJsonString(JsonOptions));
+                        rootElement = enrichedDoc.RootElement.Clone();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "VideoTranscripts verisi EDL ile birleştirilemedi: ProjectId={ProjectId}", projectId);
+                }
+            }
+        }
+
         var dto = new EdlDto
         {
             ProjectId = edl.ProjectId,
             Versiyon = edl.Versiyon,
-            Edl = doc.RootElement.Clone(),
+            Edl = rootElement,
             GuncellemeTarihi = edl.GuncellemeTarihi ?? edl.OlusturmaTarihi
         };
 
@@ -82,29 +122,43 @@ public class EdlManager : IEdlService
             var propName = property.Name;
             var patchValueNode = JsonNode.Parse(property.Value.GetRawText());
 
-            if ((propName.Equals("cuts", StringComparison.OrdinalIgnoreCase) ||
-                 propName.Equals("overlays", StringComparison.OrdinalIgnoreCase) ||
-                 propName.Equals("suggestions", StringComparison.OrdinalIgnoreCase)) &&
-                patchValueNode is JsonArray patchArray &&
-                rootNode[propName] is JsonArray targetArray)
+            var isCollectionProp = propName.Equals("cuts", StringComparison.OrdinalIgnoreCase) ||
+                                   propName.Equals("overlays", StringComparison.OrdinalIgnoreCase) ||
+                                   propName.Equals("suggestions", StringComparison.OrdinalIgnoreCase);
+
+            if (isCollectionProp && patchValueNode is JsonArray patchArray)
             {
+                // Case-insensitive olarak mevcut diziyi bul veya oluştur
+                var matchingEntry = rootNode.FirstOrDefault(kvp => kvp.Key.Equals(propName, StringComparison.OrdinalIgnoreCase));
+                var targetArray = matchingEntry.Value as JsonArray;
+                if (targetArray == null)
+                {
+                    targetArray = new JsonArray();
+                    rootNode[matchingEntry.Key ?? propName] = targetArray;
+                }
+
                 foreach (var item in patchArray)
                 {
                     if (item is JsonObject objItem)
                     {
-                        var itemId = objItem["id"]?.GetValue<string>();
-                        var isRemove = objItem["action"]?.GetValue<string>() == "remove";
+                        var idKvp = objItem.FirstOrDefault(kvp => kvp.Key.Equals("id", StringComparison.OrdinalIgnoreCase));
+                        var itemId = idKvp.Value?.GetValue<string>();
+                        var actionKvp = objItem.FirstOrDefault(kvp => kvp.Key.Equals("action", StringComparison.OrdinalIgnoreCase));
+                        var isRemove = actionKvp.Value?.GetValue<string>() == "remove";
 
                         if (!string.IsNullOrEmpty(itemId))
                         {
                             int existingIndex = -1;
                             for (int i = 0; i < targetArray.Count; i++)
                             {
-                                if (targetArray[i] is JsonObject existingObj &&
-                                    existingObj["id"]?.GetValue<string>() == itemId)
+                                if (targetArray[i] is JsonObject existingObj)
                                 {
-                                    existingIndex = i;
-                                    break;
+                                    var existingIdKvp = existingObj.FirstOrDefault(kvp => kvp.Key.Equals("id", StringComparison.OrdinalIgnoreCase));
+                                    if (existingIdKvp.Value?.GetValue<string>() == itemId)
+                                    {
+                                        existingIndex = i;
+                                        break;
+                                    }
                                 }
                             }
 
@@ -123,6 +177,11 @@ public class EdlManager : IEdlService
                                         {
                                             if (!kvp.Key.Equals("action", StringComparison.OrdinalIgnoreCase))
                                             {
+                                                var existingProp = existingItemObj.FirstOrDefault(p => p.Key.Equals(kvp.Key, StringComparison.OrdinalIgnoreCase));
+                                                if (existingProp.Key != null && existingProp.Key != kvp.Key)
+                                                {
+                                                    existingItemObj.Remove(existingProp.Key);
+                                                }
                                                 existingItemObj[kvp.Key] = kvp.Value?.DeepClone();
                                             }
                                         }
@@ -160,7 +219,7 @@ public class EdlManager : IEdlService
             }
         }
 
-        edl.EdlJson = rootNode.ToJsonString();
+        edl.EdlJson = rootNode.ToJsonString(JsonOptions);
         edl.Versiyon += 1;
         edl.GuncellemeTarihi = DateTime.UtcNow;
 

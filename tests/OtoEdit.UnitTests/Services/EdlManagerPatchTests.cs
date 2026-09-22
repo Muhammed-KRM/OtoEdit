@@ -118,4 +118,63 @@ public class EdlManagerPatchTests : IDisposable
         updatedInDb.EdlJson.Should().Contain("img_2");
         updatedInDb.EdlJson.Should().Contain("\"content\":\"cat\"");
     }
+
+    [Fact]
+    public async Task PatchEdlAsync_WithCaseInsensitivePropertyNames_ShouldMatchAndModifyCorrectly()
+    {
+        var projectId = Guid.NewGuid();
+        var initialEdlJson = """
+        {
+            "cuts": [
+                {"id": "cut_1", "start": 0.0, "end": 5.0, "reason": "silence"}
+            ],
+            "overlays": [
+                {"id": "ov_1", "type": "text", "content": "Orijinal Başlık", "position": "center"}
+            ],
+            "settings": {"resolution": "1080p"}
+        }
+        """;
+
+        var edl = new EditDecisionList
+        {
+            ProjectId = projectId,
+            EdlJson = initialEdlJson,
+            Versiyon = 1,
+            OlusturmaTarihi = DateTime.UtcNow
+        };
+        _dbContext.EditDecisionLists.Add(edl);
+        await _dbContext.SaveChangesAsync();
+
+        // Büyük / küçük harf karışık JSON patch (Cuts, OVERLAYS, ID, ACTION vb.)
+        var patchDoc = JsonDocument.Parse("""
+        {
+            "Cuts": [
+                {"ID": "cut_1", "ACTION": "remove"},
+                {"id": "cut_2", "start": 10.0, "end": 15.0}
+            ],
+            "OverLAYS": [
+                {"Id": "ov_1", "Action": "update", "Content": "Güncellenmiş Başlık", "color": "#FACC15"}
+            ],
+            "SETTINGS": {"resolution": "4k"}
+        }
+        """);
+
+        var result = await _sut.PatchEdlAsync(projectId, patchDoc.RootElement);
+
+        result.Versiyon.Should().Be(2);
+
+        var updatedInDb = await _dbContext.EditDecisionLists.FirstAsync(e => e.ProjectId == projectId);
+        var updatedJson = updatedInDb.EdlJson;
+
+        // cut_1 silinmiş olmalı
+        updatedJson.Should().NotContain("cut_1");
+        // cut_2 eklenmiş olmalı
+        updatedJson.Should().Contain("cut_2");
+        // ov_1 güncellenmiş olmalı
+        updatedJson.Should().Contain("ov_1");
+        updatedJson.Should().Contain("Güncellenmiş Başlık");
+        updatedJson.Should().Contain("#FACC15");
+        // settings güncellenmiş olmalı
+        updatedJson.Should().Contain("\"resolution\":\"4k\"");
+    }
 }

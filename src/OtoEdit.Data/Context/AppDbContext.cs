@@ -24,6 +24,7 @@ public class AppDbContext : DbContext
     public virtual DbSet<EndpointLog> EndpointLogs { get; set; } = null!;
     public virtual DbSet<FunctionLog> FunctionLogs { get; set; } = null!;
     public virtual DbSet<PipelineLog> PipelineLogs { get; set; } = null!;
+    public virtual DbSet<ProjectAsset> ProjectAssets { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

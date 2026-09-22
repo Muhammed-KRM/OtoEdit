@@ -58,6 +58,7 @@ public static class DependencyInjection
         services.AddScoped<IEdlService, EdlManager>();
         services.AddScoped<IChatService, ChatManager>();
         services.AddScoped<IRenderService, RenderManager>();
+        services.AddScoped<IAssetService, AssetManager>();
         services.AddScoped<ITemplateService, TemplateManager>();
         services.AddHttpClient<IPexelsService, PexelsService>()
             .AddStandardResilienceHandler();

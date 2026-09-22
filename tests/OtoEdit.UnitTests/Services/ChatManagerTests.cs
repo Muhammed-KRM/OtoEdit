@@ -176,4 +176,154 @@ public class ChatManagerTests : IDisposable
         history[1].Mesaj.Should().Be("Yanıt 1");
         history[2].Mesaj.Should().Be("Mesaj 2");
     }
+
+    [Fact]
+    public async Task SendMessageAsync_WhenAiReturnsClarificationIntent_ShouldSetStatusAndReturnFormFields()
+    {
+        var projectId = Guid.NewGuid();
+        var project = new Project { Id = projectId, Ad = "Clarification Test Projesi" };
+        _dbContext.Projects.Add(project);
+        await _dbContext.SaveChangesAsync();
+
+        var formFieldsDoc = JsonDocument.Parse("""
+        [
+            {"id": "content", "type": "text", "label": "Yazı Metni", "defaultValue": "Başlık"},
+            {"id": "position", "type": "position", "label": "Ekran Konumu", "defaultValue": "bottom-center"},
+            {"id": "color", "type": "color", "label": "Yazı Rengi", "defaultValue": "#FACC15"}
+        ]
+        """);
+
+        var aiResult = new ChatResult
+        {
+            Intent = "clarification",
+            Mesaj = "Lütfen yazı metni ve rengini seçin.",
+            FormFields = formFieldsDoc.RootElement
+        };
+
+        _chatProviderMock.Setup(c => c.ProcessCommandAsync(
+            "Yazı ekle",
+            It.IsAny<string>(),
+            It.IsAny<string?>(),
+            It.IsAny<List<ChatHistoryItem>>(),
+            It.IsAny<CancellationToken>()))
+            .ReturnsAsync(aiResult);
+
+        var response = await _sut.SendMessageAsync(projectId, "Yazı ekle");
+
+        response.Should().NotBeNull();
+        response.Intent.Should().Be("clarification");
+        response.PatchDurumu.Should().Be("clarification");
+        response.FormFields.Should().NotBeNull();
+        response.FormFields!.Value.GetArrayLength().Should().Be(3);
+
+        // Veritabanında form verisinin EdlPatch alanında saklandığını doğrula
+        var savedAssistantMsg = await _dbContext.ChatMessages
+            .FirstAsync(c => c.ProjectId == projectId && c.Rol == "assistant");
+        savedAssistantMsg.PatchDurumu.Should().Be("clarification");
+        savedAssistantMsg.EdlPatch.Should().Contain("position");
+        savedAssistantMsg.EdlPatch.Should().Contain("#FACC15");
+    }
+
+    [Fact]
+    public async Task GetHistoryAsync_WhenClarificationMessageExists_ShouldParseAndReturnFormFields()
+    {
+        var projectId = Guid.NewGuid();
+        var formFieldsJson = """[{"id":"color","type":"color","defaultValue":"#EF4444"}]""";
+
+        _dbContext.ChatMessages.Add(new ChatMessage
+        {
+            ProjectId = projectId,
+            Rol = "assistant",
+            Mesaj = "Renk seçin",
+            PatchDurumu = "clarification",
+            EdlPatch = formFieldsJson,
+            OlusturmaTarihi = DateTime.UtcNow
+        });
+        await _dbContext.SaveChangesAsync();
+
+        var history = (await _sut.GetHistoryAsync(projectId)).ToList();
+
+        history.Should().HaveCount(1);
+        history[0].PatchDurumu.Should().Be("clarification");
+        history[0].FormFields.Should().NotBeNull();
+        history[0].FormFields!.Value.GetArrayLength().Should().Be(1);
+        history[0].FormFields!.Value[0].GetProperty("defaultValue").GetString().Should().Be("#EF4444");
+    }
+
+    [Fact]
+    public async Task ApplyPendingPatchAsync_WhenValidPendingPatch_ShouldApplyToEdlAndMarkApplied()
+    {
+        var projectId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var pendingPatchJson = """{"cuts":[{"id":"cut_test_1","action":"add","start":5.0,"end":10.0}]}""";
+
+        var chatMessage = new ChatMessage
+        {
+            Id = messageId,
+            ProjectId = projectId,
+            Rol = "assistant",
+            Mesaj = "Kesim önerisi",
+            PatchDurumu = "pending",
+            PendingEdlPatch = pendingPatchJson,
+            OlusturmaTarihi = DateTime.UtcNow
+        };
+        _dbContext.ChatMessages.Add(chatMessage);
+        await _dbContext.SaveChangesAsync();
+
+        _edlServiceMock.Setup(e => e.PatchEdlAsync(projectId, It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EdlPatchResponseDto
+            {
+                ProjectId = projectId,
+                Versiyon = 2,
+                Mesaj = "Patch uygulandı"
+            });
+
+        var result = await _sut.ApplyPendingPatchAsync(messageId);
+
+        result.Should().NotBeNull();
+        result.Versiyon.Should().Be(2);
+
+        // Veritabanındaki mesajın durumunun applied olduğunu ve pendingPatch'in temizlendiğini doğrula
+        var updatedMsg = await _dbContext.ChatMessages.FindAsync(messageId);
+        updatedMsg!.PatchDurumu.Should().Be("applied");
+        updatedMsg.PendingEdlPatch.Should().BeNull();
+        updatedMsg.EdlPatch.Should().Be(pendingPatchJson);
+
+        // EdlService çağrısı doğrulanmalı
+        _edlServiceMock.Verify(e => e.PatchEdlAsync(projectId, It.IsAny<JsonElement>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ApplyPendingPatchAsync_WhenNoPendingPatch_ShouldThrowInvalidOperationException()
+    {
+        var messageId = Guid.NewGuid();
+        var chatMessage = new ChatMessage
+        {
+            Id = messageId,
+            ProjectId = Guid.NewGuid(),
+            Rol = "assistant",
+            Mesaj = "Bilgilendirme",
+            PatchDurumu = "none",
+            PendingEdlPatch = null,
+            OlusturmaTarihi = DateTime.UtcNow
+        };
+        _dbContext.ChatMessages.Add(chatMessage);
+        await _dbContext.SaveChangesAsync();
+
+        var act = async () => await _sut.ApplyPendingPatchAsync(messageId);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*geçerli bir değişiklik yok*");
+    }
+
+    [Fact]
+    public async Task ApplyPendingPatchAsync_WhenMessageNotFound_ShouldThrowNotFoundException()
+    {
+        var nonExistentMessageId = Guid.NewGuid();
+
+        var act = async () => await _sut.ApplyPendingPatchAsync(nonExistentMessageId);
+
+        await act.Should().ThrowAsync<NotFoundException>()
+            .WithMessage("*Chat mesajı bulunamadı*");
+    }
 }

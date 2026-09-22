@@ -2,9 +2,9 @@ import { EdlPatchDto } from './edl.model';
 
 export interface FormFieldDto {
   id: string;
-  type: 'text' | 'color' | 'select' | 'number';
+  type: 'text' | 'color' | 'select' | 'number' | 'position';
   label: string;
-  options?: { label: string; value: string }[];
+  options?: ({ label: string; value: string } | string)[];
   defaultValue?: string | number;
   required?: boolean;
 }

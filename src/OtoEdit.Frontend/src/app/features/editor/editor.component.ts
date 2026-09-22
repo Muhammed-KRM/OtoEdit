@@ -8,11 +8,13 @@ import { VideoService } from '../../core/services/video.service';
 import { EdlService } from '../../core/services/edl.service';
 import { ChatService } from '../../core/services/chat.service';
 import { RenderService } from '../../core/services/render.service';
+import { AssetService } from '../../core/services/asset.service';
 import { SignalrService } from '../../core/services/signalr.service';
 import { ProjectDetailDto } from '../../core/models/project.model';
 import { VideoDetailDto } from '../../core/models/video.model';
-import { CutItem, EdlContent, EdlDto, OverlayItem, SuggestionItem } from '../../core/models/edl.model';
-import { ChatMessageDto } from '../../core/models/chat.model';
+import { CutItem, EdlContent, EdlDto, OverlayItem, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
+import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
+import { ProjectAssetDto } from '../../core/models/asset.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
 import { DurationPipe } from '../../shared/pipes/duration.pipe';
 import { environment } from '../../../environments/environment';
@@ -68,6 +70,7 @@ import { environment } from '../../../environments/environment';
               (loadedmetadata)="onMetadataLoaded()"
               class="w-full h-full object-contain max-h-[440px]"
               controls>
+              <track *ngIf="vttTrackUrl()" kind="subtitles" [src]="vttTrackUrl()" srclang="tr" label="Türkçe" [default]="showSubtitles()">
             </video>
 
               <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
@@ -121,13 +124,58 @@ import { environment } from '../../../environments/environment';
                      <span class="text-[8px] text-brand-cyan">⤡</span>
                 </div>
               </div>
+
+              <!-- Canlı Taslak (Ghost Layer) Önizlemesi (Yönetmen AI Formu İçin) -->
+              <div 
+                *ngIf="ghostPreview() as ghost" 
+                class="absolute pointer-events-none z-30 -translate-x-1/2 -translate-y-1/2 select-none border-2 border-dashed border-brand-cyan bg-black/70 backdrop-blur-xs px-3 py-1.5 rounded-lg shadow-glow-sm transition-all duration-100"
+                [style.left.%]="ghost.posX"
+                [style.top.%]="ghost.posY"
+                [style.color]="ghost.color"
+                [style.fontFamily]="ghost.font">
+                <span class="font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] text-lg">
+                  {{ ghost.text }}
+                </span>
+                <span class="absolute -top-3 -right-3 text-[9px] bg-brand-cyan text-slate-900 font-extrabold px-1.5 py-0.5 rounded shadow">
+                  📍 Taslak Konum
+                </span>
+              </div>
+
+              <!-- Canlı TikTok / Reels Tarzı Karaoke Altyazı Katmanı -->
+              <div 
+                *ngIf="showSubtitles() && currentSubtitleSegment() as seg" 
+                class="absolute bottom-6 left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center pointer-events-none select-none px-4 py-2 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl transition-all duration-150">
+                <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" [style.fontFamily]="subtitleFont()" [style.color]="subtitleColor()">
+                  <ng-container *ngIf="seg.words && seg.words.length > 0; else plainText">
+                    <span 
+                      *ngFor="let w of seg.words"
+                      class="transition-all duration-100 inline-block px-0.5 rounded"
+                      [ngClass]="isWordActive(w) ? 'text-amber-300 font-black scale-110 bg-amber-400/20 shadow-glow-sm' : 'text-slate-100 font-semibold opacity-90'">
+                      {{ w.word }}
+                    </span>
+                  </ng-container>
+                  <ng-template #plainText>
+                    <span class="font-bold text-slate-100 text-sm md:text-base drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)]">
+                      {{ seg.text }}
+                    </span>
+                  </ng-template>
+                </div>
+              </div>
           </div>
 
           <!-- Video Zaman Kontrolleri -->
           <div class="flex items-center justify-between text-xs font-mono text-slate-400 px-2">
-            <div class="flex gap-4">
+            <div class="flex items-center gap-4">
               <span>İzlenen: {{ currentTime() | duration }} / {{ totalDuration() | duration }}</span>
               <span class="text-brand-cyan font-bold">Net Süre: {{ visibleDuration() | duration }}</span>
+              <button 
+                (click)="toggleSubtitles()" 
+                [ngClass]="showSubtitles() ? 'text-amber-300 bg-amber-400/20 border-amber-400/40' : 'border-slate-700'"
+                class="px-2.5 py-1 rounded border hover:border-slate-500 bg-dark-800 transition-colors flex items-center gap-1.5 text-[11px]"
+                title="Altyazıyı Aç/Kapat (Kısayol: C)">
+                <span>💬</span>
+                <span>{{ showSubtitles() ? 'Altyazı: Açık' : 'Altyazı: Kapalı' }}</span>
+              </button>
             </div>
             <div class="flex items-center gap-4">
               <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-emerald-500"></span> Korunan</span>
@@ -153,6 +201,14 @@ import { environment } from '../../../environments/environment';
                 </button>
                 <button (click)="rippleRetake.set(!rippleRetake())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-amber-400 border border-slate-700" title="Retake (Hatalı Tekrar) Kısımlarını Sıkıştır/Genişlet">
                   {{ rippleRetake() ? '🔄 Retake Sıkıştırılmış' : '🔄 Retake Geniş' }}
+                </button>
+                <button 
+                  *ngIf="retakeCount() > 0" 
+                  (click)="deleteRetakeCuts()" 
+                  class="p-1 px-2.5 rounded bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 font-semibold text-[11px] shadow-glow-sm flex items-center gap-1.5 transition-all" 
+                  title="Tüm Hatalı Tekrar (Retake) Kesimlerini İptal Et ve Sahneyi Geri Yükle">
+                  <span>🔄</span>
+                  <span>{{ retakeCount() }} Retake'i Geri Al</span>
                 </button>
                 <button (click)="rippleManual.set(!rippleManual())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-sky-400 border border-slate-700" title="Manuel Kesimleri Sıkıştır/Genişlet">
                   {{ rippleManual() ? '🖐 Manuel Sıkıştırılmış' : '🖐 Manuel Geniş' }}
@@ -251,14 +307,14 @@ import { environment } from '../../../environments/environment';
                       (dblclick)="toggleClip(clip, $event)"
                       class="relative h-full transition-colors border-r border-white/20 box-border group"
                       [ngClass]="{
-                         'bg-amber-500/80 hover:bg-amber-400': clip.isCut && (clip.cutObj?.reason === 'Retake' || clip.cutObj?.reason === 'Hatalı Tekrar'),
-                         'bg-rose-900/80 hover:bg-rose-800': clip.isCut && clip.cutObj?.reason !== 'Manuel kesim' && clip.cutObj?.reason !== 'Retake' && clip.cutObj?.reason !== 'Hatalı Tekrar',
-                         'bg-rose-500/80 hover:bg-rose-400': clip.isCut && clip.cutObj?.reason === 'Manuel kesim',
+                         'bg-amber-500/80 hover:bg-amber-400': isRetakeClip(clip),
+                         'bg-rose-500/80 hover:bg-rose-400': isManualClip(clip),
+                         'bg-rose-900/80 hover:bg-rose-800': clip.isCut && !isRetakeClip(clip) && !isManualClip(clip),
                          'bg-emerald-600/40 hover:bg-emerald-500/60': !clip.isCut,
                          'ring-2 ring-inset ring-brand-yellow shadow-[0_0_10px_rgba(250,204,21,0.5)] z-10': selectedClipIds().includes(clip.id)
                       }"
                       [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual() || rippleRetake()) ? visibleDuration() : totalDuration() )) * 100"
-                      [title]="'Klip (' + (clip.start | number:'1.1-1') + 's - ' + (clip.end | number:'1.1-1') + 's) - İşlem için çift tıkla'">
+                      [title]="getClipTooltip(clip)">
                       
                       <!-- Kırmızı kısımları silme (Gizle modu kapalıyken) -->
                       <div *ngIf="clip.isCut" class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100">
@@ -368,41 +424,126 @@ import { environment } from '../../../environments/environment';
                     <button (click)="cancelPatch(msg)" class="flex-1 py-1.5 bg-rose-500/20 hover:bg-rose-500/40 text-rose-400 border border-rose-500/50 rounded font-bold transition-colors">İptal Et</button>
                   </div>
                   
-                  <!-- Dinamik Form (Clarification) -->
-                  <div *ngIf="msg.patchDurumu === 'clarification' && msg.formFields" class="mt-3 p-3 bg-dark-900 border border-brand-cyan/30 rounded-xl space-y-3">
-                     <p class="text-[10px] text-brand-cyan font-bold uppercase">Devam Etmek İçin Seçim Yapın</p>
+                  <!-- Dinamik Form (Clarification - Zengin Renk ve 16:9 Konum Seçici) -->
+                  <div *ngIf="msg.patchDurumu === 'clarification' && msg.formFields" class="mt-3 p-3.5 bg-dark-900 border border-brand-cyan/40 rounded-xl space-y-3.5 shadow-lg">
+                     <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                       <span class="text-[11px] text-brand-cyan font-bold uppercase tracking-wider flex items-center gap-1.5">
+                         <span>⚙️</span> Katman Özelliklerini Belirleyin
+                       </span>
+                       <span class="text-[9px] text-slate-500 font-mono">Yönetmen AI</span>
+                     </div>
                      
-                     <div *ngFor="let field of msg.formFields" class="space-y-1">
-                        <label class="text-[10px] text-slate-400">{{ field.label }}</label>
+                     <div *ngFor="let field of msg.formFields" class="space-y-1.5">
+                        <label class="text-[10px] text-slate-300 font-medium flex items-center justify-between">
+                          <span>{{ field.label }}</span>
+                          <span *ngIf="field.required" class="text-rose-400 text-[9px]">*Zorunlu</span>
+                        </label>
                         
+                        <!-- Metin Girişi (Text) -->
                         <input *ngIf="field.type === 'text'" type="text"
                                [ngModel]="msg.formData?.[field.id] || field.defaultValue"
                                (ngModelChange)="updateFormData(msg, field.id, $event)"
-                               class="w-full bg-dark-800 border border-slate-700 rounded p-1.5 text-xs focus:border-brand-cyan outline-none" />
+                               placeholder="Metin giriniz..."
+                               class="w-full bg-dark-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 placeholder-slate-500 focus:border-brand-cyan outline-none transition-colors" />
                                
+                        <!-- Sayısal Giriş (Number) -->
                         <input *ngIf="field.type === 'number'" type="number"
                                [ngModel]="msg.formData?.[field.id] || field.defaultValue"
                                (ngModelChange)="updateFormData(msg, field.id, $event)"
-                               class="w-full bg-dark-800 border border-slate-700 rounded p-1.5 text-xs focus:border-brand-cyan outline-none" />
+                               class="w-full bg-dark-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:border-brand-cyan outline-none transition-colors" />
                                
-                        <div *ngIf="field.type === 'color'" class="flex gap-2 items-center">
-                           <input type="color" 
-                                  [ngModel]="msg.formData?.[field.id] || field.defaultValue || '#ffffff'"
-                                  (ngModelChange)="updateFormData(msg, field.id, $event)"
-                                  class="w-8 h-8 rounded cursor-pointer border border-slate-700 p-0 bg-transparent" />
-                           <span class="text-xs font-mono text-slate-400">{{ msg.formData?.[field.id] || field.defaultValue || '#ffffff' }}</span>
+                        <!-- Özel Zengin Renk Aracı (Color Palette + Hex + Picker) -->
+                        <div *ngIf="field.type === 'color'" class="space-y-2">
+                          <!-- Hazır Renk Palet Butonları -->
+                          <div class="flex flex-wrap gap-1.5 items-center">
+                            <button 
+                              *ngFor="let c of colorPalette"
+                              type="button"
+                              (click)="updateFormData(msg, field.id, c)"
+                              [style.backgroundColor]="c"
+                              [ngClass]="(msg.formData?.[field.id] || field.defaultValue) === c ? 'ring-2 ring-brand-cyan ring-offset-2 ring-offset-dark-900 scale-110 shadow-glow-sm' : 'opacity-85 hover:opacity-100 hover:scale-105'"
+                              class="w-6 h-6 rounded-full border border-white/20 transition-all shadow-sm"
+                              [title]="c">
+                            </button>
+                          </div>
+                          <!-- Özel Renk ve Hex Kutusu -->
+                          <div class="flex items-center gap-2 bg-dark-800 p-1.5 rounded-lg border border-slate-700/80">
+                            <input 
+                              type="color" 
+                              [ngModel]="msg.formData?.[field.id] || field.defaultValue || '#FACC15'"
+                              (ngModelChange)="updateFormData(msg, field.id, $event)"
+                              class="w-7 h-7 rounded cursor-pointer border-0 bg-transparent p-0" />
+                            <input 
+                              type="text" 
+                              [ngModel]="msg.formData?.[field.id] || field.defaultValue || '#FACC15'"
+                              (ngModelChange)="updateFormData(msg, field.id, $event)"
+                              class="bg-transparent text-xs font-mono text-slate-200 outline-none w-20 uppercase font-semibold" 
+                              maxlength="7" />
+                            <span class="text-[10px] text-slate-400 font-mono ml-auto">Özel Hex</span>
+                          </div>
+                        </div>
+
+                        <!-- 16:9 İnteraktif Konum Seçici (Mini-Sahne + Snap Çapalar) -->
+                        <div *ngIf="field.type === 'position'" class="space-y-1.5">
+                          <div class="flex justify-between items-center text-[10px] text-slate-400 font-mono">
+                            <span>16:9 Video Sahne Alanı</span>
+                            <span class="text-brand-cyan font-bold bg-dark-800 px-1.5 py-0.5 rounded border border-slate-700">
+                              X: %{{ getMarkerPosition(msg, field).x }} | Y: %{{ getMarkerPosition(msg, field).y }}
+                            </span>
+                          </div>
+                          <div 
+                            (click)="onMiniStageClick($event, msg, field.id)"
+                            class="w-full aspect-video bg-dark-950 border border-slate-700/90 rounded-lg relative overflow-hidden cursor-crosshair select-none group shadow-inner">
+                            <!-- Kılavuz Çizgileri (Üçte Bir Kuralı) -->
+                            <div class="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none opacity-20">
+                              <div class="border-r border-b border-slate-400"></div>
+                              <div class="border-r border-b border-slate-400"></div>
+                              <div class="border-b border-slate-400"></div>
+                              <div class="border-r border-b border-slate-400"></div>
+                              <div class="border-r border-b border-slate-400"></div>
+                              <div class="border-b border-slate-400"></div>
+                              <div class="border-r border-b border-slate-400"></div>
+                              <div class="border-r border-b border-slate-400"></div>
+                              <div></div>
+                            </div>
+                            
+                            <!-- 9 Hızlı Çapa Butonu -->
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'top-left')" title="Sol Üst" class="absolute top-2 left-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'top-center')" title="Üst Orta" class="absolute top-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'top-right')" title="Sağ Üst" class="absolute top-2 right-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'center-left')" title="Sol Orta" class="absolute top-1/2 -translate-y-1/2 left-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'center')" title="Tam Merkez" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'center-right')" title="Sağ Orta" class="absolute top-1/2 -translate-y-1/2 right-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'bottom-left')" title="Sol Alt" class="absolute bottom-2 left-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'bottom-center')" title="Alt Orta (Altyazı/Başlık)" class="absolute bottom-2 left-1/2 -translate-x-1/2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+                            <button type="button" (click)="$event.stopPropagation(); setPresetPosition(msg, field.id, 'bottom-right')" title="Sağ Alt" class="absolute bottom-2 right-2 w-3.5 h-3.5 rounded bg-slate-700/60 hover:bg-brand-cyan/80 transition-colors"></button>
+
+                            <!-- Konum Göstergesi (Pin Marker) -->
+                            <div 
+                              class="absolute -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-all duration-75 flex flex-col items-center"
+                              [style.left.%]="getMarkerPosition(msg, field).x"
+                              [style.top.%]="getMarkerPosition(msg, field).y">
+                              <div class="w-3.5 h-3.5 rounded-full bg-brand-cyan border-2 border-white shadow-glow-sm animate-pulse"></div>
+                              <span class="text-[9px] font-bold text-brand-cyan -mt-0.5 select-none drop-shadow">📍</span>
+                            </div>
+                          </div>
+                          <p class="text-[9px] text-slate-400 italic">Kutuya tıklayarak konumu belirleyin. Video oynatıcı üzerinde canlı taslak önizlenir.</p>
                         </div>
                         
+                        <!-- Font / Animasyon Seçim Dropdown'ları -->
                         <select *ngIf="field.type === 'select'"
                                 [ngModel]="msg.formData?.[field.id] || field.defaultValue"
                                 (ngModelChange)="updateFormData(msg, field.id, $event)"
-                                class="w-full bg-dark-800 border border-slate-700 rounded p-1.5 text-xs focus:border-brand-cyan outline-none">
-                            <option *ngFor="let opt of field.options" [value]="opt.value">{{ opt.label }}</option>
+                                class="w-full bg-dark-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-100 focus:border-brand-cyan outline-none transition-colors">
+                            <option *ngFor="let opt of field.options" [value]="getOptValue(opt)">
+                              {{ getOptLabel(opt) }}
+                            </option>
                         </select>
                      </div>
                      
-                     <button (click)="submitForm(msg)" class="w-full py-2 bg-brand-cyan text-slate-900 font-bold rounded hover:bg-cyan-400 transition-colors mt-2">
-                        Seçimleri Gönder
+                     <button (click)="submitForm(msg)" class="w-full py-2 bg-gradient-to-r from-brand-cyan to-cyan-500 hover:from-cyan-400 hover:to-cyan-600 text-slate-950 font-bold rounded-lg transition-all shadow-md active:scale-98 flex items-center justify-center gap-1.5 mt-2">
+                        <span>✨</span>
+                        <span>Seçimleri Onayla ve Ekle</span>
                      </button>
                   </div>
                   <div *ngIf="msg.patchDurumu === 'applied'" class="mt-1 text-[10px] text-emerald-400 font-semibold flex items-center gap-1">
@@ -626,35 +767,106 @@ import { environment } from '../../../environments/environment';
              </div>
           </div>
 
-          <!-- Sekme 4: Medya (Assets) -->
+          <!-- Sekme 4: Medya (Assets & Sürükle-Bırak) -->
           <div *ngIf="activeTab() === 'media'" class="flex-1 p-5 overflow-y-auto space-y-4">
-             <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">Medya Kütüphanesi</h3>
-             
-             <div class="p-4 rounded-xl bg-dark-800 border border-slate-700 text-center space-y-3">
-               <svg class="w-8 h-8 mx-auto text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-               </svg>
-               <p class="text-xs text-slate-400">Yeni bir görsel veya ses yüklemek için tıklayın.</p>
-               <button class="px-4 py-2 bg-brand-cyan/20 text-brand-cyan font-bold text-xs rounded hover:bg-brand-cyan/30">Dosya Yükle</button>
+             <div class="flex items-center justify-between mb-1">
+               <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                 <span>📁</span> Medya Kütüphanesi
+               </h3>
+               <span class="text-[10px] text-slate-400 font-mono">{{ assets().length }} Dosya</span>
              </div>
+
+             <!-- Gizli File Input -->
+             <input 
+               #assetFileInput 
+               type="file" 
+               (change)="onAssetFileSelected($event)" 
+               accept="image/*,video/*,audio/*" 
+               class="hidden" />
              
-             <div class="mt-4">
-               <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-2">Stok Görseller (Örnek)</h4>
-               <div class="flex gap-2 mb-3">
-                 <input type="text" placeholder="Arama yap..." class="flex-1 bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white" />
-                 <button class="px-3 bg-dark-700 text-white rounded text-xs">Ara</button>
+             <!-- İnteraktif Yükleme & Sürükle-Bırak Alanı -->
+             <div 
+               (click)="triggerAssetUpload()"
+               (dragover)="onAssetDragOver($event)"
+               (dragleave)="onAssetDragLeave($event)"
+               (drop)="onAssetDrop($event)"
+               [ngClass]="isDragOver() ? 'border-brand-cyan bg-brand-cyan/10 scale-[1.02] shadow-glow-sm' : 'border-slate-700 hover:border-slate-500 bg-dark-800/80'"
+               class="p-5 rounded-xl border-2 border-dashed text-center space-y-2.5 cursor-pointer transition-all duration-150 relative select-none">
+               
+               <div *ngIf="isUploadingAsset()" class="py-3 flex flex-col items-center gap-2">
+                 <div class="w-6 h-6 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin"></div>
+                 <span class="text-xs text-brand-cyan font-bold">MinIO'ya Yükleniyor...</span>
                </div>
+
+               <div *ngIf="!isUploadingAsset()">
+                 <svg class="w-8 h-8 mx-auto text-slate-400 mb-1" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                 </svg>
+                 <p class="text-xs text-slate-300 font-medium">
+                   <span class="text-brand-cyan font-bold">Dosya Seçin</span> veya buraya sürükleyip bırakın
+                 </p>
+                 <p class="text-[10px] text-slate-500">PNG, JPG, WEBP, MP4, MP3 (Maks 50MB)</p>
+               </div>
+             </div>
+
+             <!-- Kullanıcının Yüklediği Medyalar -->
+             <div *ngIf="assets().length > 0" class="space-y-2 mt-2">
+               <h4 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Yüklenen Dosyalar</h4>
                <div class="grid grid-cols-2 gap-2">
-                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan">
-                   <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
-                   <div class="absolute inset-0 bg-brand-cyan/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                     <span class="bg-black/50 text-white text-[10px] px-2 py-1 rounded">Ekle +</span>
+                 <div 
+                   *ngFor="let asset of assets()"
+                   class="aspect-video bg-dark-900 border border-slate-700/80 rounded-lg overflow-hidden relative group hover:border-brand-cyan transition-all shadow-sm">
+                   
+                   <!-- Görsel İse Thumbnail -->
+                   <img 
+                     *ngIf="asset.mimeTuru.startsWith('image/')" 
+                     [src]="asset.url" 
+                     [alt]="asset.dosyaAdi" 
+                     class="w-full h-full object-cover" />
+
+                   <!-- Video / Ses İse İkon -->
+                   <div *ngIf="!asset.mimeTuru.startsWith('image/')" class="w-full h-full flex flex-col items-center justify-center bg-dark-800 p-2 text-center">
+                     <span class="text-xl">{{ asset.mimeTuru.startsWith('audio/') ? '🎵' : '🎬' }}</span>
+                     <span class="text-[9px] text-slate-300 truncate w-full mt-1">{{ asset.dosyaAdi }}</span>
+                   </div>
+
+                   <!-- Hover Kontrolleri -->
+                   <div class="absolute inset-0 bg-dark-950/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2">
+                     <button 
+                       (click)="$event.stopPropagation(); addAssetOverlay(asset)"
+                       class="px-2.5 py-1 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[10px] rounded shadow-md transition-colors w-full flex items-center justify-center gap-1">
+                       <span>+</span>
+                       <span>Katmana Ekle</span>
+                     </button>
+                     <button 
+                       (click)="$event.stopPropagation(); deleteAsset(asset.id)"
+                       class="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-[9px] rounded border border-rose-500/30 transition-colors w-full">
+                       Sil
+                     </button>
+                   </div>
+
+                   <!-- Başlık Çubuğu -->
+                   <div class="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-xs px-1.5 py-0.5 truncate text-[9px] text-slate-200">
+                     {{ asset.dosyaAdi }}
                    </div>
                  </div>
-                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan">
+               </div>
+             </div>
+             
+             <!-- Örnek Stok Görseller -->
+             <div class="mt-4 pt-4 border-t border-slate-800">
+               <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-2">Pexels Stok Görseller (Örnek)</h4>
+               <div class="grid grid-cols-2 gap-2">
+                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım & Teknoloji')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
+                   <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
+                   <div class="absolute inset-0 bg-brand-cyan/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                     <span class="bg-black/60 text-white text-[10px] px-2 py-1 rounded font-bold">Katmana Ekle +</span>
+                   </div>
+                 </div>
+                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Toplantı & Ekip')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
                    <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
                    <div class="absolute inset-0 bg-brand-cyan/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                     <span class="bg-black/50 text-white text-[10px] px-2 py-1 rounded">Ekle +</span>
+                     <span class="bg-black/60 text-white text-[10px] px-2 py-1 rounded font-bold">Katmana Ekle +</span>
                    </div>
                  </div>
                </div>
@@ -673,11 +885,17 @@ export class EditorComponent implements OnInit, OnDestroy {
   private edlService = inject(EdlService);
   private chatService = inject(ChatService);
   private renderService = inject(RenderService);
+  private assetService = inject(AssetService);
   private signalr = inject(SignalrService);
 
   @ViewChild('videoPlayer') videoRef!: ElementRef<HTMLVideoElement>;
   @ViewChild('chatMessagesContainer') chatContainer!: ElementRef<HTMLDivElement>;
   @ViewChild('timelineTrack') timelineTrackRef!: ElementRef<HTMLDivElement>;
+  @ViewChild('assetFileInput') assetFileInput?: ElementRef<HTMLInputElement>;
+
+  readonly assets = signal<ProjectAssetDto[]>([]);
+  readonly isUploadingAsset = signal<boolean>(false);
+  readonly isDragOver = signal<boolean>(false);
 
   projectId = '';
   readonly project = signal<ProjectDetailDto | null>(null);
@@ -685,6 +903,35 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly videoUrl = signal<string>('');
   readonly currentTime = signal<number>(0);
   readonly totalDuration = signal<number>(100);
+
+  // Altyazı & Karaoke State
+  readonly showSubtitles = signal<boolean>(true);
+  readonly subtitleFont = signal<string>('Montserrat, Inter, sans-serif');
+  readonly subtitleColor = signal<string>('#FFFFFF');
+
+  readonly currentSubtitleSegment = computed<TranscriptSegment | null>(() => {
+    const edl = this.activeEdl();
+    const segments = edl?.transcript?.segments;
+    if (!segments || segments.length === 0) return null;
+    const t = this.currentTime();
+    return segments.find(s => t >= s.start && t <= s.end) || null;
+  });
+
+  readonly vttTrackUrl = computed<string | null>(() => {
+    const edl = this.activeEdl();
+    const segments = edl?.transcript?.segments;
+    if (!segments || segments.length === 0) return null;
+
+    let vttContent = 'WEBVTT\n\n';
+    segments.forEach((seg, index) => {
+      const start = this.formatVttTimestamp(seg.start);
+      const end = this.formatVttTimestamp(seg.end);
+      vttContent += `${index + 1}\n${start} --> ${end}\n${seg.text.trim()}\n\n`;
+    });
+
+    const blob = new Blob([vttContent], { type: 'text/vtt' });
+    return URL.createObjectURL(blob);
+  });
   readonly activeOverlays = computed(() => {
     const t = this.currentTime();
     const overlays = this.activeEdl()?.overlays || [];
@@ -695,6 +942,14 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly rippleAi = signal<boolean>(true); // Varsayılan: AI kısımları Sıkıştırılmış
   readonly rippleManual = signal<boolean>(true); // Varsayılan: Manuel kısımlar Sıkıştırılmış
   readonly rippleRetake = signal<boolean>(true); // Varsayılan: Retake kısımları Sıkıştırılmış
+  readonly retakeCount = computed(() => {
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return 0;
+    return edl.cuts.filter(c => {
+      const r = (c.reason || '').toLowerCase();
+      return r.includes('retake') || r.includes('tekrar');
+    }).length;
+  });
   readonly timelineZoom = signal<number>(1);
   readonly splitMarkers = signal<number[]>([]);
   readonly selectedClipIds = signal<string[]>([]);
@@ -723,6 +978,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   isCanvasResizing = false;
   canvasResizeOverlayId: string | null = null;
   canvasResizeStartX = 0;
+  canvasResizeStartY = 0;
   canvasResizeOriginalScale = 1;
   canvasResizeOriginalFontSize = 48;
   
@@ -737,6 +993,33 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly previewEdl = signal<EdlContent | null>(null);
   readonly previewMessageId = signal<string | null>(null);
   readonly activeEdl = computed(() => this.previewEdl() || this.edl());
+
+  // Canlı Taslak (Ghost Layer) - Yönetmen AI soru formunu doldururken ekranda canlı gösterilir
+  readonly ghostPreview = computed(() => {
+    const msgs = this.chatMessages();
+    const clarMsg = [...msgs].reverse().find(m => m.patchDurumu === 'clarification' && m.formFields);
+    if (!clarMsg) return null;
+
+    const data = clarMsg.formData || {};
+    const text = data['content'] || clarMsg.formFields?.find(f => f.id === 'content')?.defaultValue || 'Önizleme Başlığı';
+    const color = data['color'] || clarMsg.formFields?.find(f => f.id === 'color')?.defaultValue || '#FACC15';
+    const font = data['font'] || clarMsg.formFields?.find(f => f.id === 'font')?.defaultValue || 'Montserrat';
+
+    let posX = 50;
+    let posY = 85;
+
+    if (data['positionX'] !== undefined && data['positionY'] !== undefined) {
+      posX = Number(data['positionX']);
+      posY = Number(data['positionY']);
+    } else {
+      const pos = data['position'] || clarMsg.formFields?.find(f => f.id === 'position')?.defaultValue || 'bottom-center';
+      const coords = this.getPresetCoords(String(pos));
+      posX = coords.x;
+      posY = coords.y;
+    }
+
+    return { text: String(text), color: String(color), font: String(font), posX, posY };
+  });
 
   // Clips (Parçalar) hesaplaması
   readonly clips = computed(() => {
@@ -777,15 +1060,63 @@ export class EditorComponent implements OnInit, OnDestroy {
     return result;
   });
 
+  isRetakeClip(clip: any): boolean {
+    if (!clip || !clip.isCut || !clip.cutObj) return false;
+    const r = (clip.cutObj.reason || '').toLowerCase();
+    return r.includes('retake') || r.includes('tekrar');
+  }
+
+  isManualClip(clip: any): boolean {
+    if (!clip || !clip.isCut || !clip.cutObj) return false;
+    const r = (clip.cutObj.reason || '').toLowerCase();
+    return r.includes('manuel');
+  }
+
+  getClipTooltip(clip: any): string {
+    const startStr = clip.start.toFixed(1);
+    const endStr = clip.end.toFixed(1);
+    if (!clip.isCut) {
+      return `Klip (${startStr}s - ${endStr}s) - Kesmek için çift tıkla`;
+    }
+    if (this.isRetakeClip(clip)) {
+      const desc = clip.cutObj?.command || clip.cutObj?.reason || 'Hatalı Tekrar';
+      return `🔁 Hatalı Tekrar (Retake) [${startStr}s - ${endStr}s]: ${desc} - İptal edip geri almak için çift tıkla`;
+    }
+    if (this.isManualClip(clip)) {
+      return `🖐 Manuel Kesim [${startStr}s - ${endStr}s] - İptal edip geri almak için çift tıkla`;
+    }
+    return `🤖 AI Jump-Cut [${startStr}s - ${endStr}s]: ${clip.cutObj?.reason || 'Sessizlik'} - İptal edip geri almak için çift tıkla`;
+  }
+
   isVisible(clip: any): boolean {
     if (!clip.isCut) return true;
-    if (clip.cutObj.reason === 'Manuel kesim') {
+    if (this.isManualClip(clip)) {
        return !this.rippleManual();
     }
-    if (clip.cutObj.reason === 'Retake' || clip.cutObj.reason === 'Hatalı Tekrar') {
+    if (this.isRetakeClip(clip)) {
        return !this.rippleRetake();
     }
     return !this.rippleAi();
+  }
+
+  deleteRetakeCuts(): void {
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return;
+
+    const retakeCuts = edl.cuts.filter(c => {
+      const r = (c.reason || '').toLowerCase();
+      return r.includes('retake') || r.includes('tekrar');
+    });
+
+    if (retakeCuts.length === 0) return;
+
+    if (confirm(`Tespit edilen ${retakeCuts.length} adet hatalı tekrar (Retake) kesimi iptal edilecek ve bu sahneler geri yüklenecektir. Onaylıyor musunuz?`)) {
+      const patchPayload = retakeCuts.map(c => ({ id: c.id, start: 0, end: 0, action: 'remove' }));
+      this.edlService.patchEdl(this.projectId, { cuts: patchPayload as any }).subscribe({
+        next: () => this.loadEdl(),
+        error: (err) => console.error('Retake kesimleri kaldırılamadı:', err)
+      });
+    }
   }
 
   readonly visibleDuration = computed(() => {
@@ -806,6 +1137,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.loadVideo();
       this.loadEdl();
       this.loadChatHistory();
+      this.loadAssets();
       this.signalr.joinProjectGroup(this.projectId);
     }
   }
@@ -876,6 +1208,99 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.chatService.getHistory(this.projectId).subscribe({
       next: (msgs) => this.chatMessages.set(msgs),
       error: (err) => console.error('Chat geçmişi alınamadı:', err)
+    });
+  }
+
+  loadAssets(): void {
+    if (!this.projectId) return;
+    this.assetService.getAssets(this.projectId).subscribe({
+      next: (assets) => this.assets.set(assets),
+      error: (err) => console.error('Medya varlıkları yüklenemedi:', err)
+    });
+  }
+
+  triggerAssetUpload(): void {
+    this.assetFileInput?.nativeElement.click();
+  }
+
+  onAssetFileSelected(event: Event): void {
+    const input = event.target as HTMLInputElement;
+    if (input.files && input.files.length > 0) {
+      this.uploadFile(input.files[0]);
+      input.value = '';
+    }
+  }
+
+  onAssetDragOver(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver.set(true);
+  }
+
+  onAssetDragLeave(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver.set(false);
+  }
+
+  onAssetDrop(event: DragEvent): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.isDragOver.set(false);
+    if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
+      this.uploadFile(event.dataTransfer.files[0]);
+    }
+  }
+
+  uploadFile(file: File): void {
+    if (!this.projectId) return;
+    this.isUploadingAsset.set(true);
+    this.assetService.uploadAsset(this.projectId, file).subscribe({
+      next: (newAsset) => {
+        this.isUploadingAsset.set(false);
+        this.assets.update(list => [newAsset, ...list]);
+      },
+      error: (err) => {
+        this.isUploadingAsset.set(false);
+        alert('Medya yüklenemedi: ' + (err.error?.detail || err.message));
+      }
+    });
+  }
+
+  deleteAsset(assetId: string): void {
+    if (!confirm('Bu medya dosyasını silmek istediğinize emin misiniz?')) return;
+    this.assetService.deleteAsset(this.projectId, assetId).subscribe({
+      next: () => {
+        this.assets.update(list => list.filter(a => a.id !== assetId));
+      },
+      error: (err) => alert('Medya silinemedi: ' + err.message)
+    });
+  }
+
+  addAssetOverlay(asset: ProjectAssetDto): void {
+    const isImage = asset.mimeTuru.startsWith('image/');
+    const isVideo = asset.mimeTuru.startsWith('video/');
+    const t = Math.max(0, this.currentTime());
+
+    const newOverlay: any = {
+      id: `asset_${Date.now()}`,
+      type: isImage ? 'image' : (isVideo ? 'video' : 'text'),
+      content: asset.dosyaAdi,
+      source: asset.url,
+      timestamp: parseFloat(t.toFixed(2)),
+      duration: 5.0,
+      positionX: 50,
+      positionY: 50,
+      scale: 1.0,
+      animation: 'fade',
+      action: 'add'
+    };
+
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [newOverlay]
+    }).subscribe(() => {
+      this.loadEdl();
+      this.activeTab.set('overlays');
     });
   }
 
@@ -1113,7 +1538,9 @@ export class EditorComponent implements OnInit, OnDestroy {
   onCanvasDragStart(event: MouseEvent, overlayId: string): void {
      event.preventDefault(); // Prevent text selection
      event.stopPropagation();
-     this.selectOverlay(overlayId);
+     if (this.selectedOverlayId() !== overlayId) {
+        this.selectOverlay(overlayId);
+     }
      this.isCanvasDragging = true;
      this.canvasDragOverlayId = overlayId;
      this.canvasDragStartX = event.clientX;
@@ -1247,7 +1674,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  addImageOverlayFromUrl(url: string): void {
+  addImageOverlayFromUrl(url: string, contentName = 'Stok Görsel'): void {
     let start = this.currentTime();
     let duration = 4.0;
     
@@ -1265,7 +1692,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     const newOverlay: any = {
       id: newOvId,
       type: 'image',
-      content: 'Stok Görsel',
+      content: contentName,
       source: url,
       timestamp: parseFloat(start.toFixed(2)),
       duration: parseFloat(duration.toFixed(2)),
@@ -1439,6 +1866,7 @@ export class EditorComponent implements OnInit, OnDestroy {
             pendingEdlPatch: res.pendingEdlPatch,
             patchDurumu: res.patchDurumu,
             intent: res.intent,
+            formFields: res.formFields,
             id: res.id
           }
         ]);
@@ -1564,12 +1992,79 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  // --- Dynamic Form Methods ---
+  // --- Dynamic Clarification Form & 16:9 Stage Methods ---
+  readonly colorPalette = [
+    '#FFFFFF', // Beyaz
+    '#FACC15', // Canlı Sarı
+    '#06B6D4', // Turkuaz / Cyan
+    '#EF4444', // Vurgu Kırmızı
+    '#10B981', // Neon Yeşil
+    '#A855F7', // Mor
+    '#F97316', // Turuncu
+    '#000000'  // Siyah
+  ];
+
+  getPresetCoords(preset: string): { x: number; y: number } {
+    switch (preset) {
+      case 'top-left': return { x: 18, y: 15 };
+      case 'top-center': return { x: 50, y: 15 };
+      case 'top-right': return { x: 82, y: 15 };
+      case 'center-left': return { x: 18, y: 50 };
+      case 'center': return { x: 50, y: 50 };
+      case 'center-right': return { x: 82, y: 50 };
+      case 'bottom-left': return { x: 18, y: 85 };
+      case 'bottom-center': return { x: 50, y: 85 };
+      case 'bottom-right': return { x: 82, y: 85 };
+      default: return { x: 50, y: 85 };
+    }
+  }
+
+  getMarkerPosition(msg: ChatMessageDto, field: FormFieldDto): { x: number; y: number } {
+    if (msg.formData?.['positionX'] !== undefined && msg.formData?.['positionY'] !== undefined) {
+      return { x: Number(msg.formData['positionX']), y: Number(msg.formData['positionY']) };
+    }
+    const pos = msg.formData?.[field.id] || field.defaultValue || 'bottom-center';
+    return this.getPresetCoords(String(pos));
+  }
+
+  onMiniStageClick(event: MouseEvent, msg: ChatMessageDto, fieldId: string): void {
+    const target = event.currentTarget as HTMLElement;
+    if (!target) return;
+    const rect = target.getBoundingClientRect();
+    const clickX = event.clientX - rect.left;
+    const clickY = event.clientY - rect.top;
+    const posX = Math.max(5, Math.min(95, Math.round((clickX / rect.width) * 100)));
+    const posY = Math.max(5, Math.min(95, Math.round((clickY / rect.height) * 100)));
+
+    if (!msg.formData) msg.formData = {};
+    msg.formData[fieldId] = `X: %${posX}, Y: %${posY}`;
+    msg.formData['positionX'] = posX;
+    msg.formData['positionY'] = posY;
+    this.chatMessages.update(msgs => [...msgs]);
+  }
+
+  setPresetPosition(msg: ChatMessageDto, fieldId: string, preset: string): void {
+    const coords = this.getPresetCoords(preset);
+    if (!msg.formData) msg.formData = {};
+    msg.formData[fieldId] = preset;
+    msg.formData['positionX'] = coords.x;
+    msg.formData['positionY'] = coords.y;
+    this.chatMessages.update(msgs => [...msgs]);
+  }
+
+  getOptValue(opt: any): string {
+    if (typeof opt === 'string') return opt;
+    return opt?.value ?? opt?.label ?? String(opt);
+  }
+
+  getOptLabel(opt: any): string {
+    if (typeof opt === 'string') return opt;
+    return opt?.label ?? opt?.value ?? String(opt);
+  }
   
   updateFormData(msg: ChatMessageDto, fieldId: string, value: any): void {
      if (!msg.formData) {
         msg.formData = {};
-        // Initialize defaults
         if (msg.formFields) {
            msg.formFields.forEach(f => {
               msg.formData[f.id] = f.defaultValue;
@@ -1577,12 +2072,13 @@ export class EditorComponent implements OnInit, OnDestroy {
         }
      }
      msg.formData[fieldId] = value;
+     this.chatMessages.update(msgs => [...msgs]);
   }
   
   submitForm(msg: ChatMessageDto): void {
      if (!msg.formFields) return;
      
-     // Initialize defaults for untouched fields
+     // Varsayılan değerleri tanımla
      if (!msg.formData) msg.formData = {};
      msg.formFields.forEach(f => {
          if (msg.formData[f.id] === undefined) {
@@ -1590,16 +2086,20 @@ export class EditorComponent implements OnInit, OnDestroy {
          }
      });
      
-     // Build user response
-     let responseText = "İstediğim özellikler:\n";
+     // Kullanıcı yanıtını oluştur
+     let responseText = "Belirttiğim özellikler ile katmanı ekle:\n";
      msg.formFields.forEach(f => {
          responseText += `- ${f.label}: ${msg.formData[f.id]}\n`;
      });
+     if (msg.formData['positionX'] !== undefined && msg.formData['positionY'] !== undefined) {
+         responseText += `[Koordinatlar: positionX=${msg.formData['positionX']}, positionY=${msg.formData['positionY']}]\n`;
+     }
      
      this.userPrompt = responseText;
      
-     // Mark the form as answered (hide it)
+     // Formu cevaplandı olarak işaretle
      msg.patchDurumu = 'answered';
+     this.chatMessages.update(msgs => [...msgs]);
      
      this.sendChatMessage();
   }
@@ -1619,11 +2119,14 @@ export class EditorComponent implements OnInit, OnDestroy {
     } else if (event.key.toLowerCase() === 'b') {
       event.preventDefault();
       this.addSplitMarker();
-    } else if (event.key === 'Delete') {
-      if (this.selectedClipId()) {
+    } else if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (this.selectedClipIds().length > 0) {
          event.preventDefault();
-         this.deleteSelectedClip();
+         this.deleteSelectedClips();
       }
+    } else if (event.key.toLowerCase() === 'c') {
+      event.preventDefault();
+      this.toggleSubtitles();
     }
   }
 
@@ -1686,10 +2189,13 @@ export class EditorComponent implements OnInit, OnDestroy {
   onCanvasResizeStart(event: MouseEvent, overlayId: string): void {
       event.preventDefault();
       event.stopPropagation();
-      this.selectOverlay(overlayId);
+      if (this.selectedOverlayId() !== overlayId) {
+        this.selectOverlay(overlayId);
+      }
       this.isCanvasResizing = true;
       this.canvasResizeOverlayId = overlayId;
       this.canvasResizeStartX = event.clientX;
+      this.canvasResizeStartY = event.clientY;
       const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
       if (ov) {
           this.canvasResizeOriginalScale = ov.scale || 1.0;
@@ -1732,10 +2238,14 @@ export class EditorComponent implements OnInit, OnDestroy {
 
      if (this.isCanvasResizing) {
          const deltaX = event.clientX - this.canvasResizeStartX;
+         const deltaY = event.clientY - this.canvasResizeStartY;
+         // En baskın çekme eksenini (yatay, dikey veya çapraz) algıla:
+         const delta = Math.abs(deltaX) >= Math.abs(deltaY) ? deltaX : deltaY;
+
          const ov = this.activeEdl()?.overlays?.find(o => o.id === this.canvasResizeOverlayId);
          if (ov) {
              if (ov.type === 'image') {
-                 let newScale = this.canvasResizeOriginalScale + (deltaX / 100);
+                 let newScale = this.canvasResizeOriginalScale + (delta / 100);
                  if (newScale < 0.2) newScale = 0.2;
                  if (newScale > 5.0) newScale = 5.0;
                  ov.scale = newScale;
@@ -1743,7 +2253,7 @@ export class EditorComponent implements OnInit, OnDestroy {
                      this.inspectorData.scale = parseFloat(newScale.toFixed(2));
                  }
              } else if (ov.type === 'text') {
-                 let newSize = this.canvasResizeOriginalFontSize + deltaX;
+                 let newSize = this.canvasResizeOriginalFontSize + delta;
                  if (newSize < 10) newSize = 10;
                  if (newSize > 400) newSize = 400;
                  ov.fontSize = newSize;
@@ -1869,5 +2379,22 @@ export class EditorComponent implements OnInit, OnDestroy {
             }
          }
      }
+  }
+
+  isWordActive(word: TranscriptWord): boolean {
+    const t = this.currentTime();
+    return t >= word.start && t <= word.end;
+  }
+
+  toggleSubtitles(): void {
+    this.showSubtitles.update(v => !v);
+  }
+
+  private formatVttTimestamp(seconds: number): string {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    const ms = Math.floor((seconds % 1) * 1000);
+    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms.toString().padStart(3, '0')}`;
   }
 }

@@ -54,10 +54,31 @@ public class GeminiChatProvider : IChatProvider
                    - "information": Kullanıcı sadece soru soruyorsa veya bilgi istiyorsa (EDL değişmez).
                    - "suggestion": Kullanıcı "ne ekleyebiliriz?" diyorsa veya onaya sunulacak bir öneri ise.
                    - "command": Kullanıcı kesin bir dille "şurayı kes", "şunu ekle" diyorsa ve eksik parametre (renk, konum vb.) yoksa.
-                   - "clarification": Kullanıcının talebi ("buraya yazı ekle" veya "resim koy") tam detaylı değilse (metin, renk, font, konum, animasyon, boyut eksikse) KESİNLİKLE bu intent'i kullan.
-                2. Eğer intent "clarification" ise, "formFields" array'ini dön. Type'lar "text", "color", "select", "number" olabilir.
-                   Örn Yazı için: "text" (İçerik), "color" (Renk), "select" (Font: Inter, Arial, Roboto), "select" (Konum: Merkez, Alt, Üst, Sağ, Sol vb.), "select" (Animasyon: pop-up, fade, slide-up, none).
-                   Örn Görsel/Resim için: "select" (Konum), "number" (Boyut/Scale, örn 1.0).
+                   - "clarification": Kullanıcının talebi ("yazı ekle", "başlık koy", "resim ekle" vb.) stil veya konum detayları içermiyorsa KESİNLİKLE bu intent'i kullan ve formFields dön.
+                2. Eğer intent "clarification" ise, "formFields" dizisini KESİNLİKLE aşağıdaki şemaya uygun dön:
+                   Desteklenen "type" türleri:
+                   - "text": Metin girişi (id: "content", label: "Yazı Metni")
+                   - "position": 16:9 İnteraktif konumlayıcı (id: "position", label: "Ekran Konumu", defaultValue: "bottom-center")
+                   - "color": Zengin renk paleti ve Hex seçici (id: "color", label: "Yazı Rengi", defaultValue: "#FACC15")
+                   - "select": Seçim kutusu (Font ve Animasyon için). ZORUNLU options: [ { "value": "...", "label": "..." } ]
+                   
+                   Standart Font Presetleri (type="select", id="font"):
+                   [
+                     { "value": "Montserrat", "label": "Montserrat (Kalın & Vurgulu)" },
+                     { "value": "Inter", "label": "Inter (Modern & Sade)" },
+                     { "value": "Bebas Neue", "label": "Bebas Neue (Büyük Harf)" },
+                     { "value": "Anton", "label": "Anton (Ağır & Vurucu)" }
+                   ]
+                   
+                   Standart Animasyon Presetleri (type="select", id="animation"):
+                   [
+                     { "value": "pop-up", "label": "✨ Büyüyerek Açıl (Pop-up)" },
+                     { "value": "fade", "label": "🌫 Yumuşak Geçiş (Fade)" },
+                     { "value": "slide-up", "label": "⬆ Aşağıdan Yukarı" },
+                     { "value": "none", "label": "⚡ Sabit" }
+                   ]
+
+                   Kullanıcı form doldurup "Belirttiğim özellikler ile katmanı ekle: [positionX: 50, positionY: 85]" şeklinde yanıt verirse, intent: "command" olarak edlPatch içinde "positionX" ve "positionY" sayısal yüzdelerini (0-100) kullanarak OverlayItem ekle.
                 3. Videonun içeriğini SADECE verilen VİDEO TRANSKRİPTİNE göre değerlendir. Transkriptte geçmeyen HİÇBİR KELİMEYİ VEYA OLAYI UYDURMA. Bilgi yoksa "Bu bilgi transkriptte yok" de.
                 4. Zaman damgalarını transkriptteki gerçek sürelere göre belirle.
                 5. Sadece "cuts", "overlays", "settings" ve "suggestions" alanlarını değiştirebilir veya ekleme yapabilirsin.
@@ -67,7 +88,13 @@ public class GeminiChatProvider : IChatProvider
                    "mesaj": "Kullanıcıya gösterilecek açıklayıcı yanıt metni",
                    "intent": "information, suggestion, command veya clarification",
                    "edlPatch": { ... JSON patch ... } (eğer değişiklik yoksa null),
-                   "formFields": [ { "id": "renk", "type": "color", "label": "Yazı Rengi", "defaultValue": "#FFFFFF" } ] (eğer intent clarification ise dolu, değilse null)
+                   "formFields": [
+                      { "id": "content", "type": "text", "label": "Yazı Metni", "defaultValue": "Öne Çıkan Başlık" },
+                      { "id": "position", "type": "position", "label": "Ekran Konumu", "defaultValue": "bottom-center" },
+                      { "id": "color", "type": "color", "label": "Yazı Rengi", "defaultValue": "#FACC15" },
+                      { "id": "font", "type": "select", "label": "Yazı Tipi (Font)", "defaultValue": "Montserrat", "options": [ { "value": "Montserrat", "label": "Montserrat (Kalın & Vurgulu)" } ] },
+                      { "id": "animation", "type": "select", "label": "Giriş Animasyonu", "defaultValue": "pop-up", "options": [ { "value": "pop-up", "label": "✨ Pop-up" } ] }
+                   ] (eğer intent clarification ise dolu, değilse null)
                 }
                 """;
 
