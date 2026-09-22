@@ -1,10 +1,11 @@
 """
-OtoEdit Akıllı Hatalı Tekrar Eleyici (Smart Retake Detector)
-Transkript üzerinde anlamsal tekrar öbeklerini tespit eder,
-AcousticScorer ile ses kalitelerini (patlama, fısıltı, süreklilik) karşılaştırır ve
-en kaliteli olanı seçip hatalı tekrarları EDL CutItem olarak döndürür.
+OtoEdit Akıllı Hatalı Tekrar Eleyici (Smart Retake Detector) V2
+Transkript üzerinde anlamsal tekrar öbeklerini, stüdyo meta-komutlarını ("başa sar", "olmadı")
+ve yarım kalan cümleleri tespit eder. AcousticScorer ile ses kalitelerini (patlama, fısıltı, süreklilik)
+karşılaştırır ve en kaliteli olanı seçip hatalı tekrarları EDL CutItem olarak döndürür.
 """
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Set
+import re
 import difflib
 from models.edl_model import CutItem
 from models.transcript_model import TranscriptResult, TranscriptSegment
@@ -24,17 +25,78 @@ class RetakeCandidate:
 
 
 class RetakeDetector:
-    """Transkript ve ses sinyali üzerinden hatalı tekrarları budayan motor."""
+    """Transkript ve ses sinyali üzerinden hatalı tekrarları budayan akıllı motor."""
 
-    def __init__(self, similarity_threshold: float = 0.60):
+    META_RESTART_PATTERNS = [
+        r'\bbaşa\s*sar\b',
+        r'\bbaşasar\b',
+        r'\bbaştan\s*al\b',
+        r'\bolmadı\b',
+        r'\bkonuşamadık\b',
+        r'\byanlış\s*oldu\b',
+        r'\bdur\s*baştan\b',
+        r'\bpardon\b',
+        r'\bbir\s*daha\b'
+    ]
+
+    ORDINAL_WORDS = {'birinci', 'ikinci', 'üçüncü', 'dördüncü', 'beşinci', 'içinci', 'ilk', 'son'}
+    STOPWORDS = {'ve', 'bu', 'da', 'de', 'için', 'ile', 'en', 'ise', 'o', 'çok', 'gibi', 'kadar', 'daha', 'yani', 'olan', 'olarak', 'tam'}
+
+    def __init__(self, similarity_threshold: float = 0.45):
         self.similarity_threshold = similarity_threshold
         self.scorer = AcousticScorer()
 
+    @staticmethod
+    def normalize_tr(text: str) -> str:
+        """Türkçe karakterleri (İ/I/i/ı) Unicode combining karakter tuzaklarına takılmadan normalize eder."""
+        return text.replace("İ", "i").replace("I", "ı").lower().replace("i̇", "i")
+
+    def is_meta_speech(self, text: str) -> bool:
+        """Kayıt esnasında söylenen stüdyo meta komutlarını ('başa sar', 'olmadı') tespit eder."""
+        t = self.normalize_tr(text)
+        return any(re.search(pat, t) for pat in self.META_RESTART_PATTERNS)
+
+    def extract_keywords(self, text: str) -> Set[str]:
+        t = self.normalize_tr(text)
+        words = re.findall(r'\w+', t)
+        return set(w for w in words if w not in self.STOPWORDS and len(w) > 1)
+
+    def has_conflicting_ordinals(self, text1: str, text2: str) -> bool:
+        """'Birinci öncül' ile 'İkinci öncül' gibi zıt sıralı ifadelerin yanlışlıkla eşleşmesini önler."""
+        t1 = self.normalize_tr(text1)
+        t2 = self.normalize_tr(text2)
+        ord1 = set(re.findall(r'\w+', t1)).intersection(self.ORDINAL_WORDS)
+        ord2 = set(re.findall(r'\w+', t2)).intersection(self.ORDINAL_WORDS)
+        if ord1 and ord2 and ord1 != ord2:
+            return True
+        return False
+
+    def calculate_similarity(self, text1: str, text2: str) -> float:
+        """Zıt öncülleri koruyan, anlamsal anahtar kelime Jaccard ve difflib hibrit benzerliği."""
+        if self.has_conflicting_ordinals(text1, text2):
+            return 0.0
+
+        kw1 = self.extract_keywords(text1)
+        kw2 = self.extract_keywords(text2)
+        if not kw1 or not kw2:
+            return 0.0
+
+        intersection = kw1.intersection(kw2)
+        union = kw1.union(kw2)
+        jaccard = len(intersection) / len(union)
+        
+        # Kelime bazlı örtüşme yeterliyse Jaccard'ı esas al
+        if len(intersection) >= 2 or jaccard >= 0.40:
+            return jaccard
+
+        # Ekstra difflib benzerliği (kelimeler çok azsa)
+        char_sim = difflib.SequenceMatcher(None, text1.lower().strip(), text2.lower().strip()).ratio()
+        return (jaccard * 0.7) + (char_sim * 0.3)
+
     def detect_retakes(self, audio_path: str, transcript: TranscriptResult) -> List[CutItem]:
         """
-        Transkript segmentlerini kronolojik olarak tarar, birbirini tekrar eden
-        veya yarıda bırakılan cümleleri gruplar, en iyi skora sahip olanı seçip
-        diğerlerini CutItem listesi olarak döndürür.
+        Transkript segmentlerini kronolojik olarak tarar, meta-konuşmaları doğrudan keser,
+        tekrarlanan cümleleri gruplar, en kaliteli olanı seçip hatalı olanları CutItem listesi olarak döndürür.
         """
         if not transcript.segments or len(transcript.segments) < 2:
             return []
@@ -52,23 +114,61 @@ class RetakeDetector:
                 i += 1
                 continue
 
-            current_group: List[RetakeCandidate] = [RetakeCandidate(segments[i], i)]
+            seg_i = segments[i]
+            text_i = seg_i.text
+
+            # 1. KURAL: Meta-konuşma içeriyorsa ("başa sar", "olmadı", "Allah konuşamadık") doğrudan KES!
+            if self.is_meta_speech(text_i):
+                logger.info(f"🛑 Meta-konuşma / Outtake tespit edildi: #{i} '{text_i}'")
+                cut_items.append(CutItem(
+                    id=f"cut_retake_{i}",
+                    start=round(seg_i.start, 2),
+                    end=round(seg_i.end, 2),
+                    reason=f"smart_retake (Stüdyo Outtake: {text_i})",
+                    source="auto",
+                    command=f"Elenen Stüdyo Konuşması: {text_i}"
+                ))
+                visited.add(i)
+
+                # Hemen önceki cümle yarım kalmışsa (nokta ile bitmiyorsa) onu da outtake olarak kes
+                if i > 0 and (i - 1) not in visited:
+                    prev_seg = segments[i - 1]
+                    if not prev_seg.text.strip().endswith(('.', '!', '?')):
+                        logger.info(f"✂ Yarım kalan cümle outtake ile birlikte kesildi: #{i-1} '{prev_seg.text}'")
+                        cut_items.append(CutItem(
+                            id=f"cut_retake_{i-1}",
+                            start=round(prev_seg.start, 2),
+                            end=round(prev_seg.end, 2),
+                            reason=f"smart_retake (Yarım Kalan İptal Edilmiş Cümle)",
+                            source="auto",
+                            command=f"Elenen Yarım Cümle: {prev_seg.text}"
+                        ))
+                        visited.add(i - 1)
+
+                i += 1
+                continue
+
+            # 2. KURAL: Aynı cümlenin ardışık veya kısa aralıklı tekrarlarını ara
+            current_group: List[RetakeCandidate] = [RetakeCandidate(seg_i, i)]
             j = i + 1
 
-            # Aynı cümlenin ardışık veya kısa aralıklı tekrarlarını ara
-            while j < min(n, i + 4):
+            while j < min(n, i + 5):
                 if j in visited:
                     j += 1
                     continue
 
-                sim = self._calculate_similarity(segments[i].text, segments[j].text)
+                # Eğer j meta-konuşmaysa bu grupta yarışmasın, kendi adımında direkt kesilsin
+                if self.is_meta_speech(segments[j].text):
+                    j += 1
+                    continue
+
+                sim = self.calculate_similarity(segments[i].text, segments[j].text)
                 prefix_match = self._is_prefix_restart(segments[i].text, segments[j].text)
 
                 if sim >= self.similarity_threshold or prefix_match:
                     current_group.append(RetakeCandidate(segments[j], j))
                     visited.add(j)
-                else:
-                    break
+
                 j += 1
 
             # Eğer birden fazla aday bulunduysa (Tekrar/Retake var!)
@@ -94,17 +194,20 @@ class RetakeDetector:
                     conf_scores = [w.confidence for w in getattr(cand.segment, 'words', []) if hasattr(w, 'confidence') and w.confidence is not None]
                     avg_conf = (sum(conf_scores) / len(conf_scores) * 100.0) if conf_scores else 90.0
 
-                    # 🏆 Nihai Birleşik Skor Formülü:
-                    # 40% Akustik Kalite + 35% Semantik Tamlık + 25% Tanıma Güveni
+                    # Kronolojik Recency Bonus: Genelde en son söylenen tekrar doğrusudur (+0.5 puan/indeks)
+                    recency_bonus = min(5.0, (cand.index - current_group[0].index) * 2.0)
+
+                    # 🏆 Nihai Birleşik Skor Formülü
                     cand.score = (
                         0.40 * acoustics["composite_acoustic_score"] +
                         0.35 * completeness_score +
-                        0.25 * avg_conf
+                        0.25 * avg_conf +
+                        recency_bonus
                     )
                     logger.info(
                         f"  -> Aday #{cand.index} [{cand.segment.start:.1f}s - {cand.segment.end:.1f}s]: "
                         f"Skor={cand.score:.1f} | Akustik={acoustics['composite_acoustic_score']} "
-                        f"| Clipping={acoustics['clipping_score']} | Metin='{cand.segment.text}'"
+                        f"| Metin='{cand.segment.text}'"
                     )
 
                 # Skoru en yüksek olanı KAZANAN olarak seç
@@ -135,11 +238,6 @@ class RetakeDetector:
 
         logger.info(f"Akıllı Retake analizi bitti: Toplam {len(cut_items)} hatalı tekrar budandı.")
         return cut_items
-
-    @staticmethod
-    def _calculate_similarity(str1: str, str2: str) -> float:
-        """İki cümlenin difflib benzerlik oranını döner."""
-        return difflib.SequenceMatcher(None, str1.lower().strip(), str2.lower().strip()).ratio()
 
     @staticmethod
     def _is_prefix_restart(str1: str, str2: str) -> bool:

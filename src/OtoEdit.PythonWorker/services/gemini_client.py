@@ -19,8 +19,9 @@ class GeminiClient:
                 import importlib
                 genai = importlib.import_module("google.generativeai")
                 genai.configure(api_key=self.api_key)
-                self.model = genai.GenerativeModel("gemini-2.5-flash")
-                logger.info("Gemini API istemcisi başarıyla yapılandırıldı.")
+                model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+                self.model = genai.GenerativeModel(model_name)
+                logger.info(f"Gemini API istemcisi başarıyla yapılandırıldı. Model: {model_name}")
             except Exception as e:
                 logger.warning(f"Gemini API başlatılamadı, fallback modu kullanılacak: {e}")
         else:

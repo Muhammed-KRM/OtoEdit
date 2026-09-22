@@ -91,16 +91,68 @@ class Transcriber:
             except Exception as e:
                 logger.error(f"Whisper API transkripsiyon hatası: {e}", exc_info=True)
 
+        # 2. Yerel faster-whisper motorunu dene (API anahtarı yoksa veya hata verdiyse)
+        try:
+            from faster_whisper import WhisperModel
+            logger.info("Yerel faster-whisper modeli ile transkripsiyon başlatılıyor (model='base', device='cpu', compute_type='int8')...")
+            local_model = WhisperModel("base", device="cpu", compute_type="int8")
+            segments_iter, info = local_model.transcribe(
+                audio_path,
+                language="tr",
+                word_timestamps=True
+            )
+
+            segments = []
+            words = []
+            full_text_parts = []
+
+            for seg in segments_iter:
+                seg_words = []
+                if seg.words:
+                    for w in seg.words:
+                        w_obj = WordTimestamp(
+                            word=w.word.strip(),
+                            start=float(round(w.start, 2)),
+                            end=float(round(w.end, 2)),
+                            confidence=float(round(w.probability, 2))
+                        )
+                        seg_words.append(w_obj)
+                        words.append(w_obj)
+
+                seg_text = seg.text.strip()
+                if seg_text:
+                    full_text_parts.append(seg_text)
+                    segments.append(TranscriptSegment(
+                        start=float(round(seg.start, 2)),
+                        end=float(round(seg.end, 2)),
+                        text=seg_text,
+                        words=seg_words
+                    ))
+
+            full_text = " ".join(full_text_parts)
+            duration = float(getattr(info, "duration", 0.0))
+            if not duration and words:
+                duration = max(w.end for w in words)
+
+            logger.info(f"Yerel Whisper transkripsiyonu tamamlandı: {len(words)} kelime, {len(segments)} segment, süre={duration:.1f}s")
+            return TranscriptResult(
+                full_text=full_text,
+                segments=segments,
+                words=words,
+                duration=duration
+            )
+        except Exception as local_ex:
+            logger.warning(f"Yerel faster-whisper transkripsiyonu başarısız oldu: {local_ex}")
+
         logger.info("Transkript fallback üretiliyor...")
         return self._generate_fallback_transcript(audio_path)
 
     @staticmethod
     def _generate_fallback_transcript(audio_path: str) -> TranscriptResult:
-        """API anahtarı olmadığında geliştirme ve test için BOŞ bir transkript üretir. (Halüsinasyonları önlemek için sahte veri silinmiştir)"""
-        logger.warning("TRANSKRIPT UYARISI: API anahtarı yok, boş transkript dönülüyor. AI sisteminin videoyu okuyabilmesi için geçerli bir API anahtarı sağlayın.")
+        """API anahtarı ve yerel model olmadığında uyarı transkripti üretir."""
+        logger.warning("TRANSKRIPT UYARISI: Model bulunamadı veya çalıştırılamadı.")
         
-        # Sadece hata olduğunu belirten tek bir segment dönüyoruz, uydurma veri yok.
-        warning_text = "[TRANSKRİPT ÇIKARILAMADI - API ANAHTARI EKSİK]"
+        warning_text = "[TRANSKRİPT ÇIKARILAMADI]"
         words = [WordTimestamp(word=warning_text, start=0.0, end=1.0)]
         segment = TranscriptSegment(start=0.0, end=1.0, text=warning_text, words=words)
 
