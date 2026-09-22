@@ -224,5 +224,107 @@ public class EdlManagerPatchTests : IDisposable
         updatedJson.Should().Contain("ov_img_2");
         updatedJson.Should().Contain("\"trackId\":2");
     }
+
+    [Fact]
+    public async Task PatchEdlAsync_WhenUpdatingOverlayExitAnimationAndFont_ShouldUpdateCorrectly()
+    {
+        var projectId = Guid.NewGuid();
+        var initialEdlJson = """
+        {
+            "projectId": "11111111-1111-1111-1111-111111111111",
+            "cuts": [],
+            "overlays": [
+                {"id": "ov_text_1", "type": "text", "content": "Başlık", "font": "Inter", "animation": "fade", "exitAnimation": "fade"}
+            ],
+            "settings": {}
+        }
+        """;
+
+        var edl = new EditDecisionList
+        {
+            ProjectId = projectId,
+            EdlJson = initialEdlJson,
+            Versiyon = 1,
+            OlusturmaTarihi = DateTime.UtcNow
+        };
+        _dbContext.EditDecisionLists.Add(edl);
+        await _dbContext.SaveChangesAsync();
+
+        var patchDoc = JsonDocument.Parse("""
+        {
+            "overlays": [
+                {
+                    "id": "ov_text_1",
+                    "action": "update",
+                    "font": "Bebas Neue",
+                    "animation": "pop-up",
+                    "exitAnimation": "scale-out"
+                }
+            ]
+        }
+        """);
+
+        var result = await _sut.PatchEdlAsync(projectId, patchDoc.RootElement);
+
+        result.Versiyon.Should().Be(2);
+
+        var updatedInDb = await _dbContext.EditDecisionLists.FirstAsync(e => e.ProjectId == projectId);
+        var updatedJson = updatedInDb.EdlJson;
+
+        updatedJson.Should().Contain("ov_text_1");
+        updatedJson.Should().Contain("Bebas Neue");
+        updatedJson.Should().Contain("scale-out");
+        updatedJson.Should().Contain("pop-up");
+    }
+
+    [Fact]
+    public async Task PatchEdlAsync_WhenMergingClipsByRemovingMultipleCuts_ShouldRemoveAllSpecifiedCuts()
+    {
+        var projectId = Guid.NewGuid();
+        var initialEdlJson = """
+        {
+            "projectId": "11111111-1111-1111-1111-111111111111",
+            "cuts": [
+                {"id": "cut_gap_1", "start": 5.0, "end": 7.0, "reason": "silence"},
+                {"id": "cut_gap_2", "start": 12.0, "end": 14.0, "reason": "silence"},
+                {"id": "cut_keep_outside", "start": 50.0, "end": 55.0, "reason": "silence"}
+            ],
+            "overlays": [],
+            "settings": {}
+        }
+        """;
+
+        var edl = new EditDecisionList
+        {
+            ProjectId = projectId,
+            EdlJson = initialEdlJson,
+            Versiyon = 1,
+            OlusturmaTarihi = DateTime.UtcNow
+        };
+        _dbContext.EditDecisionLists.Add(edl);
+        await _dbContext.SaveChangesAsync();
+
+        // Kurguda [0-20] aralığındaki 3 klip seçilip 'Birleştir' dendiğinde aradaki 2 cut kaldırılır
+        var patchDoc = JsonDocument.Parse("""
+        {
+            "cuts": [
+                {"id": "cut_gap_1", "action": "remove"},
+                {"id": "cut_gap_2", "action": "remove"}
+            ]
+        }
+        """);
+
+        var result = await _sut.PatchEdlAsync(projectId, patchDoc.RootElement);
+
+        result.Versiyon.Should().Be(2);
+
+        var updatedInDb = await _dbContext.EditDecisionLists.FirstAsync(e => e.ProjectId == projectId);
+        var updatedJson = updatedInDb.EdlJson;
+
+        updatedJson.Should().NotContain("cut_gap_1");
+        updatedJson.Should().NotContain("cut_gap_2");
+        updatedJson.Should().Contain("cut_keep_outside");
+    }
 }
+
 

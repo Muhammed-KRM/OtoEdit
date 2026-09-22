@@ -212,10 +212,20 @@ import { environment } from '../../../environments/environment';
                 <button (click)="rippleManual.set(!rippleManual())" class="p-1 px-2 rounded bg-dark-800 text-slate-400 hover:text-sky-400 border border-slate-700" title="Manuel Kesimleri Sıkıştır/Genişlet">
                   {{ rippleManual() ? '🖐 Manuel Sıkıştırılmış' : '🖐 Manuel Geniş' }}
                 </button>
-                <div *ngIf="selectedClipIds().length > 0" class="flex items-center gap-2 border-l border-slate-700 pl-2 ml-1">
-                  <span class="text-[10px] font-bold text-slate-300">{{ selectedClipIds().length }} Seçili</span>
-                  <button (click)="deleteSelectedClips()" class="p-1 px-2.5 rounded bg-rose-600/80 text-white font-bold hover:bg-rose-500 border border-rose-500 shadow-glow-sm" title="Seçili Klipleri Sil (Del)">✕ Sil (Del)</button>
-                  <button *ngIf="selectedClipIds().length > 1" (click)="mergeSelectedClips()" class="p-1 px-2.5 rounded bg-emerald-600/80 text-white font-bold hover:bg-emerald-500 border border-emerald-500 shadow-glow-sm" title="Seçili Klipleri Birleştir">🔗 Birleştir</button>
+                <div *ngIf="selectedClipIds().length > 0" class="flex items-center gap-1.5 border-l border-slate-700 pl-2 ml-1">
+                  <span class="text-[10px] font-bold text-amber-300">{{ selectedClipIds().length }} Klip Seçili</span>
+                  <button *ngIf="selectedHasKeep()" (click)="deleteSelectedClips()" class="p-1 px-2.5 rounded bg-rose-600/80 text-white font-bold hover:bg-rose-500 border border-rose-500 shadow-glow-sm flex items-center gap-1" title="Seçili Klipleri Sil / Kes (Kısayol: Del)">
+                    <span>✕</span> Sil (Del)
+                  </button>
+                  <button *ngIf="selectedHasCuts()" (click)="restoreSelectedCuts()" class="p-1 px-2.5 rounded bg-sky-600/80 text-white font-bold hover:bg-sky-500 border border-sky-500 shadow-glow-sm flex items-center gap-1" title="Seçili Kesilen Kısımları İptal Et ve Sahneye Geri Al">
+                    <span>↩</span> Geri Al
+                  </button>
+                  <button *ngIf="selectedClipIds().length > 1" (click)="mergeSelectedClips()" class="p-1 px-2.5 rounded bg-emerald-600/80 text-white font-bold hover:bg-emerald-500 border border-emerald-500 shadow-glow-sm flex items-center gap-1" title="Seçili Klipleri Birleştir (Kısayol: M)">
+                    <span>🔗</span> Birleştir (M)
+                  </button>
+                  <button (click)="selectedClipIds.set([])" class="p-1 px-1.5 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700 text-[10px]" title="Seçimleri Temizle (Esc)">
+                    ✕ Temizle
+                  </button>
                 </div>
                 <button (click)="addTextOverlay()" class="p-1 px-2.5 rounded bg-brand-cyan text-slate-900 font-bold hover:bg-cyan-400 border border-cyan-500 shadow-glow-sm flex items-center gap-1 ml-auto" title="Zaman çizgisine yazı katmanı ekle">
                   <span class="font-black">T</span>
@@ -1086,6 +1096,14 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly timelineZoom = signal<number>(1);
   readonly splitMarkers = signal<number[]>([]);
   readonly selectedClipIds = signal<string[]>([]);
+  readonly selectedHasCuts = computed(() => {
+    const selIds = this.selectedClipIds();
+    return this.clips().some(c => selIds.includes(c.id) && c.isCut);
+  });
+  readonly selectedHasKeep = computed(() => {
+    const selIds = this.selectedClipIds();
+    return this.clips().some(c => selIds.includes(c.id) && !c.isCut);
+  });
   readonly selectedOverlayId = signal<string | null>(null);
   
   // Inspector Data State
@@ -1548,17 +1566,32 @@ export class EditorComponent implements OnInit, OnDestroy {
     
     const current = this.selectedClipIds();
     
-    // Ctrl (Windows) veya Cmd (Mac) basılıysa çoklu seçim yap
+    // Ctrl (Windows) veya Cmd (Mac) basılıysa çoklu seçim yap (Toggle)
     if (event.ctrlKey || event.metaKey) {
        if (current.includes(clipId)) {
           this.selectedClipIds.set(current.filter(id => id !== clipId));
        } else {
           this.selectedClipIds.set([...current, clipId]);
        }
+    } else if (event.shiftKey && current.length > 0) {
+       // Shift basılıysa: Son seçilen klip ile bu klip arasındaki tüm klipleri aralık olarak seç (Range Selection)
+       const allClips = this.clips();
+       const lastSelectedId = current[current.length - 1];
+       const lastIdx = allClips.findIndex(c => c.id === lastSelectedId);
+       const curIdx = allClips.findIndex(c => c.id === clipId);
+       
+       if (lastIdx !== -1 && curIdx !== -1) {
+          const start = Math.min(lastIdx, curIdx);
+          const end = Math.max(lastIdx, curIdx);
+          const rangeIds = allClips.slice(start, end + 1).map(c => c.id);
+          this.selectedClipIds.set(Array.from(new Set([...current, ...rangeIds])));
+       } else {
+          this.selectedClipIds.set([clipId]);
+       }
     } else {
-       // Tekli seçim
+       // Düz tıklama: Tekli seçim (zaten tek seçiliyse kaldır, değilse sadece bunu seç)
        if (current.length === 1 && current[0] === clipId) {
-          this.selectedClipIds.set([]); // Zaten seçiliyse kaldır
+          this.selectedClipIds.set([]);
        } else {
           this.selectedClipIds.set([clipId]);
        }
@@ -1612,6 +1645,28 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
+  restoreSelectedCuts(): void {
+    const selIds = this.selectedClipIds();
+    if (!selIds.length) return;
+
+    const selectedCutClips = this.clips().filter(c => selIds.includes(c.id) && c.isCut && c.cutObj);
+    if (!selectedCutClips.length) return;
+
+    const patchCuts = selectedCutClips.map(clip => ({
+      id: clip.cutObj.id,
+      start: 0,
+      end: 0,
+      action: 'remove'
+    }));
+
+    this.edlService.patchEdl(this.projectId, {
+      cuts: patchCuts as any
+    }).subscribe(() => {
+      this.selectedClipIds.set([]);
+      this.loadEdl();
+    });
+  }
+
   mergeSelectedClips(): void {
     const selIds = this.selectedClipIds();
     if (selIds.length < 2) return;
@@ -1627,7 +1682,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!edl || !edl.cuts) return;
     
     // Bu aralığa denk gelen tüm cut'ları bul
-    const cutsToRemove = edl.cuts.filter(c => c.start >= startRange && c.end <= endRange);
+    const cutsToRemove = edl.cuts.filter(c => c.start >= (startRange - 0.05) && c.end <= (endRange + 0.05));
     if (cutsToRemove.length === 0) {
        alert('Seçilen klipler arasında birleştirilecek (silinecek) bir kesim bulunamadı.');
        return;
@@ -2437,6 +2492,79 @@ export class EditorComponent implements OnInit, OnDestroy {
           this.canvasResizeOriginalScale = ov.scale || 1.0;
           this.canvasResizeOriginalFontSize = ov.fontSize || 48;
       }
+  }
+
+  @HostListener('window:keydown', ['$event'])
+  onGlobalKeyDown(event: KeyboardEvent): void {
+    // Input, textarea veya select odaklıysa genel kısayolları engelle
+    const target = event.target as HTMLElement;
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+      return;
+    }
+
+    // Del veya Backspace: Seçili klipleri veya seçili katmanı sil
+    if (event.key === 'Delete' || event.key === 'Backspace') {
+      if (this.selectedClipIds().length > 0) {
+        event.preventDefault();
+        this.deleteSelectedClips();
+      } else if (this.selectedOverlayId()) {
+        event.preventDefault();
+        this.removeOverlay(this.selectedOverlayId()!);
+      }
+      return;
+    }
+
+    // 'm' veya 'M': Seçili klipleri birleştir
+    if ((event.key === 'm' || event.key === 'M') && !event.ctrlKey && !event.metaKey) {
+      if (this.selectedClipIds().length > 1) {
+        event.preventDefault();
+        this.mergeSelectedClips();
+      }
+      return;
+    }
+
+    // 'b' veya 'B': Zaman çizgisini bulunulan yerden böl (Split)
+    if ((event.key === 'b' || event.key === 'B') && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      this.addSplitMarker();
+      return;
+    }
+
+    // 'c' veya 'C': Altyazıyı aç/kapat
+    if ((event.key === 'c' || event.key === 'C') && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      this.toggleSubtitles();
+      return;
+    }
+
+    // Escape: Seçimleri temizle
+    if (event.key === 'Escape') {
+      this.selectedClipIds.set([]);
+      this.selectedOverlayId.set(null);
+      return;
+    }
+
+    // Ctrl+A / Cmd+A: Kesilmemiş tüm video kliplerini seç
+    if ((event.ctrlKey || event.metaKey) && (event.key === 'a' || event.key === 'A')) {
+      event.preventDefault();
+      const allNonCutIds = this.clips().filter(c => !c.isCut).map(c => c.id);
+      this.selectedClipIds.set(allNonCutIds);
+      return;
+    }
+
+    // Boşluk (Space): Oynat / Duraklat
+    if (event.code === 'Space') {
+      event.preventDefault();
+      const video = this.videoRef?.nativeElement;
+      if (video) {
+        if (video.paused) {
+          video.play();
+        } else {
+          video.pause();
+        }
+      }
+      return;
+    }
   }
 
   @HostListener('window:mousemove', ['$event'])
