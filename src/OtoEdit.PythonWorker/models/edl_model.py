@@ -93,3 +93,4 @@ class EdlDocument(BaseModel):
     suggestions: List[SuggestionItem] = Field(default_factory=list)
     repurposing: RepurposingData = Field(default_factory=RepurposingData)
     template: Dict[str, Any] = Field(default_factory=dict)
+    audioPeaks: Optional[List[float]] = None

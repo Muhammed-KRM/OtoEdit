@@ -4,6 +4,8 @@ try:
     pika = importlib.import_module("pika")
 except Exception:
     pika = None
+import scipy.io.wavfile as wavfile
+import numpy as np
 from config import Config
 from pipeline.audio_enhancer import AudioEnhancer
 from pipeline.edl_builder import EdlBuilder
@@ -159,6 +161,7 @@ class AnalysisConsumer:
 
             # 11. Aşama 7: EDL Oluşturma (Tüm sonuçları birleştir)
             self._publish_progress(project_id, video_id, PipelineStage.EDL_OLUSTURMA, 96, "Nihai EDL karar listesi derleniyor...")
+            audio_peaks = self._extract_audio_peaks(clean_audio_path)
             edl_dict = self.edl_builder.build(
                 project_id=project_id,
                 video_id=video_id,
@@ -170,7 +173,8 @@ class AnalysisConsumer:
                 suggestions=suggestions,
                 video_format=video_format,
                 extra_cuts=retake_cuts,
-                extra_overlays=broll_overlays
+                extra_overlays=broll_overlays,
+                audio_peaks=audio_peaks
             )
 
             # 10. Tamamlandı Bildirimi ve EDL'yi .NET API'ye Gönder
@@ -184,6 +188,24 @@ class AnalysisConsumer:
             logger.error(f"❌ Analiz pipeline hatası (VideoId={video_id}): {e}", exc_info=True)
             self.publisher.publish_pipeline_error(project_id, video_id, "Analiz", str(e))
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+    def _extract_audio_peaks(self, audio_path: str, num_peaks: int = 1000) -> list:
+        try:
+            sample_rate, data = wavfile.read(audio_path)
+            if len(data.shape) > 1:
+                data = data.mean(axis=1)
+            chunk_size = max(1, len(data) // num_peaks)
+            peaks = []
+            for i in range(num_peaks):
+                chunk = data[i * chunk_size : (i+1) * chunk_size]
+                if len(chunk) > 0:
+                    peak = np.sqrt(np.mean(chunk**2))
+                    peaks.append(float(peak))
+            max_val = max(peaks) if peaks and max(peaks) > 0 else 1
+            return [p / max_val for p in peaks]
+        except Exception as e:
+            logger.error(f"Waveform çıkarılamadı: {e}")
+            return []
 
     def _publish_progress(self, project_id: str, video_id: str, asama: str, yuzde: int, mesaj: str):
         try:

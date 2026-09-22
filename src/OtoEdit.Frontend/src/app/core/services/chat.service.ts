@@ -21,4 +21,8 @@ export class ChatService {
   applyPendingPatch(projectId: string, messageId: string): Observable<any> {
     return this.api.post<any>(`/projects/${projectId}/chat/${messageId}/apply`, {});
   }
+
+  submitForm(projectId: string, messageId: string, parameters: { [key: string]: string }): Observable<any> {
+    return this.api.post<any>(`/projects/${projectId}/chat/${messageId}/form`, parameters);
+  }
 }

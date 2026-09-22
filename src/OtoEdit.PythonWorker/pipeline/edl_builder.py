@@ -26,7 +26,8 @@ class EdlBuilder:
         suggestions: List[SuggestionItem],
         video_format: int = 0,
         extra_cuts: Optional[List[CutItem]] = None,
-        extra_overlays: Optional[List[OverlayItem]] = None
+        extra_overlays: Optional[List[OverlayItem]] = None,
+        audio_peaks: Optional[List[float]] = None
     ) -> Dict[str, Any]:
         """Tüm analiz çıktılarını tek bir EDL JSON sözlüğüne derler."""
         logger.info(f"EDL dokümanı inşa ediliyor: ProjectId={project_id}, VideoId={video_id}")
@@ -122,7 +123,8 @@ class EdlBuilder:
             cuts=sorted_cuts,
             overlays=overlays,
             suggestions=suggestions,
-            repurposing=repurposing_data
+            repurposing=repurposing_data,
+            audioPeaks=audio_peaks
         )
 
         logger.info(f"EDL dokümanı başarıyla inşa edildi: {len(sorted_cuts)} kesim, {len(overlays)} overlay, {len(suggestions)} öneri.")

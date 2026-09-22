@@ -106,6 +106,7 @@ export interface EdlContent {
   };
   suggestions?: SuggestionItem[];
   template?: EdlTemplate;
+  audioPeaks?: number[];
 }
 
 export interface EdlPatchDto {

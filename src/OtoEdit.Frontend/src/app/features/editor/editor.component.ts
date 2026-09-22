@@ -390,7 +390,7 @@ export interface ContextMenuState {
               (play)="isPlaying.set(true)"
               (pause)="isPlaying.set(false)"
               class="w-full h-full object-contain max-h-[460px]">
-              <track *ngIf="vttTrackUrl()" kind="subtitles" [src]="vttTrackUrl()" srclang="tr" label="Türkçe" [default]="showSubtitles()">
+              
             </video>
 
             <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
@@ -906,6 +906,25 @@ export interface ContextMenuState {
                 </ng-container>
               </div>
 
+              
+              <!-- Altyazı Kanalı (Subtitle Track) -->
+              <div class="relative h-10 bg-dark-900/40 border-b border-slate-800/60 overflow-hidden flex items-center hover:bg-dark-900/70 transition-colors">
+                <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
+                <div class="absolute left-0 top-0 bottom-0 w-[120px] bg-dark-950 border-r border-slate-700 flex items-center px-2 z-10 shadow-md">
+                  <span class="text-[10px] font-bold text-amber-400">💬 Altyazı</span>
+                </div>
+                
+                <div class="absolute left-[120px] right-0 top-0 bottom-0 overflow-hidden">
+                  <div *ngFor="let seg of activeEdl()?.transcript?.segments"
+                       class="absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer"
+                       [style.left.%]="(seg.start / totalDuration()) * 100"
+                       [style.width.%]="((seg.end - seg.start) / totalDuration()) * 100"
+                       [title]="seg.text">
+                       <span class="truncate font-semibold">{{ seg.text }}</span>
+                  </div>
+                </div>
+              </div>
+
               <!-- Katman Şeritleri (T3, T2, T1) -->
               <div 
                 *ngFor="let trackNum of overlayTrackNumbers()" 
@@ -979,7 +998,7 @@ export interface ContextMenuState {
                     (click)="selectClip(clip.id, $event)"
                     (dblclick)="toggleClip(clip, $event)"
                     (contextmenu)="openClipContextMenu($event, clip)"
-                    class="relative h-full transition-all border-r border-white/20 box-border group flex flex-col justify-between p-1 select-none z-10 cursor-pointer"
+                    class="absolute top-0 bottom-0 transition-all border-r border-white/20 box-border group flex flex-col justify-between p-1 select-none z-10 cursor-pointer"
                     [ngClass]="{
                        'bg-amber-500/70 hover:bg-amber-500/80 backdrop-blur-xs': isRetakeClip(clip),
                        'bg-rose-500/70 hover:bg-rose-500/80 backdrop-blur-xs': isManualClip(clip),
@@ -987,7 +1006,8 @@ export interface ContextMenuState {
                        'bg-emerald-600/20 hover:bg-emerald-500/35': !clip.isCut,
                        'ring-2 ring-inset ring-brand-yellow shadow-[0_0_12px_rgba(250,204,21,0.6)] z-20': selectedClipIds().includes(clip.id)
                     }"
-                    [style.width.%]="(clip.duration / ( (rippleAi() || rippleManual() || rippleRetake()) ? visibleDuration() : totalDuration() )) * 100"
+                    [style.left.%]="(clip.start / totalDuration()) * 100"
+                    [style.width.%]="((clip.end - clip.start) / totalDuration()) * 100"
                     [title]="getClipTooltip(clip)">
                     
                     <!-- Üst Klip Başlığı -->
@@ -1007,7 +1027,7 @@ export interface ContextMenuState {
                     </div>
 
                     <!-- Çift Tıkla İade İpucu -->
-                    <div *ngIf="clip.isCut" class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-rose-950/90 transition-opacity z-20">
+                    <div *ngIf="clip.isCut" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 bg-rose-950/90 transition-opacity z-20 whitespace-nowrap">
                       <span class="text-[10px] text-white font-bold">↩ Geri Yükle</span>
                     </div>
                   </div>
@@ -1016,7 +1036,8 @@ export interface ContextMenuState {
 
               <!-- Ortak Zaman İmleci (Playhead) -->
               <div 
-                class="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-40 pointer-events-none"
+                (mousedown)="onPlayheadDragStart($event)"
+                class="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-50 cursor-ew-resize pointer-events-auto"
                 [style.left.%]="getPlayheadPosition()">
                 <div class="w-3.5 h-3.5 bg-white rotate-45 -translate-x-[6px] -translate-y-[2px] shadow-lg rounded-sm border border-slate-300"></div>
               </div>
@@ -1157,6 +1178,41 @@ export interface ContextMenuState {
   `
 })
 export class EditorComponent implements OnInit, OnDestroy {
+  isScrubbing = false;
+
+  @HostListener('window:mousemove', ['$event'])
+  onWindowMouseMove(event: MouseEvent) {
+    if (!this.isScrubbing || !this.timelineScrollContainerRef) return;
+    
+    const container = this.timelineScrollContainerRef.nativeElement;
+    const rect = container.getBoundingClientRect();
+    const scrollLeft = container.scrollLeft;
+    
+    let x = event.clientX - rect.left + scrollLeft;
+    const totalW = container.scrollWidth;
+    x = Math.max(0, Math.min(x, totalW));
+    
+    const percentage = x / totalW;
+    const targetTime = percentage * this.totalDuration();
+    
+    if (this.videoRef && this.videoRef.nativeElement) {
+      this.videoRef.nativeElement.currentTime = targetTime;
+    }
+    this.currentTime.set(targetTime);
+  }
+
+  @HostListener('window:mouseup')
+  onWindowMouseUp() {
+    if (this.isScrubbing) {
+      this.isScrubbing = false;
+    }
+  }
+
+  onPlayheadDragStart(event: MouseEvent) {
+    this.isScrubbing = true;
+    event.preventDefault();
+  }
+
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private projectService = inject(ProjectService);
@@ -1473,7 +1529,14 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   readonly visibleDuration = computed(() => {
-     return this.clips().filter(c => this.isVisible(c)).reduce((sum, c) => sum + c.duration, 0);
+     const allClips = this.clips(); 
+     let totalCut = 0;
+     for (const c of allClips) {
+         if (c.isCut && (this.isRetakeClip(c) || c.cutObj?.reason?.includes('silence') || c.cutObj?.reason?.includes('manuel'))) {
+             totalCut += c.duration;
+         }
+     }
+     return Math.max(0, this.totalDuration() - totalCut);
   });
 
   // Chat
@@ -2972,27 +3035,31 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   submitForm(msg: ChatMessageDto): void {
-     if (!msg.formFields) return;
-     
-     if (!msg.formData) msg.formData = {};
-     msg.formFields.forEach(f => {
-         if (msg.formData[f.id] === undefined) {
-             msg.formData[f.id] = f.defaultValue;
-         }
-     });
-     
-     let responseText = "Belirttiğim özellikler ile katmanı ekle:\n";
-     msg.formFields.forEach(f => {
-         responseText += `- ${f.label}: ${msg.formData[f.id]}\n`;
-     });
-     if (msg.formData['positionX'] !== undefined && msg.formData['positionY'] !== undefined) {
-         responseText += `[Koordinatlar: positionX=${msg.formData['positionX']}, positionY=${msg.formData['positionY']}]\n`;
-     }
-     
-     this.userPrompt = responseText;
-     msg.patchDurumu = 'answered';
-     this.chatMessages.update(msgs => [...msgs]);
-     this.sendChatMessage();
+    if (!msg.formFields) return;
+    
+    const requiredEmpty = msg.formFields.some(f => f.required && !msg.formData?.[f.id]);
+    if (requiredEmpty) {
+       alert('Lütfen tüm zorunlu alanları doldurunuz.');
+       return;
+    }
+    
+    const params: { [key: string]: string } = {};
+    for (const key of Object.keys(msg.formData || {})) {
+       params[key] = String(msg.formData![key]);
+    }
+    
+    this.chatLoading.set(true);
+    this.chatService.submitForm(this.projectId, msg.id!, params).subscribe({
+       next: (res: any) => {
+          this.chatLoading.set(false);
+          msg.patchDurumu = res.patchDurumu || 'applied';
+          this.loadEdl();
+       },
+       error: (err: any) => {
+          this.chatLoading.set(false);
+          alert('Form gönderilemedi: ' + (err.error?.detail || err.message));
+       }
+    });
   }
 
   // --- TIMELINE & CANVAS DRAG & RESIZE ---
