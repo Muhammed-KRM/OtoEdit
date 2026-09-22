@@ -75,3 +75,26 @@ def test_generate_ass_file():
         assert "Abone Ol!" in content
         assert "Merhaba" in content
         assert "{\\k" in content  # Karaoke etiketi
+
+
+def test_generate_ass_file_with_track_id():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ass_path = os.path.join(tmpdir, "test_track.ass")
+        overlays = [
+            {
+                "type": "text",
+                "content": "En Üst Katman",
+                "trackId": 5,
+                "timestamp": 1.0,
+                "duration": 2.0
+            }
+        ]
+
+        TextOverlay.generate_ass(overlays=overlays, output_path=ass_path)
+        with open(ass_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        # Dialogue satırının Layer parametresi 5 olmalı: Dialogue: 5,...
+        assert "Dialogue: 5," in content
+        assert "En Üst Katman" in content
+

@@ -80,12 +80,11 @@ import { environment } from '../../../environments/environment';
                 (click)="$event.stopPropagation(); selectOverlay(ov.id)"
                 [style.top]="getOverlayTop(ov)"
                 [style.left]="getOverlayLeft(ov)"
-                class="absolute transition-none z-20 cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
+                [style.zIndex]="getOverlayZIndex(ov)"
+                class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
                 [ngClass]="[
                    selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : '',
-                   ov.animation === 'fade' ? 'animate-fade-in' : '',
-                   ov.animation === 'pop-up' ? 'scale-in' : '',
-                   ov.animation === 'slide-up' ? 'translate-y-4 opacity-0 animate-slide-up-forwards' : ''
+                   getOverlayAnimationClass(ov)
                 ]"
                 [style.color]="ov.color || '#FFFFFF'"
                 [style.backgroundColor]="ov.backgroundColor || 'transparent'"
@@ -604,6 +603,9 @@ import { environment } from '../../../environments/environment';
                     class="px-2 py-0.5 rounded text-[10px] font-bold uppercase">
                     {{ ov.type }}
                   </span>
+                  <span class="px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-slate-800 text-brand-cyan border border-slate-700">
+                    Katman #{{ ov.trackId || 1 }}
+                  </span>
                   <span class="text-xs font-mono text-slate-400">{{ ov.timestamp | number:'1.1-1' }}s - {{ (ov.timestamp + ov.duration) | number:'1.1-1' }}s</span>
                 </div>
                 <p class="text-xs font-medium text-white line-clamp-2">
@@ -615,12 +617,28 @@ import { environment } from '../../../environments/environment';
                 </div>
               </div>
 
-              <button 
-                (click)="$event.stopPropagation(); removeOverlay(ov.id)" 
-                title="Katmanı Sil"
-                class="text-slate-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-rose-500/10 transition-colors">
-                ✕
-              </button>
+              <div class="flex flex-col items-end gap-1">
+                <div class="flex items-center gap-0.5 bg-dark-900 rounded p-0.5 border border-slate-700/60">
+                  <button 
+                    (click)="$event.stopPropagation(); bringOverlayForward(ov.id)" 
+                    title="Öne Getir (Z-Index +1)"
+                    class="text-slate-400 hover:text-brand-cyan hover:bg-slate-700 p-1 rounded text-xs transition-colors cursor-pointer">
+                    🔼
+                  </button>
+                  <button 
+                    (click)="$event.stopPropagation(); sendOverlayBackward(ov.id)" 
+                    title="Arkaya Gönder (Z-Index -1)"
+                    class="text-slate-400 hover:text-brand-cyan hover:bg-slate-700 p-1 rounded text-xs transition-colors cursor-pointer">
+                    🔽
+                  </button>
+                </div>
+                <button 
+                  (click)="$event.stopPropagation(); removeOverlay(ov.id)" 
+                  title="Katmanı Sil"
+                  class="text-slate-500 hover:text-rose-400 p-1 rounded-lg hover:bg-rose-500/10 transition-colors text-xs cursor-pointer">
+                  ✕
+                </button>
+              </div>
             </div>
           </div>
 
@@ -665,8 +683,16 @@ import { environment } from '../../../environments/environment';
                 </div>
 
                 <!-- Görsel URL / Kaynak (Image ise) -->
-                <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
-                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Görsel Kaynağı (URL veya Stok Yolu)</label>
+                <div class="space-y-1.5" *ngIf="inspectorData.type === 'image'">
+                   <div class="flex items-center justify-between">
+                     <label class="text-[10px] text-slate-400 uppercase font-semibold">Görsel Kaynağı (URL veya Stok Yolu)</label>
+                     <button 
+                       type="button" 
+                       (click)="activeTab.set('media')" 
+                       class="text-[10px] font-bold text-brand-cyan hover:underline flex items-center gap-1 cursor-pointer">
+                       <span>🖼️</span> Medyadan Seç
+                     </button>
+                   </div>
                    <input 
                       type="text" 
                       [(ngModel)]="inspectorData.source" 
@@ -719,14 +745,30 @@ import { environment } from '../../../environments/environment';
                 </div>
 
                 <div class="space-y-1" *ngIf="inspectorData.type === 'text'">
-                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font)</label>
+                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font & Tipografi)</label>
                    <select [(ngModel)]="inspectorData.font" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
-                     <option value="Inter">Inter (Modern & Temiz)</option>
-                     <option value="Arial">Arial (Klasik Sans)</option>
-                     <option value="Roboto">Roboto (Google Standart)</option>
-                     <option value="Montserrat">Montserrat (Güçlü & Kalın)</option>
-                     <option value="Impact">Impact (YouTube Başlık)</option>
-                     <option value="Comic Sans MS">Comic Sans (Eğlenceli)</option>
+                     <optgroup label="🔥 YouTube & Sosyal Medya Başlık">
+                       <option value="Bebas Neue">Bebas Neue (Büyük & Vurucu)</option>
+                       <option value="Montserrat">Montserrat (Modern & Kalın)</option>
+                       <option value="Anton">Anton (Ağır & Dikkat Çekici)</option>
+                       <option value="Oswald">Oswald (Dar & Yüksek Başlık)</option>
+                       <option value="Impact">Impact (Klasik Meme/YouTube)</option>
+                     </optgroup>
+                     <optgroup label="✨ Modern & Geometrik Sans">
+                       <option value="Poppins">Poppins (Temiz & Yuvarlak)</option>
+                       <option value="Outfit">Outfit (Fütüristik Sans)</option>
+                       <option value="Inter">Inter (Ultra Okunabilir UI)</option>
+                       <option value="Roboto">Roboto (Google Standart)</option>
+                       <option value="Arial">Arial (Sade & Klasik)</option>
+                     </optgroup>
+                     <optgroup label="🎨 Yaratıcı & Tematik">
+                       <option value="Syne">Syne (Özgün Sanatsal Başlık)</option>
+                       <option value="Bangers">Bangers (Çizgi Roman / Enerjik)</option>
+                       <option value="Cinzel">Cinzel (Sinematik Serif / Tarih)</option>
+                       <option value="Playfair Display">Playfair Display (Zarif Serif)</option>
+                       <option value="Fira Code">Fira Code (Kod / Teknoloji)</option>
+                       <option value="Comic Sans MS">Comic Sans (Eğlenceli)</option>
+                     </optgroup>
                    </select>
                 </div>
 
@@ -741,15 +783,65 @@ import { environment } from '../../../environments/environment';
                       <input type="number" step="0.5" [(ngModel)]="inspectorData.positionY" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none" />
                    </div>
                 </div>
+
+                <!-- Katman Sırası / Hiyerarşi (Z-Index) -->
+                <div class="p-3 bg-dark-950/70 rounded-xl border border-slate-800 space-y-2">
+                   <div class="flex items-center justify-between">
+                     <span class="text-[10px] text-slate-400 uppercase font-semibold flex items-center gap-1.5">
+                       <span>🥞</span> Katman Hiyerarşisi (Z-Index)
+                     </span>
+                     <span class="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30">
+                       Katman #{{ inspectorData.trackId || 1 }}
+                     </span>
+                   </div>
+                   <div class="grid grid-cols-2 gap-2">
+                     <button 
+                       type="button"
+                       (click)="bringOverlayForward(selectedOverlayId()!)"
+                       class="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-slate-700 text-xs text-white font-semibold border border-slate-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+                       <span>🔼</span> Öne Getir (+1)
+                     </button>
+                     <button 
+                       type="button"
+                       (click)="sendOverlayBackward(selectedOverlayId()!)"
+                       class="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-slate-700 text-xs text-white font-semibold border border-slate-700 flex items-center justify-center gap-1.5 transition-all cursor-pointer">
+                       <span>🔽</span> Arkaya Gönder (-1)
+                     </button>
+                   </div>
+                   <div class="flex items-center gap-2 pt-1 text-[10px] text-slate-400">
+                     <span>Özel Katman No:</span>
+                     <input 
+                       type="number" 
+                       min="1" 
+                       max="99" 
+                       [(ngModel)]="inspectorData.trackId" 
+                       (ngModelChange)="onInspectorChange()" 
+                       class="w-16 bg-dark-900 border border-slate-700 rounded p-1 text-xs text-center text-white focus:border-brand-cyan focus:outline-none font-mono" />
+                     <span class="text-[9px] text-slate-500 italic">(Daha büyük = Daha üstte)</span>
+                   </div>
+                </div>
                 
-                <div class="space-y-1">
-                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Giriş Animasyonu</label>
-                   <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
-                     <option value="none">Yok (Doğrudan Göster)</option>
-                     <option value="fade">Fade In (Yumuşak Geçiş)</option>
-                     <option value="pop-up">Pop Up (Büyüyerek Çık)</option>
-                     <option value="slide-up">Slide Up (Aşağıdan Yukarı)</option>
-                   </select>
+                <!-- Animasyon Kontrolleri (Giriş ve Çıkış) -->
+                <div class="grid grid-cols-2 gap-3">
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Giriş Animasyonu</label>
+                      <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
+                        <option value="none">Yok (Doğrudan Göster)</option>
+                        <option value="fade">Fade In (Yumuşak Geçiş)</option>
+                        <option value="pop-up">Pop Up (Büyüyerek Çık)</option>
+                        <option value="slide-up">Slide Up (Aşağıdan Yukarı)</option>
+                      </select>
+                   </div>
+                   <div class="space-y-1">
+                      <label class="text-[10px] text-slate-400 uppercase font-semibold">Çıkış Animasyonu</label>
+                      <select [(ngModel)]="inspectorData.exitAnimation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none">
+                        <option value="none">Yok (Aniden Kaybol)</option>
+                        <option value="fade">Fade Out (Sönerek Çık)</option>
+                        <option value="scale-out">Scale Out (Küçülerek Çık)</option>
+                        <option value="slide-down">Slide Down (Aşağıya İterek)</option>
+                        <option value="slide-up">Slide Up (Yukarıya Uçarak)</option>
+                      </select>
+                   </div>
                 </div>
 
                 <!-- Actions -->
@@ -809,6 +901,20 @@ import { environment } from '../../../environments/environment';
                </div>
              </div>
 
+              <!-- Seçili Katman Bilgisi / Hızlı Değiştirme Bildirimi -->
+              <div *ngIf="selectedOverlay()?.type === 'image'" class="p-2.5 rounded-xl bg-purple-950/60 border border-purple-500/40 flex items-center justify-between text-xs mt-3">
+                <div class="flex items-center gap-2 truncate">
+                  <span class="text-sm">🎯</span>
+                  <div class="truncate">
+                    <span class="text-purple-300 font-bold block">Seçili Görsel Katmanı</span>
+                    <span class="text-[10px] text-slate-400 truncate">{{ selectedOverlay()?.content || selectedOverlay()?.id }}</span>
+                  </div>
+                </div>
+                <span class="px-2 py-0.5 rounded text-[9px] font-mono font-bold bg-purple-900/80 text-purple-300 border border-purple-600/50">
+                  Katman #{{ selectedOverlay()?.trackId || 1 }}
+                </span>
+              </div>
+
              <!-- Kullanıcının Yüklediği Medyalar -->
              <div *ngIf="assets().length > 0" class="space-y-2 mt-2">
                <h4 class="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Yüklenen Dosyalar</h4>
@@ -831,7 +937,14 @@ import { environment } from '../../../environments/environment';
                    </div>
 
                    <!-- Hover Kontrolleri -->
-                   <div class="absolute inset-0 bg-dark-950/80 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2">
+                   <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1.5 p-2">
+                     <button 
+                       *ngIf="selectedOverlay()?.type === 'image'"
+                       (click)="$event.stopPropagation(); assignAssetToSelectedOverlay(asset)"
+                       class="px-2 py-1 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded shadow transition-colors w-full flex items-center justify-center gap-1 cursor-pointer">
+                       <span>🎯</span>
+                       <span>Seçili Katmana Ata</span>
+                     </button>
                      <button 
                        (click)="$event.stopPropagation(); addAssetOverlay(asset)"
                        class="px-2.5 py-1 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[10px] rounded shadow-md transition-colors w-full flex items-center justify-center gap-1">
@@ -857,18 +970,38 @@ import { environment } from '../../../environments/environment';
              <div class="mt-4 pt-4 border-t border-slate-800">
                <h4 class="text-[10px] font-bold text-slate-400 uppercase mb-2">Pexels Stok Görseller (Örnek)</h4>
                <div class="grid grid-cols-2 gap-2">
-                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım & Teknoloji')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
-                   <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
-                   <div class="absolute inset-0 bg-brand-cyan/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                     <span class="bg-black/60 text-white text-[10px] px-2 py-1 rounded font-bold">Katmana Ekle +</span>
-                   </div>
-                 </div>
-                 <div (click)="addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Toplantı & Ekip')" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
-                   <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
-                   <div class="absolute inset-0 bg-brand-cyan/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                     <span class="bg-black/60 text-white text-[10px] px-2 py-1 rounded font-bold">Katmana Ekle +</span>
-                   </div>
-                 </div>
+                 <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
+                  <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
+                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1.5">
+                    <button 
+                      *ngIf="selectedOverlay()?.type === 'image'"
+                      (click)="$event.stopPropagation(); assignUrlToSelectedOverlay('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım & Teknoloji')"
+                      class="px-1.5 py-0.5 bg-purple-600 hover:bg-purple-500 text-white text-[9px] rounded font-bold w-full cursor-pointer">
+                      🎯 Seçiliye Ata
+                    </button>
+                    <button 
+                      (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım & Teknoloji')"
+                      class="px-1.5 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 text-[9px] rounded font-bold w-full cursor-pointer">
+                      + Katman Ekle
+                    </button>
+                  </div>
+                </div>
+                <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group cursor-pointer hover:border-brand-cyan transition-colors">
+                  <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
+                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1.5">
+                    <button 
+                      *ngIf="selectedOverlay()?.type === 'image'"
+                      (click)="$event.stopPropagation(); assignUrlToSelectedOverlay('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Toplantı & Ekip')"
+                      class="px-1.5 py-0.5 bg-purple-600 hover:bg-purple-500 text-white text-[9px] rounded font-bold w-full cursor-pointer">
+                      🎯 Seçiliye Ata
+                    </button>
+                    <button 
+                      (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Toplantı & Ekip')"
+                      class="px-1.5 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 text-[9px] rounded font-bold w-full cursor-pointer">
+                      + Katman Ekle
+                    </button>
+                  </div>
+                </div>
                </div>
              </div>
           </div>
@@ -1281,6 +1414,9 @@ export class EditorComponent implements OnInit, OnDestroy {
     const isImage = asset.mimeTuru.startsWith('image/');
     const isVideo = asset.mimeTuru.startsWith('video/');
     const t = Math.max(0, this.currentTime());
+    const currentOverlays = this.activeEdl()?.overlays || [];
+    const maxTrack = currentOverlays.reduce((max, o) => Math.max(max, o.trackId || 1), 0);
+    const nextTrack = maxTrack + 1;
 
     const newOverlay: any = {
       id: `asset_${Date.now()}`,
@@ -1292,7 +1428,9 @@ export class EditorComponent implements OnInit, OnDestroy {
       positionX: 50,
       positionY: 50,
       scale: 1.0,
+      trackId: nextTrack,
       animation: 'fade',
+      exitAnimation: 'fade',
       action: 'add'
     };
 
@@ -1534,6 +1672,120 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (hPos === 'right') return '70%';
     return '35%';
   }
+
+  getOverlayZIndex(ov: OverlayItem): number {
+    if (this.selectedOverlayId() === ov.id) {
+      return 50; // Seçili eleman her zaman en üstte yer alır (kulp ve sürükleme engellenemez)
+    }
+    return 20 + (ov.trackId ?? 1);
+  }
+
+  isOverlayExiting(ov: OverlayItem): boolean {
+    const remaining = (ov.timestamp + ov.duration) - this.currentTime();
+    return remaining > 0 && remaining <= 0.45;
+  }
+
+  getOverlayAnimationClass(ov: OverlayItem): string {
+    if (this.isOverlayExiting(ov)) {
+      const exitAnim = ov.exitAnimation || 'fade';
+      switch (exitAnim) {
+        case 'fade': return 'animate-fade-out';
+        case 'pop-up':
+        case 'scale-out': return 'animate-scale-out';
+        case 'slide-down': return 'animate-slide-down-out';
+        case 'slide-up': return 'animate-slide-up-out';
+        case 'none': return '';
+        default: return 'animate-fade-out';
+      }
+    }
+
+    const enterAnim = ov.animation || 'none';
+    switch (enterAnim) {
+      case 'fade': return 'animate-fade-in';
+      case 'pop-up': return 'scale-in';
+      case 'slide-up': return 'translate-y-4 opacity-0 animate-slide-up-forwards';
+      case 'none': return '';
+      default: return '';
+    }
+  }
+
+  bringOverlayForward(ovId: string): void {
+    const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
+    if (!ov) return;
+    const currentTrack = ov.trackId ?? 1;
+    const newTrack = currentTrack + 1;
+    ov.trackId = newTrack;
+    if (this.selectedOverlayId() === ovId && this.inspectorData) {
+      this.inspectorData.trackId = newTrack;
+    }
+    this.edl.update(e => e ? { ...e } : null);
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [{ id: ovId, trackId: newTrack, action: 'update' } as any]
+    }).subscribe({
+      next: () => this.loadEdl(),
+      error: (err) => console.error('Katman sırası öne alınamadı:', err)
+    });
+  }
+
+  sendOverlayBackward(ovId: string): void {
+    const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
+    if (!ov) return;
+    const currentTrack = ov.trackId ?? 1;
+    const newTrack = Math.max(1, currentTrack - 1);
+    ov.trackId = newTrack;
+    if (this.selectedOverlayId() === ovId && this.inspectorData) {
+      this.inspectorData.trackId = newTrack;
+    }
+    this.edl.update(e => e ? { ...e } : null);
+    this.edlService.patchEdl(this.projectId, {
+      overlays: [{ id: ovId, trackId: newTrack, action: 'update' } as any]
+    }).subscribe({
+      next: () => this.loadEdl(),
+      error: (err) => console.error('Katman sırası arkaya alınamadı:', err)
+    });
+  }
+
+  assignAssetToSelectedOverlay(asset: ProjectAssetDto): void {
+    const selId = this.selectedOverlayId();
+    if (!selId) return;
+    const ov = this.activeEdl()?.overlays?.find(o => o.id === selId);
+    if (ov) {
+      ov.source = asset.url;
+      ov.content = asset.dosyaAdi;
+      if (this.inspectorData && this.inspectorData.id === selId) {
+        this.inspectorData.source = asset.url;
+        this.inspectorData.content = asset.dosyaAdi;
+      }
+      this.edl.update(e => e ? { ...e } : null);
+      this.edlService.patchEdl(this.projectId, {
+        overlays: [{ id: selId, source: asset.url, content: asset.dosyaAdi, action: 'update' } as any]
+      }).subscribe(() => {
+        this.loadEdl();
+        this.activeTab.set('inspector');
+      });
+    }
+  }
+
+  assignUrlToSelectedOverlay(url: string, name: string): void {
+    const selId = this.selectedOverlayId();
+    if (!selId) return;
+    const ov = this.activeEdl()?.overlays?.find(o => o.id === selId);
+    if (ov) {
+      ov.source = url;
+      ov.content = name;
+      if (this.inspectorData && this.inspectorData.id === selId) {
+        this.inspectorData.source = url;
+        this.inspectorData.content = name;
+      }
+      this.edl.update(e => e ? { ...e } : null);
+      this.edlService.patchEdl(this.projectId, {
+        overlays: [{ id: selId, source: url, content: name, action: 'update' } as any]
+      }).subscribe(() => {
+        this.loadEdl();
+        this.activeTab.set('inspector');
+      });
+    }
+  }
   
   onCanvasDragStart(event: MouseEvent, overlayId: string): void {
      event.preventDefault(); // Prevent text selection
@@ -1598,6 +1850,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     
     const newOvId = `ov_txt_${Date.now()}`;
+    const currentOverlays = this.activeEdl()?.overlays || [];
+    const maxTrack = currentOverlays.reduce((max, o) => Math.max(max, o.trackId || 1), 0);
+    const nextTrack = maxTrack + 1;
+
     const newOverlay: any = {
       id: newOvId,
       type: 'text',
@@ -1609,7 +1865,9 @@ export class EditorComponent implements OnInit, OnDestroy {
       font: 'Inter',
       positionX: 50,
       positionY: 80,
+      trackId: nextTrack,
       animation: 'fade',
+      exitAnimation: 'fade',
       action: 'add'
     };
 
@@ -1630,48 +1888,14 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   addImageOverlay(): void {
-    let start = this.currentTime();
-    let duration = 4.0;
-    
-    const selIds = this.selectedClipIds();
-    if (selIds.length > 0) {
-      const selectedClips = this.clips().filter(c => selIds.includes(c.id)).sort((a,b) => a.start - b.start);
-      if (selectedClips.length > 0) {
-        start = selectedClips[0].start;
-        const end = selectedClips[selectedClips.length - 1].end;
-        duration = Math.max(1.0, end - start);
-      }
+    const imgAssets = this.assets().filter(a => a.mimeTuru?.startsWith('image/'));
+    if (imgAssets.length > 0) {
+      const latestAsset = imgAssets[imgAssets.length - 1];
+      this.addAssetOverlay(latestAsset);
+      return;
     }
-    
-    const newOvId = `ov_img_${Date.now()}`;
-    const newOverlay: any = {
-      id: newOvId,
-      type: 'image',
-      content: 'Görsel Kaplaması',
-      source: 'https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=600',
-      timestamp: parseFloat(start.toFixed(2)),
-      duration: parseFloat(duration.toFixed(2)),
-      positionX: 50,
-      positionY: 45,
-      scale: 1.0,
-      animation: 'fade',
-      action: 'add'
-    };
-
-    this.edlService.patchEdl(this.projectId, {
-      overlays: [newOverlay]
-    }).subscribe({
-      next: () => {
-        this.loadEdl();
-        if (this.videoRef?.nativeElement) {
-          this.videoRef.nativeElement.currentTime = start;
-          this.currentTime.set(start);
-        }
-        this.selectOverlay(newOvId);
-        this.activeTab.set('inspector');
-      },
-      error: (err) => console.error('Görsel eklenemedi:', err)
-    });
+    // Yüklenmiş görsel yoksa kullanıcıyı dosya yüklemesi / seçmesi için Medya sekmesine yönlendir
+    this.activeTab.set('media');
   }
 
   addImageOverlayFromUrl(url: string, contentName = 'Stok Görsel'): void {
@@ -1689,6 +1913,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     
     const newOvId = `ov_img_${Date.now()}`;
+    const currentOverlays = this.activeEdl()?.overlays || [];
+    const maxTrack = currentOverlays.reduce((max, o) => Math.max(max, o.trackId || 1), 0);
+    const nextTrack = maxTrack + 1;
+
     const newOverlay: any = {
       id: newOvId,
       type: 'image',
@@ -1699,7 +1927,9 @@ export class EditorComponent implements OnInit, OnDestroy {
       positionX: 50,
       positionY: 45,
       scale: 1.0,
+      trackId: nextTrack,
       animation: 'fade',
+      exitAnimation: 'fade',
       action: 'add'
     };
 
@@ -1745,7 +1975,9 @@ export class EditorComponent implements OnInit, OnDestroy {
           positionX: ov.positionX ?? 50,
           positionY: ov.positionY ?? 50,
           animation: ov.animation || 'none',
-          scale: ov.scale ?? 1.0
+          exitAnimation: ov.exitAnimation || 'fade',
+          scale: ov.scale ?? 1.0,
+          trackId: ov.trackId ?? 1
         };
         this.activeTab.set('inspector');
         
@@ -1772,10 +2004,12 @@ export class EditorComponent implements OnInit, OnDestroy {
       ov.font = this.inspectorData.font;
       ov.scale = Number(this.inspectorData.scale) || 1.0;
       ov.animation = this.inspectorData.animation;
+      ov.exitAnimation = this.inspectorData.exitAnimation || 'fade';
       ov.positionX = Number(this.inspectorData.positionX);
       ov.positionY = Number(this.inspectorData.positionY);
       ov.timestamp = Number(this.inspectorData.timestamp);
       ov.duration = Number(this.inspectorData.duration);
+      ov.trackId = Number(this.inspectorData.trackId) || 1;
       
       this.edl.update(e => e ? { ...e } : null);
     }
@@ -1800,6 +2034,8 @@ export class EditorComponent implements OnInit, OnDestroy {
           font: this.inspectorData.font,
           scale: Number(this.inspectorData.scale),
           animation: this.inspectorData.animation,
+          exitAnimation: this.inspectorData.exitAnimation || 'fade',
+          trackId: Number(this.inspectorData.trackId) || 1,
           action: 'update'
         } as any]
      }).subscribe({

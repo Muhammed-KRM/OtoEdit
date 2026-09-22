@@ -138,11 +138,12 @@ class TextOverlay:
             bg_ass = cls.hex_to_ass_color(ov.get("backgroundColor", "#00000080"))
             align = cls.position_to_ass_alignment(ov.get("position", ["center", "bottom"]))
             animation = ov.get("animation", "pop-up")
+            exit_animation = ov.get("exitAnimation") or ov.get("exit_animation") or "fade"
             
             posX = ov.get("positionX")
             posY = ov.get("positionY")
 
-            anim_tags = AnimationEffects.get_ass_tags(animation, duration_sec)
+            anim_tags = AnimationEffects.get_ass_tags(animation, duration_sec, exit_anim_type=exit_animation)
 
             pos_tag = ""
             if posX is not None and posY is not None:
@@ -159,7 +160,8 @@ class TextOverlay:
                 inline_tags = f"{{\\an{align}\\fn{font}\\fs{size}\\c{color_ass}\\4c{bg_ass}{anim_tags}}}"
                 
             clean_content = content.replace("\n", "\\N")
-            dialogue_lines.append(f"Dialogue: 0,{start_ass},{end_ass},Default,,0,0,0,,{inline_tags}{clean_content}")
+            track_layer = int(ov.get("trackId") or ov.get("track_id") or 1)
+            dialogue_lines.append(f"Dialogue: {track_layer},{start_ass},{end_ass},Default,,0,0,0,,{inline_tags}{clean_content}")
 
         # 2. Transkript altyazılarını işle (varsa)
         if transcript and isinstance(transcript, dict):

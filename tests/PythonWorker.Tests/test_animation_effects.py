@@ -29,3 +29,22 @@ def test_resolve_static_position():
     x_top_right, y_top_right = AnimationEffects.resolve_static_position(["right", "top"])
     assert "main_w-overlay_w" in x_top_right
     assert y_top_right == "40"
+
+
+def test_animation_effects_exit_fade():
+    tag = AnimationEffects.get_ass_tags("fade", duration_sec=5.0, exit_anim_type="fade")
+    assert "\\fad(" in tag
+
+
+def test_animation_effects_exit_scale_out():
+    tag = AnimationEffects.get_ass_tags("pop-up", duration_sec=4.0, exit_anim_type="scale-out")
+    assert "\\fscx50" in tag
+    assert "\\fscx40" in tag  # scale-out shrinks
+    assert "\\fad(" in tag
+
+
+def test_animation_effects_exit_none():
+    tag = AnimationEffects.get_ass_tags("fade", duration_sec=5.0, exit_anim_type="none")
+    assert "\\fad(" in tag
+    assert ",0)" in tag  # fade_out is 0
+

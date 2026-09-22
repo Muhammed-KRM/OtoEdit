@@ -19,6 +19,7 @@ export interface OverlayItem {
   color?: string;
   backgroundColor?: string;
   animation?: 'fade' | 'pop-up' | 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down' | 'none';
+  exitAnimation?: 'fade' | 'pop-up' | 'slide-down' | 'slide-up' | 'scale-out' | 'none';
   position?: [string, string];
   positionX?: number; // 0-100 percentage
   positionY?: number; // 0-100 percentage

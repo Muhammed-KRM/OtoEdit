@@ -93,9 +93,11 @@ class Transcriber:
 
         # 2. Yerel faster-whisper motorunu dene (API anahtarı yoksa veya hata verdiyse)
         try:
-            from faster_whisper import WhisperModel
+            import importlib
+            fw_mod = importlib.import_module("faster_whisper")
+            whisper_model_cls = getattr(fw_mod, "WhisperModel")
             logger.info("Yerel faster-whisper modeli ile transkripsiyon başlatılıyor (model='base', device='cpu', compute_type='int8')...")
-            local_model = WhisperModel("base", device="cpu", compute_type="int8")
+            local_model = whisper_model_cls("base", device="cpu", compute_type="int8")
             segments_iter, info = local_model.transcribe(
                 audio_path,
                 language="tr",

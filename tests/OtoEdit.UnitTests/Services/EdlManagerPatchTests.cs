@@ -177,4 +177,52 @@ public class EdlManagerPatchTests : IDisposable
         // settings güncellenmiş olmalı
         updatedJson.Should().Contain("\"resolution\":\"4k\"");
     }
+
+    [Fact]
+    public async Task PatchEdlAsync_WhenUpdatingOverlayTrackId_ShouldUpdateTrackIdCorrectly()
+    {
+        var projectId = Guid.NewGuid();
+        var initialEdlJson = """
+        {
+            "cuts": [],
+            "overlays": [
+                {"id": "ov_text_1", "type": "text", "content": "Alt Yazı", "trackId": 1},
+                {"id": "ov_img_2", "type": "image", "content": "Logo", "trackId": 2}
+            ],
+            "settings": {}
+        }
+        """;
+
+        var edl = new EditDecisionList
+        {
+            ProjectId = projectId,
+            EdlJson = initialEdlJson,
+            Versiyon = 1,
+            OlusturmaTarihi = DateTime.UtcNow
+        };
+        _dbContext.EditDecisionLists.Add(edl);
+        await _dbContext.SaveChangesAsync();
+
+        // ov_text_1'i öne getir (trackId 1 -> 3)
+        var patchDoc = JsonDocument.Parse("""
+        {
+            "overlays": [
+                {"id": "ov_text_1", "action": "update", "trackId": 3}
+            ]
+        }
+        """);
+
+        var result = await _sut.PatchEdlAsync(projectId, patchDoc.RootElement);
+
+        result.Versiyon.Should().Be(2);
+
+        var updatedInDb = await _dbContext.EditDecisionLists.FirstAsync(e => e.ProjectId == projectId);
+        var updatedJson = updatedInDb.EdlJson;
+
+        updatedJson.Should().Contain("ov_text_1");
+        updatedJson.Should().Contain("\"trackId\":3");
+        updatedJson.Should().Contain("ov_img_2");
+        updatedJson.Should().Contain("\"trackId\":2");
+    }
 }
+

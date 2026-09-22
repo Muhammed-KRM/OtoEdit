@@ -6,48 +6,88 @@ class AnimationEffects:
     """Yazı ve görsel kaplamaları için FFmpeg ve ASS uyumlu animasyon parametreleri üretir."""
 
     @staticmethod
-    def get_ass_tags(animation_type: str, duration_sec: float, pos_x: int = 0, pos_y: int = 0) -> str:
+    def get_ass_tags(
+        animation_type: str,
+        duration_sec: float,
+        pos_x: int = 0,
+        pos_y: int = 0,
+        exit_anim_type: str = "fade"
+    ) -> str:
         r"""
         ASS formatı için animasyon kontrol etiketlerini döndürür.
+        Giriş (entrance) ve çıkış (exit) animasyonlarını kombine eder.
         Örn: fade -> \fad(300,300)
              pop-up -> \t(0, 300, \fscx100\fscy100)
              slide-left -> \move(x_start, y, x_end, y, 0, 400)
         """
         duration_ms = int(duration_sec * 1000)
         anim = (animation_type or "").lower().strip()
+        exit_anim = (exit_anim_type or "fade").lower().strip()
+
+        # Çıkış fade süresi
+        if exit_anim == "none":
+            fade_out = 0
+        elif exit_anim in ["scale-out", "pop-up"]:
+            fade_out = 150
+        else:
+            fade_out = min(300, max(50, int(duration_ms * 0.1)))
 
         if anim == "fade":
             fade_in = min(300, max(50, int(duration_ms * 0.1)))
-            fade_out = min(300, max(50, int(duration_ms * 0.1)))
+            if exit_anim in ["scale-out", "pop-up"]:
+                exit_start = max(0, duration_ms - 250)
+                return f"\\fad({fade_in},{fade_out})\\t({exit_start},{duration_ms},\\fscx40\\fscy40)"
             return f"\\fad({fade_in},{fade_out})"
 
         elif anim == "pop-up":
             # 0-250ms arasında %50'den %100'e hızlı büyüme + hafif fade
-            return "\\fscx50\\fscy50\\t(0,250,\\fscx100\\fscy100)\\fad(100,200)"
+            if exit_anim in ["scale-out", "pop-up"]:
+                exit_start = max(0, duration_ms - 250)
+                return f"\\fscx50\\fscy50\\t(0,250,\\fscx100\\fscy100)\\t({exit_start},{duration_ms},\\fscx40\\fscy40)\\fad(100,{fade_out})"
+            return f"\\fscx50\\fscy50\\t(0,250,\\fscx100\\fscy100)\\fad(100,{fade_out})"
 
         elif anim == "slide-left":
             # Sağdan sola kayarak gelme
             start_x = pos_x + 300
             anim_dur = min(400, int(duration_ms * 0.2))
-            return f"\\move({start_x},{pos_y},{pos_x},{pos_y},0,{anim_dur})"
+            move_tag = f"\\move({start_x},{pos_y},{pos_x},{pos_y},0,{anim_dur})"
+            if fade_out > 0:
+                return f"{move_tag}\\fad(0,{fade_out})"
+            return move_tag
 
         elif anim == "slide-right":
             # Soldan sağa kayarak gelme
             start_x = max(0, pos_x - 300)
             anim_dur = min(400, int(duration_ms * 0.2))
-            return f"\\move({start_x},{pos_y},{pos_x},{pos_y},0,{anim_dur})"
+            move_tag = f"\\move({start_x},{pos_y},{pos_x},{pos_y},0,{anim_dur})"
+            if fade_out > 0:
+                return f"{move_tag}\\fad(0,{fade_out})"
+            return move_tag
 
         elif anim == "slide-up":
             # Aşağıdan yukarıya kayarak gelme
             start_y = pos_y + 200
             anim_dur = min(400, int(duration_ms * 0.2))
-            return f"\\move({pos_x},{start_y},{pos_x},{pos_y},0,{anim_dur})"
+            move_tag = f"\\move({pos_x},{start_y},{pos_x},{pos_y},0,{anim_dur})"
+            if fade_out > 0:
+                return f"{move_tag}\\fad(0,{fade_out})"
+            return move_tag
 
         elif anim == "slide-down":
             # Yukarıdan aşağıya kayarak gelme
             start_y = max(0, pos_y - 200)
             anim_dur = min(400, int(duration_ms * 0.2))
-            return f"\\move({pos_x},{start_y},{pos_x},{pos_y},0,{anim_dur})"
+            move_tag = f"\\move({pos_x},{start_y},{pos_x},{pos_y},0,{anim_dur})"
+            if fade_out > 0:
+                return f"{move_tag}\\fad(0,{fade_out})"
+            return move_tag
+
+        # anim == "none" veya tanımsız ama exit_anim varsa
+        if fade_out > 0:
+            if exit_anim in ["scale-out", "pop-up"]:
+                exit_start = max(0, duration_ms - 250)
+                return f"\\t({exit_start},{duration_ms},\\fscx40\\fscy40)\\fad(0,{fade_out})"
+            return f"\\fad(0,{fade_out})"
 
         return ""
 

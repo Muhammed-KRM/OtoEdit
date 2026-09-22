@@ -59,3 +59,41 @@
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
+
+/* Çıkış Animasyonları (Exit Animations) Keyframes & Utilities */
+@keyframes fadeOut {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.96); }
+}
+
+@keyframes slideDownOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(24px); }
+}
+
+@keyframes slideUpOut {
+  from { opacity: 1; transform: translateY(0); }
+  to { opacity: 0; transform: translateY(-24px); }
+}
+
+@keyframes scaleOut {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.6); }
+}
+
+.animate-fade-out {
+  animation: fadeOut 0.35s ease-in forwards !important;
+}
+
+.animate-slide-down-out {
+  animation: slideDownOut 0.35s ease-in forwards !important;
+}
+
+.animate-slide-up-out {
+  animation: slideUpOut 0.35s ease-in forwards !important;
+}
+
+.animate-scale-out {
+  animation: scaleOut 0.3s ease-in forwards !important;
+}
+

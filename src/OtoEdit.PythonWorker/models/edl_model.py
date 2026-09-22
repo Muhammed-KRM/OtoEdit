@@ -37,6 +37,7 @@ class OverlayItem(BaseModel):
     timestamp: float
     duration: float = 5.0
     animation: Optional[str] = "pop-up"  # "pop-up", "fade", "slide-left"
+    exitAnimation: Optional[str] = "fade"  # "fade", "pop-up", "slide-down", "slide-up", "scale-out", "none"
     position: List[str] = Field(default_factory=lambda: ["center", "bottom"])
     positionX: Optional[float] = None
     positionY: Optional[float] = None

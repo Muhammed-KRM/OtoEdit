@@ -80,9 +80,11 @@ class ImageOverlay:
 
         v = base_stream
 
-        for ov in (overlays or []):
-            if ov.get("type") != "image":
-                continue
+        # Katman hiyerarşisi (Z-Index): Küçük trackId altta, büyük trackId üstte render edilir
+        img_overlays = [ov for ov in (overlays or []) if ov.get("type") == "image"]
+        img_overlays.sort(key=lambda o: int(o.get("trackId") or o.get("track_id") or 1))
+
+        for ov in img_overlays:
 
             source = ov.get("source", "")
             local_path = self.resolve_image_path(source, temp_dir=temp_dir)
