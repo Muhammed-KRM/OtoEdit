@@ -50,8 +50,8 @@ class AnalysisConsumer:
             port=Config.RABBITMQ_PORT,
             virtual_host=Config.RABBITMQ_VHOST,
             credentials=credentials,
-            heartbeat=60,
-            blocked_connection_timeout=300
+            heartbeat=0,
+            blocked_connection_timeout=0
         )
 
         connection = pika.BlockingConnection(parameters)
