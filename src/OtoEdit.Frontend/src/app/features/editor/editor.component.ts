@@ -67,6 +67,7 @@ export interface ContextMenuState {
               </div>
               <div class="flex justify-between"><span class="text-slate-400">Oynat / Duraklat:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Space</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">İmleçten Böl:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">B</kbd></div>
+              <div class="flex justify-between"><span class="text-amber-300 font-semibold">Soldakini Kırp & Birleştir:</span> <kbd class="px-1 bg-dark-800 border border-amber-400/50 text-amber-300 rounded font-mono font-bold">V</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">Sil (Klip / Katman):</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Del</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">Katmanı Çoğalt:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Ctrl+D</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">Klipleri Birleştir:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">M</kbd></div>
@@ -386,6 +387,7 @@ export interface ContextMenuState {
               #videoPlayer
               [src]="videoUrl()"
               (timeupdate)="onTimeUpdate()"
+              (seeked)="onVideoSeeked()"
               (loadedmetadata)="onMetadataLoaded()"
               (play)="isPlaying.set(true)"
               (pause)="isPlaying.set(false)"
@@ -900,6 +902,8 @@ export interface ContextMenuState {
             class="flex-1 overflow-x-auto overflow-y-auto relative pb-2 scrollbar-thin scrollbar-thumb-slate-700 scrollbar-track-dark-900">
             <div 
               #timelineTrack
+              id="timelineTrack"
+              (mousedown)="onTimelineTrackMouseDown($event)"
               (click)="seekTimeline($event)"
               (contextmenu)="openTimelineContextMenu($event)"
               [style.width.%]="100 * timelineZoom()"
@@ -1063,11 +1067,16 @@ export interface ContextMenuState {
 
               <!-- Ortak Zaman İmleci (Playhead) -->
               <div 
+                #playhead
                 (mousedown)="onPlayheadDragStart($event)"
-                class="absolute top-0 bottom-0 w-6 -translate-x-1/2 z-50 cursor-ew-resize pointer-events-auto flex flex-col items-center group"
+                (pointerdown)="onPlayheadPointerDown($event)"
+                (pointermove)="onPlayheadPointerMove($event)"
+                (pointerup)="onPlayheadPointerUp($event)"
+                (pointercancel)="onPlayheadPointerUp($event)"
+                class="absolute top-0 bottom-0 w-6 -translate-x-1/2 z-50 cursor-ew-resize pointer-events-auto flex flex-col items-center group touch-none select-none"
                 [style.left.%]="getPlayheadPosition()">
-                <div class="w-3.5 h-3.5 bg-white rotate-45 shadow-lg rounded-sm border border-slate-300 group-hover:scale-125 transition-transform shrink-0"></div>
-                <div class="w-0.5 flex-1 bg-white shadow-[0_0_8px_white]"></div>
+                <div class="w-3.5 h-3.5 bg-white rotate-45 shadow-lg rounded-sm border border-slate-300 group-hover:scale-125 transition-transform shrink-0 pointer-events-none"></div>
+                <div class="w-0.5 flex-1 bg-white shadow-[0_0_8px_white] pointer-events-none"></div>
               </div>
             </div>
           </div>
@@ -1130,6 +1139,13 @@ export interface ContextMenuState {
             class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
             <span class="flex items-center gap-2"><span>✂</span> Bu Noktadan Böl</span>
             <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">B</kbd>
+          </button>
+          <button 
+            *ngIf="!menu.targetClip?.isCut"
+            (click)="rippleDeleteLeft(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-amber-500/20 hover:text-amber-400 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>⏪</span> Soldakini Kırp & Birleştir</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-amber-300 border border-amber-400/50 font-bold">V</kbd>
           </button>
           <button 
             *ngIf="!menu.targetClip?.isCut"
@@ -1245,43 +1261,147 @@ export interface ContextMenuState {
 export class EditorComponent implements OnInit, OnDestroy {
   isScrubbing = false;
   private wasDragging = false;
+  private scrubSeekPending = false;
+  private scrubTargetTime: number | null = null;
+  private wasPlayingBeforeScrub = false;
+  private scrubMoveLogCounter = 0;
 
-  @HostListener('window:mousemove', ['$event'])
-  onWindowMouseMove(event: MouseEvent) {
+  handleScrubMouseMove(clientX: number): void {
     if (!this.isScrubbing) return;
     this.wasDragging = true;
     
-    const targetTime = this.getTimeAtClientX(event.clientX);
+    const targetTime = this.getTimeAtClientX(clientX);
     this.currentTime.set(targetTime);
+
+    if (this.scrubMoveLogCounter++ % 5 === 0) {
+      console.log(`%c[SCRUB:MOVE] clientX=${clientX} -> targetTime=${targetTime.toFixed(2)}s | playheadPos=${this.getPlayheadPosition().toFixed(1)}% | videoSeeking=${this.videoRef?.nativeElement?.seeking}`, 'color: #38bdf8;');
+    }
+
+    // Throttled video preview: requestAnimationFrame & fastSeek ile donma yapmayan akıcı önizleme
+    this.scrubTargetTime = targetTime;
+    if (!this.scrubSeekPending) {
+      this.scrubSeekPending = true;
+      requestAnimationFrame(() => {
+        this.scrubSeekPending = false;
+        const v = this.videoRef?.nativeElement;
+        if (v && this.scrubTargetTime !== null && !v.seeking) {
+          try {
+            const videoEl = v as any;
+            if (typeof videoEl.fastSeek === 'function') {
+              videoEl.fastSeek(this.scrubTargetTime);
+            } else {
+              videoEl.currentTime = this.scrubTargetTime;
+            }
+          } catch (err) {
+            console.error('[SCRUB:PREVIEW_ERROR]', err);
+          }
+        }
+      });
+    }
   }
 
-  @HostListener('window:mouseup')
-  onWindowMouseUp() {
+  handleScrubMouseUp(): void {
     if (this.isScrubbing) {
+      console.log(`%c[SCRUB:MOUSE_UP] Bırakıldı! wasDragging=${this.wasDragging}, currentTime=${this.currentTime().toFixed(2)}s`, 'color: #10b981; font-weight: bold;');
       this.isScrubbing = false;
-      if (this.videoRef?.nativeElement) {
-        this.videoRef.nativeElement.currentTime = this.currentTime();
+      this.scrubTargetTime = null;
+      const v = this.videoRef?.nativeElement;
+      if (v) {
+        try {
+          v.currentTime = this.currentTime();
+          if (this.wasPlayingBeforeScrub) {
+            v.play().catch(e => console.warn('[SCRUB:RESUME_ERROR]', e));
+            this.wasPlayingBeforeScrub = false;
+          }
+        } catch (err) {
+          console.error('[SCRUB:MOUSE_UP_ERROR]', err);
+        }
       }
     }
   }
 
-  onPlayheadDragStart(event: MouseEvent) {
+  onPlayheadPointerDown(event: PointerEvent): void {
     if (event.button !== 0) return;
     event.preventDefault();
     event.stopPropagation();
-    this.isScrubbing = true;
-    this.wasDragging = false;
+    const target = event.currentTarget as HTMLElement;
+    if (target && typeof target.setPointerCapture === 'function') {
+      try {
+        target.setPointerCapture(event.pointerId);
+      } catch (e) {
+        console.warn('[SCRUB:POINTER_CAPTURE_FAIL]', e);
+      }
+    }
+    console.log(`%c[SCRUB:PLAYHEAD_POINTER_DOWN] Beyaz iğne tutuldu (PointerCapture)! clientX=${event.clientX}, currentTime=${this.currentTime().toFixed(2)}s`, 'color: #f59e0b; font-weight: bold;');
+    this.startScrubbing(event.clientX);
   }
 
-  onRulerMouseDown(event: MouseEvent) {
+  onPlayheadPointerMove(event: PointerEvent): void {
+    if (!this.isScrubbing) return;
+    event.preventDefault();
+    this.handleScrubMouseMove(event.clientX);
+  }
+
+  onPlayheadPointerUp(event: PointerEvent): void {
+    const target = event.currentTarget as HTMLElement;
+    if (target && typeof target.releasePointerCapture === 'function') {
+      try {
+        if (target.hasPointerCapture(event.pointerId)) {
+          target.releasePointerCapture(event.pointerId);
+        }
+      } catch (e) {
+        // ignore
+      }
+    }
+    this.handleScrubMouseUp();
+  }
+
+  onPlayheadDragStart(event: MouseEvent): void {
     if (event.button !== 0) return;
     event.preventDefault();
+    event.stopPropagation();
+    console.log(`%c[SCRUB:PLAYHEAD_DOWN] Beyaz iğne tutuldu! clientX=${event.clientX}, currentTime=${this.currentTime().toFixed(2)}s`, 'color: #f59e0b; font-weight: bold;');
+    this.startScrubbing(event.clientX);
+  }
+
+  onRulerMouseDown(event: MouseEvent): void {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    console.log(`%c[SCRUB:RULER_DOWN] Zaman Cetveli tıklandı! clientX=${event.clientX}`, 'color: #f59e0b; font-weight: bold;');
+    this.startScrubbing(event.clientX);
+  }
+
+  onTimelineTrackMouseDown(event: MouseEvent): void {
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement;
+    // Eğer tıklanan element bir buton, klip, input veya context menu ise sürükleme başlatma
+    if (target && (target.closest('button') || target.closest('input') || (target.closest('.cursor-pointer') && !target.closest('#timelineTrack')))) {
+      return;
+    }
+    console.log(`%c[SCRUB:TRACK_DOWN] Timeline zemini tıklandı! clientX=${event.clientX}`, 'color: #f59e0b; font-weight: bold;');
+    this.startScrubbing(event.clientX);
+  }
+
+  startScrubbing(clientX: number): void {
     this.isScrubbing = true;
     this.wasDragging = false;
-    const targetTime = this.getTimeAtClientX(event.clientX);
+    this.scrubMoveLogCounter = 0;
+    const v = this.videoRef?.nativeElement;
+    if (v && !v.paused) {
+      this.wasPlayingBeforeScrub = true;
+      v.pause();
+    } else {
+      this.wasPlayingBeforeScrub = false;
+    }
+    const targetTime = this.getTimeAtClientX(clientX);
+    console.log(`%c[SCRUB:START] targetTime=${targetTime.toFixed(2)}s, totalDur=${this.totalDuration().toFixed(1)}s, visDur=${this.visibleDuration().toFixed(1)}s, ripple=${this.isAnyRippleActive()}`, 'color: #818cf8; font-weight: bold;');
     this.currentTime.set(targetTime);
-    if (this.videoRef?.nativeElement) {
-      this.videoRef.nativeElement.currentTime = targetTime;
+    if (v && !v.seeking) {
+      try {
+        v.currentTime = targetTime;
+      } catch (err) {
+        console.error('[SCRUB:START_SEEK_ERROR]', err);
+      }
     }
   }
 
@@ -2372,6 +2492,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
+  isSkippingCut = false;
+
+  onVideoSeeked(): void {
+    this.isSkippingCut = false;
+  }
+
   // --- CANLI EDL SİMÜLASYONU ---
   onTimeUpdate(): void {
     if (this.isScrubbing) return;
@@ -2382,12 +2508,32 @@ export class EditorComponent implements OnInit, OnDestroy {
     const t = video.currentTime;
     this.currentTime.set(t);
 
-    const cuts = this.activeEdl()?.cuts || [];
-    for (const cut of cuts) {
-      if (t >= cut.start && t < cut.end) {
-        video.currentTime = cut.end;
-        return;
+    if (video.seeking || this.isSkippingCut) return;
+
+    // Sadece ripple ile kesilmiş ve gizlenmiş klipleri atla
+    const allClips = this.clips();
+    const currentClip = allClips.find(c => t >= c.start && t < c.end);
+    if (currentClip && !this.isVisible(currentClip)) {
+      // Kesilmiş bir klipteyiz. Bu klibi ve ardışık gelen tüm kesilmiş klipleri birleştirip tek seferde atla!
+      let targetJumpTime = currentClip.end;
+      const sortedClips = allClips.slice().sort((a, b) => a.start - b.start);
+      const currIdx = sortedClips.findIndex(c => c.id === currentClip.id);
+      if (currIdx !== -1) {
+        for (let i = currIdx + 1; i < sortedClips.length; i++) {
+          const nextClip = sortedClips[i];
+          if (!this.isVisible(nextClip) && Math.abs(nextClip.start - targetJumpTime) < 0.05) {
+            targetJumpTime = nextClip.end;
+          } else {
+            break;
+          }
+        }
       }
+
+      this.isSkippingCut = true;
+      // 0.04s (1 video frame) tampon ekleyerek geriye düşme (infinite seek-loop) riskini sıfırla
+      const finalJumpTime = Math.min(this.totalDuration(), targetJumpTime + 0.04);
+      video.currentTime = finalJumpTime;
+      this.currentTime.set(finalJumpTime);
     }
   }
 
@@ -2445,27 +2591,44 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   getTimeAtClientX(clientX: number): number {
     const track = this.timelineTrackRef?.nativeElement;
-    if (!track) return 0;
+    if (!track) {
+      console.warn('[SCRUB:WARN] timelineTrackRef referansı DOM üzerinde bulunamadı!');
+      return 0;
+    }
     const rect = track.getBoundingClientRect();
     const clickX = clientX - rect.left;
-    const percentage = Math.max(0, Math.min(1, clickX / rect.width));
+    const percentage = Math.max(0, Math.min(1, clickX / Math.max(1, rect.width)));
     
+    let resultTime: number;
     if (!this.isAnyRippleActive()) {
-       return percentage * this.totalDuration();
+       resultTime = percentage * this.totalDuration();
+    } else {
+       const targetVisDuration = percentage * this.visibleDuration();
+       resultTime = this.getRawTimeFromVisTime(targetVisDuration);
     }
 
-    const targetVisDuration = percentage * this.visibleDuration();
-    return this.getRawTimeFromVisTime(targetVisDuration);
+    if (isNaN(resultTime) || resultTime < 0) {
+      console.error('[SCRUB:TIME_NAN_ERROR]', { clientX, rectLeft: rect.left, rectWidth: rect.width, clickX, percentage, resultTime });
+      return 0;
+    }
+    return resultTime;
   }
 
   getPlayheadPosition(): number {
     const t = this.currentTime();
+    let pos: number;
     if (!this.isAnyRippleActive()) {
-       return (t / this.totalDuration()) * 100;
+       pos = (t / Math.max(0.001, this.totalDuration())) * 100;
+    } else {
+       const visDur = this.visibleDuration();
+       if (visDur <= 0) return 0;
+       pos = (this.getVisTimeFromRawTime(t) / visDur) * 100;
     }
-    const visDur = this.visibleDuration();
-    if (visDur <= 0) return 0;
-    return (this.getVisTimeFromRawTime(t) / visDur) * 100;
+    if (isNaN(pos)) {
+      console.error('[PLAYHEAD:POS_NAN]', { t, totalDur: this.totalDuration(), visDur: this.visibleDuration() });
+      return 0;
+    }
+    return Math.max(0, Math.min(100, pos));
   }
 
   getTimelineTime(event: MouseEvent): number {
@@ -2474,12 +2637,15 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   seekTimeline(event: MouseEvent): void {
     if (this.wasDragging) {
+      console.log('[SEEK:SKIP_BECAUSE_DRAGGED]');
       this.wasDragging = false;
       return;
     }
     const targetTime = this.getTimeAtClientX(event.clientX);
-    if (this.videoRef?.nativeElement) {
-      this.videoRef.nativeElement.currentTime = targetTime;
+    console.log(`%c[SEEK:CLICK] clientX=${event.clientX} -> targetTime=${targetTime.toFixed(2)}s`, 'color: #ec4899; font-weight: bold;');
+    const v = this.videoRef?.nativeElement;
+    if (v && !v.seeking) {
+      v.currentTime = targetTime;
     }
     this.currentTime.set(targetTime);
   }
@@ -3432,6 +3598,11 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   @HostListener('window:mousemove', ['$event'])
   onGlobalMouseMove(event: MouseEvent): void {
+     if (this.isScrubbing) {
+        this.handleScrubMouseMove(event.clientX);
+        return;
+     }
+
      if (this.isResizingTrack) {
         event.preventDefault();
         const delta = event.clientY - this.resizeStartY;
@@ -3567,6 +3738,10 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   @HostListener('window:mouseup', ['$event'])
   onGlobalMouseUp(event: MouseEvent): void {
+     if (this.isScrubbing) {
+        this.handleScrubMouseUp();
+     }
+
      if (this.isResizingTrack) {
         this.isResizingTrack = false;
      }

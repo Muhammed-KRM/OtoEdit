@@ -129,7 +129,7 @@ class AnalysisConsumer:
             retake_cuts = []
             if auto_retake:
                 self._publish_progress(project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 50, "Akıllı tekrar ve ses patlaması analizi yapılıyor...")
-                retake_cuts = self.retake_detector.detect_retakes(clean_audio_path, transcript)
+                retake_cuts = self.retake_detector.detect_retakes(clean_audio_path, transcript, silence_cuts=silence_cuts)
 
             # 6. Aşama 3: Çoklu-Modal Komut Algılama (El Hareketi + Ses)
             commands = []

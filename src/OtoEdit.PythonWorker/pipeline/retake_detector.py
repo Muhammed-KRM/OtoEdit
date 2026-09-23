@@ -93,10 +93,11 @@ class RetakeDetector:
         char_sim = difflib.SequenceMatcher(None, text1.lower().strip(), text2.lower().strip()).ratio()
         return (jaccard * 0.7) + (char_sim * 0.3)
 
-    def detect_retakes(self, audio_path: str, transcript: TranscriptResult) -> List[CutItem]:
+    def detect_retakes(self, audio_path: str, transcript: TranscriptResult, silence_cuts: List[CutItem] = None) -> List[CutItem]:
         """
         Transkript segmentlerini kronolojik olarak tarar, meta-konuşmaları doğrudan keser,
         tekrarlanan cümleleri gruplar, en kaliteli olanı seçip hatalı olanları CutItem listesi olarak döndürür.
+        silence_cuts verilirse, Auto-Jumpcut ile zaten kesilmiş sessizlik alanları taranmayarak vakit kazanılır.
         """
         if not transcript.segments or len(transcript.segments) < 2:
             return []
@@ -116,6 +117,23 @@ class RetakeDetector:
 
             seg_i = segments[i]
             text_i = seg_i.text
+
+            # SESSİZLİK KONTROLÜ: Auto-Jumpcut'ın zaten kestiği alanlardaki segmentleri doğrudan atla (vakit kaybetme)
+            if silence_cuts:
+                in_silence = False
+                for sc in silence_cuts:
+                    overlap_start = max(seg_i.start, sc.start)
+                    overlap_end = min(seg_i.end, sc.end)
+                    if overlap_end > overlap_start:
+                        seg_dur = max(0.01, seg_i.end - seg_i.start)
+                        if (overlap_end - overlap_start) / seg_dur > 0.6:
+                            in_silence = True
+                            break
+                if in_silence:
+                    logger.info(f"⏭ Auto-Jumpcut sessizliğinde kalan segment Retake'te atlandı: #{i} '{text_i}'")
+                    visited.add(i)
+                    i += 1
+                    continue
 
             # HALÜSİNASYON KONTROLÜ: Tam sessizlikte üretilen uydurma Whisper metinlerini atla.
             seg_acoustics = self.scorer.score_audio_segment(audio_path, seg_i.start, seg_i.end)
