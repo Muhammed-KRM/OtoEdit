@@ -929,9 +929,11 @@ export interface ContextMenuState {
                 
                 <div class="absolute left-0 right-0 top-0 bottom-0 overflow-hidden">
                   <div *ngFor="let seg of getVisibleSubtitleSegments()"
-                       class="absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20"
-                       [ngClass]="editingSubtitleId() === getSubtitleId(seg) ? 'ring-1 ring-white z-30 bg-amber-500/40' : 'cursor-pointer'"
+                       (mousedown)="onSubtitleMouseDown($event, seg)"
+                       (click)="$event.stopPropagation()"
                        (dblclick)="$event.stopPropagation(); startEditSubtitle(seg)"
+                       class="subtitle-segment absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer"
+                       [ngClass]="editingSubtitleId() === getSubtitleId(seg) ? 'ring-1 ring-white z-30 bg-amber-500/40' : 'cursor-pointer'"
                        [style.left.%]="getSubtitleLeft(seg)"
                        [style.width.%]="getSubtitleWidth(seg)"
                        [title]="editingSubtitleId() === getSubtitleId(seg) ? '' : 'Çift tıklayarak düzenle: ' + seg.text">
@@ -965,7 +967,7 @@ export interface ContextMenuState {
                   (mousedown)="onOverlayDragStart($event, ov.id)"
                   (click)="$event.stopPropagation(); selectOverlay(ov.id)"
                   (contextmenu)="openOverlayContextMenu($event, ov)"
-                  class="absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[70px] border"
+                  class="overlay-item absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[70px] border"
                   [ngClass]="[
                      ov.type === 'text' 
                        ? 'bg-gradient-to-r from-[#ba5748] to-[#994033] text-white border-[#e07567]/70 hover:brightness-110 shadow-rose-950/50' 
@@ -1006,10 +1008,11 @@ export interface ContextMenuState {
                 <ng-container *ngFor="let clip of clips()">
                   <div 
                     *ngIf="isVisible(clip)"
+                    (mousedown)="onClipMouseDown($event, clip.id)"
                     (click)="selectClip(clip.id, $event)"
                     (dblclick)="toggleClip(clip, $event)"
                     (contextmenu)="openClipContextMenu($event, clip)"
-                    class="absolute top-0 bottom-0 transition-all border-r border-white/20 box-border group flex flex-col justify-between p-1 select-none z-10 cursor-pointer"
+                    class="timeline-clip absolute top-0 bottom-0 transition-all border-r border-white/20 box-border group flex flex-col justify-between p-1 select-none z-10 cursor-pointer"
                     [ngClass]="{
                        'bg-amber-500/70 hover:bg-amber-500/80 backdrop-blur-xs': isRetakeClip(clip),
                        'bg-rose-500/70 hover:bg-rose-500/80 backdrop-blur-xs': isManualClip(clip),
@@ -1374,12 +1377,36 @@ export class EditorComponent implements OnInit, OnDestroy {
   onTimelineTrackMouseDown(event: MouseEvent): void {
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
-    // Eğer tıklanan element bir buton, klip, input veya context menu ise sürükleme başlatma
-    if (target && (target.closest('button') || target.closest('input') || (target.closest('.cursor-pointer') && !target.closest('#timelineTrack')))) {
+    // Eğer tıklanan element bir buton, klip, katman, altyazı, input veya playhead ise timeline zemin sürüklemesi BAŞLATMA
+    if (target && (
+      target.closest('button') ||
+      target.closest('input') ||
+      target.closest('.timeline-clip') ||
+      target.closest('.overlay-item') ||
+      target.closest('.subtitle-segment') ||
+      target.closest('#playhead')
+    )) {
       return;
     }
     console.log(`%c[SCRUB:TRACK_DOWN] Timeline zemini tıklandı! clientX=${event.clientX}`, 'color: #f59e0b; font-weight: bold;');
     this.startScrubbing(event.clientX);
+  }
+
+  onClipMouseDown(event: MouseEvent, clipId: string): void {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    this.selectClip(clipId, event);
+  }
+
+  onSubtitleMouseDown(event: MouseEvent, seg: TranscriptSegment): void {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    const v = this.videoRef?.nativeElement;
+    if (v && !v.seeking) {
+      v.currentTime = seg.start;
+    }
+    this.currentTime.set(seg.start);
+    console.log(`%c[SUBTITLE:CLICK] "${seg.text}" (${seg.start}s)`, 'color: #f59e0b;');
   }
 
   startScrubbing(clientX: number): void {
@@ -2641,6 +2668,22 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.wasDragging = false;
       return;
     }
+    const target = event.target as HTMLElement;
+    if (target && (
+      target.closest('button') || 
+      target.closest('input') || 
+      target.closest('.timeline-clip') || 
+      target.closest('.overlay-item') || 
+      target.closest('.subtitle-segment') ||
+      target.closest('#playhead')
+    )) {
+      return;
+    }
+
+    // Boş timeline alanına tıklandığında seçili klip ve katmanları temizle
+    this.selectedClipIds.set([]);
+    this.selectedOverlayId.set(null);
+
     const targetTime = this.getTimeAtClientX(event.clientX);
     console.log(`%c[SEEK:CLICK] clientX=${event.clientX} -> targetTime=${targetTime.toFixed(2)}s`, 'color: #ec4899; font-weight: bold;');
     const v = this.videoRef?.nativeElement;
@@ -2652,6 +2695,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   selectClip(clipId: string, event: MouseEvent): void {
     event.stopPropagation();
+    this.selectedOverlayId.set(null);
     const current = this.selectedClipIds();
     
     if (event.ctrlKey || event.metaKey) {
@@ -2675,12 +2719,9 @@ export class EditorComponent implements OnInit, OnDestroy {
           this.selectedClipIds.set([clipId]);
        }
     } else {
-       if (current.length === 1 && current[0] === clipId) {
-          this.selectedClipIds.set([]);
-       } else {
-          this.selectedClipIds.set([clipId]);
-       }
+       this.selectedClipIds.set([clipId]);
     }
+    console.log(`%c[CLIP:SELECTED] clipId=${clipId}, totalSelected=${this.selectedClipIds().length}`, 'color: #10b981; font-weight: bold;');
   }
 
   toggleClip(clip: any, event: MouseEvent): void {
