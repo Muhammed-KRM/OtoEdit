@@ -81,7 +81,10 @@ class Transcriber:
                 if not duration and words:
                     duration = max(w.end for w in words)
 
-                logger.info(f"Transkripsiyon tamamlandı: {len(words)} kelime, {len(segments)} segment, süre={duration:.1f}s")
+                # Uzun segmentleri kısa altyazı parçalarına böl
+                segments = self._chunk_segments(segments, max_words=6, max_duration=3.0)
+
+                logger.info(f"Transkripsiyon tamamlandı: {len(words)} kelime, {len(segments)} parçalanmış segment, süre={duration:.1f}s")
                 return TranscriptResult(
                     full_text=full_text,
                     segments=segments,
@@ -136,7 +139,10 @@ class Transcriber:
             if not duration and words:
                 duration = max(w.end for w in words)
 
-            logger.info(f"Yerel Whisper transkripsiyonu tamamlandı: {len(words)} kelime, {len(segments)} segment, süre={duration:.1f}s")
+            # Uzun segmentleri kısa altyazı parçalarına böl
+            segments = self._chunk_segments(segments, max_words=6, max_duration=3.0)
+
+            logger.info(f"Yerel Whisper transkripsiyonu tamamlandı: {len(words)} kelime, {len(segments)} parçalanmış segment, süre={duration:.1f}s")
             return TranscriptResult(
                 full_text=full_text,
                 segments=segments,
@@ -164,3 +170,44 @@ class Transcriber:
             words=words,
             duration=1.0
         )
+
+    @staticmethod
+    def _chunk_segments(segments: list, max_words: int = 6, max_duration: float = 3.0) -> list:
+        """
+        Uzun segmentleri (cümleleri) ekranda güzel durması için 
+        daha kısa mikro-parçalara (chunk) böler.
+        """
+        chunked = []
+        for seg in segments:
+            if not getattr(seg, 'words', None):
+                chunked.append(seg)
+                continue
+                
+            current_chunk_words = []
+            for w in seg.words:
+                current_chunk_words.append(w)
+                
+                duration = current_chunk_words[-1].end - current_chunk_words[0].start
+                is_terminal = w.word.strip().endswith(('.', '!', '?', ',', ':'))
+                
+                # Eğer sınır aşıldıysa veya noktalama varsa böl
+                if len(current_chunk_words) >= max_words or duration >= max_duration or is_terminal:
+                    chunk_text = " ".join(cw.word for cw in current_chunk_words)
+                    chunked.append(TranscriptSegment(
+                        start=round(current_chunk_words[0].start, 2),
+                        end=round(current_chunk_words[-1].end, 2),
+                        text=chunk_text,
+                        words=list(current_chunk_words)
+                    ))
+                    current_chunk_words = []
+            
+            # Arta kalan kelimeleri son bir parça olarak ekle
+            if current_chunk_words:
+                chunk_text = " ".join(cw.word for cw in current_chunk_words)
+                chunked.append(TranscriptSegment(
+                    start=round(current_chunk_words[0].start, 2),
+                    end=round(current_chunk_words[-1].end, 2),
+                    text=chunk_text,
+                    words=list(current_chunk_words)
+                ))
+        return chunked

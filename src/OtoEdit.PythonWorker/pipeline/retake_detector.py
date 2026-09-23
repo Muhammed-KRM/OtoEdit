@@ -117,6 +117,14 @@ class RetakeDetector:
             seg_i = segments[i]
             text_i = seg_i.text
 
+            # HALÜSİNASYON KONTROLÜ: Tam sessizlikte üretilen uydurma Whisper metinlerini atla.
+            seg_acoustics = self.scorer.score_audio_segment(audio_path, seg_i.start, seg_i.end)
+            if seg_acoustics.get("current_rms_db", -20.0) < -45.0:
+                logger.info(f"🔇 Whisper Halüsinasyonu Atlandı (Sessizlik): #{i} '{text_i}' (RMS: {seg_acoustics.get('current_rms_db', -99):.1f}dB)")
+                visited.add(i)
+                i += 1
+                continue
+
             # 1. KURAL: Meta-konuşma içeriyorsa ("başa sar", "olmadı", "Allah konuşamadık") doğrudan KES!
             if self.is_meta_speech(text_i):
                 logger.info(f"🛑 Meta-konuşma / Outtake tespit edildi: #{i} '{text_i}'")

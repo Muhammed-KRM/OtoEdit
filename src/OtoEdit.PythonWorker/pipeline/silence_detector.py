@@ -43,8 +43,8 @@ class SilenceDetector:
                 silence_thresh=self.silence_thresh
             )
 
-            # Kısa sesleri yoksayma (Merge silences if gap < min_keep_duration_ms)
-            min_keep_ms = self.min_keep_duration_sec * 1000.0
+            # Kısa sesleri (çıtırtıları) yoksayma, ancak gerçek kısa kelimeleri ("Ve", "Ne") yutmamak için eşiği 50ms ile sınırla.
+            min_keep_ms = 50.0 # self.min_keep_duration_sec * 1000.0 (Eski hatalı kural)
             merged_silences = []
             for current in silent_ranges_ms:
                 if not merged_silences:
@@ -53,7 +53,7 @@ class SilenceDetector:
                     prev = merged_silences[-1]
                     gap = current[0] - prev[1]
                     if gap < min_keep_ms:
-                        # Gap is too small, merge the silences (i.e. cut out the short noise too)
+                        # Çıtırtı / çok kısa gürültü ise birleştir
                         merged_silences[-1] = (prev[0], current[1])
                     else:
                         merged_silences.append(current)

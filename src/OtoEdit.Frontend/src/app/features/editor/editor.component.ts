@@ -811,8 +811,8 @@ export interface ContextMenuState {
               <input 
                 type="range" 
                 min="1" 
-                max="6" 
-                step="0.2" 
+                max="50" 
+                step="0.5" 
                 [ngModel]="timelineZoom()" 
                 (ngModelChange)="timelineZoom.set($event)" 
                 class="w-20 h-1 accent-brand-cyan cursor-pointer" 
@@ -848,9 +848,19 @@ export interface ContextMenuState {
               <span class="font-bold text-slate-300 flex items-center gap-1">
                 <span>🎬</span> KANALLAR
               </span>
-              <button (click)="addTrackLane()" class="px-1.5 py-0.5 rounded bg-dark-800 hover:bg-slate-700 text-sky-400 border border-slate-700 hover:text-white transition-colors text-[9px] font-bold cursor-pointer" title="Yeni Katman Kanalı Ekle">
-                + Katman
-              </button>
+              <div class="flex items-center gap-0.5">
+                <button (click)="removeTrackLane()" class="px-1 py-0.5 rounded bg-dark-800 hover:bg-rose-900/50 text-rose-400 border border-slate-700 hover:text-white transition-colors text-[9px] font-bold cursor-pointer" title="En Üst Katman Kanalını Sil">
+                  - Sil
+                </button>
+                <button (click)="addTrackLane()" class="px-1 py-0.5 rounded bg-dark-800 hover:bg-slate-700 text-sky-400 border border-slate-700 hover:text-white transition-colors text-[9px] font-bold cursor-pointer" title="Yeni Katman Kanalı Ekle">
+                  + Katman
+                </button>
+              </div>
+            </div>
+
+            <!-- Altyazı Kanalı Başlığı -->
+            <div class="h-10 border-b border-slate-800/70 px-2.5 flex items-center justify-between text-xs bg-dark-900/40 hover:bg-dark-800/60 transition-colors shadow-md z-10">
+              <span class="text-[10px] font-bold text-amber-400">💬 Altyazı</span>
             </div>
 
             <!-- Overlay Katman Başlıkları (T3, T2, T1) -->
@@ -896,8 +906,10 @@ export interface ContextMenuState {
               class="relative min-w-full flex flex-col select-none cursor-pointer bg-dark-950 min-h-full">
               
               <!-- Zaman Cetveli (Timecode Ruler with Ticks) -->
-              <div class="relative h-7 bg-dark-950 border-b border-slate-800 overflow-hidden select-none">
-                <div class="absolute inset-0 bg-[linear-gradient(to_right,#334155_1px,transparent_1px)] bg-[size:10px_100%] opacity-20"></div>
+              <div 
+                (mousedown)="onRulerMouseDown($event)"
+                class="relative h-7 bg-dark-950 border-b border-slate-800 overflow-hidden select-none cursor-pointer">
+                <div class="absolute inset-0 bg-[linear-gradient(to_right,#334155_1px,transparent_1px)] bg-[size:10px_100%] opacity-20 pointer-events-none"></div>
                 <ng-container *ngFor="let mark of timelineRulerMarks()">
                   <div class="absolute top-0 bottom-0 flex flex-col items-center pointer-events-none -translate-x-1/2" [style.left.%]="mark.percent">
                     <span class="text-[9px] font-mono text-slate-400 font-semibold pt-0.5 tracking-tight">{{ mark.label }}</span>
@@ -910,17 +922,25 @@ export interface ContextMenuState {
               <!-- Altyazı Kanalı (Subtitle Track) -->
               <div class="relative h-10 bg-dark-900/40 border-b border-slate-800/60 overflow-hidden flex items-center hover:bg-dark-900/70 transition-colors">
                 <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
-                <div class="absolute left-0 top-0 bottom-0 w-[120px] bg-dark-950 border-r border-slate-700 flex items-center px-2 z-10 shadow-md">
-                  <span class="text-[10px] font-bold text-amber-400">💬 Altyazı</span>
-                </div>
                 
-                <div class="absolute left-[120px] right-0 top-0 bottom-0 overflow-hidden">
-                  <div *ngFor="let seg of activeEdl()?.transcript?.segments"
-                       class="absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer"
-                       [style.left.%]="(seg.start / totalDuration()) * 100"
-                       [style.width.%]="((seg.end - seg.start) / totalDuration()) * 100"
-                       [title]="seg.text">
-                       <span class="truncate font-semibold">{{ seg.text }}</span>
+                <div class="absolute left-0 right-0 top-0 bottom-0 overflow-hidden">
+                  <div *ngFor="let seg of getVisibleSubtitleSegments()"
+                       class="absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20"
+                       [ngClass]="editingSubtitleId() === getSubtitleId(seg) ? 'ring-1 ring-white z-30 bg-amber-500/40' : 'cursor-pointer'"
+                       (dblclick)="$event.stopPropagation(); startEditSubtitle(seg)"
+                       [style.left.%]="getSubtitleLeft(seg)"
+                       [style.width.%]="getSubtitleWidth(seg)"
+                       [title]="editingSubtitleId() === getSubtitleId(seg) ? '' : 'Çift tıklayarak düzenle: ' + seg.text">
+                       <span *ngIf="editingSubtitleId() !== getSubtitleId(seg)" class="truncate font-semibold">{{ seg.text }}</span>
+                       <input *ngIf="editingSubtitleId() === getSubtitleId(seg)" 
+                              type="text" 
+                              class="w-full bg-dark-950 text-white outline-none border-b border-amber-400 font-semibold h-full shadow-inner"
+                              [value]="seg.text"
+                              (blur)="saveSubtitleEdit(seg, subtitleInput.value)"
+                              (keydown.enter)="$event.preventDefault(); saveSubtitleEdit(seg, subtitleInput.value)"
+                              (keydown.escape)="cancelSubtitleEdit()"
+                              #subtitleInput 
+                              autofocus>
                   </div>
                 </div>
               </div>
@@ -975,21 +995,8 @@ export interface ContextMenuState {
               </div>
 
               <!-- Video Klipleri Şeridi (V1 - Ana Video Kanalı & Gerçek Ses Dalgası) -->
-              <div class="relative h-14 bg-dark-950 flex overflow-hidden border-b border-slate-800">
-                <!-- Gerçek Ses Dalga Formu (Web Audio API Waveform SVG Arka Planı) -->
-                <div *ngIf="audioPeaks()?.length" class="absolute inset-0 flex items-center pointer-events-none z-0">
-                  <svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 1000 56">
-                    <defs>
-                      <linearGradient id="waveGradient" x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.85" />
-                        <stop offset="50%" stop-color="#06b6d4" stop-opacity="0.95" />
-                        <stop offset="100%" stop-color="#0284c7" stop-opacity="0.85" />
-                      </linearGradient>
-                    </defs>
-                    <path [attr.d]="getWaveformPath()" fill="url(#waveGradient)" />
-                    <line x1="0" y1="28" x2="1000" y2="28" stroke="#0ea5e9" stroke-opacity="0.3" stroke-width="1" />
-                  </svg>
-                </div>
+              <div class="relative bg-dark-950 flex overflow-hidden border-b border-slate-800" [style.height.px]="audioTrackHeight()">
+                <!-- Waveform SVG'si kliplerin içine taşındı (Per-Clip Render) -->
 
                 <!-- Klipler (Flexbox ile ardışık dizilir) -->
                 <ng-container *ngFor="let clip of clips()">
@@ -1006,12 +1013,27 @@ export interface ContextMenuState {
                        'bg-emerald-600/20 hover:bg-emerald-500/35': !clip.isCut,
                        'ring-2 ring-inset ring-brand-yellow shadow-[0_0_12px_rgba(250,204,21,0.6)] z-20': selectedClipIds().includes(clip.id)
                     }"
-                    [style.left.%]="(clip.start / totalDuration()) * 100"
-                    [style.width.%]="((clip.end - clip.start) / totalDuration()) * 100"
+                    [style.left.%]="getClipLeft(clip)"
+                    [style.width.%]="getClipWidth(clip)"
                     [title]="getClipTooltip(clip)">
                     
+                    <!-- Per-Clip Gerçek Ses Dalgası (CapCut Style) -->
+                    <div *ngIf="audioPeaks()?.length && getWaveformPathForClip(clip)" class="absolute inset-0 flex items-end pointer-events-none z-0 mix-blend-screen opacity-90 overflow-hidden" style="bottom: -1px;">
+                      <svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 56" style="filter: drop-shadow(0px -1px 3px rgba(245, 158, 11, 0.5));">
+                        <defs>
+                          <linearGradient [id]="'waveGrad_' + clip.id" x1="0%" y1="0%" x2="0%" y2="100%">
+                            <stop offset="0%" stop-color="#ef4444" stop-opacity="1" />
+                            <stop offset="25%" stop-color="#f59e0b" stop-opacity="0.9" />
+                            <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.8" />
+                            <stop offset="100%" stop-color="#0284c7" stop-opacity="0.7" />
+                          </linearGradient>
+                        </defs>
+                        <path [attr.d]="getWaveformPathForClip(clip)" [attr.fill]="'url(#waveGrad_' + clip.id + ')'" />
+                      </svg>
+                    </div>
+
                     <!-- Üst Klip Başlığı -->
-                    <div class="flex items-center justify-between text-[9px] text-white/90 font-mono truncate pointer-events-none">
+                    <div class="relative flex items-center justify-between text-[9px] text-white/90 font-mono truncate pointer-events-none z-10">
                       <span class="truncate font-semibold flex items-center gap-1">
                         <span *ngIf="clip.isCut" class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
                         <span>{{ clip.isCut ? (isRetakeClip(clip) ? '🔁 Retake' : '✕ Kesilen') : 'Klip' }}</span>
@@ -1034,14 +1056,57 @@ export interface ContextMenuState {
                 </ng-container>
               </div>
 
+              <!-- Track Yükseklik Boyutlandırıcı (Resizer) -->
+              <div (mousedown)="onTrackResizeStart($event)" class="h-2 w-full bg-slate-900 border-b border-slate-700 cursor-ns-resize hover:bg-slate-700 transition-colors z-20 flex items-center justify-center relative -mt-1 group">
+                 <div class="w-12 h-0.5 bg-slate-500 rounded-full group-hover:bg-slate-300"></div>
+              </div>
+
               <!-- Ortak Zaman İmleci (Playhead) -->
               <div 
                 (mousedown)="onPlayheadDragStart($event)"
-                class="absolute top-0 bottom-0 w-0.5 bg-white shadow-[0_0_8px_white] z-50 cursor-ew-resize pointer-events-auto"
+                class="absolute top-0 bottom-0 w-6 -translate-x-1/2 z-50 cursor-ew-resize pointer-events-auto flex flex-col items-center group"
                 [style.left.%]="getPlayheadPosition()">
-                <div class="w-3.5 h-3.5 bg-white rotate-45 -translate-x-[6px] -translate-y-[2px] shadow-lg rounded-sm border border-slate-300"></div>
+                <div class="w-3.5 h-3.5 bg-white rotate-45 shadow-lg rounded-sm border border-slate-300 group-hover:scale-125 transition-transform shrink-0"></div>
+                <div class="w-0.5 flex-1 bg-white shadow-[0_0_8px_white]"></div>
               </div>
             </div>
+          </div>
+        </div>
+
+        <!-- Timeline Alt Kaydırma Çubuğu -->
+        <div class="h-7 px-4 bg-dark-900/95 border-t border-slate-800 flex items-center justify-between shrink-0 select-none">
+          <!-- Sol: Bilgi -->
+          <div class="flex items-center gap-2 text-[10px] text-slate-500">
+            <span class="font-mono">{{ formatTime(currentTime()) }}</span>
+            <span>/</span>
+            <span class="font-mono">{{ formatTime(isAnyRippleActive() ? visibleDuration() : totalDuration()) }}</span>
+          </div>
+          
+          <!-- Orta: Kaydırma Butonları -->
+          <div class="flex items-center gap-1">
+            <button 
+              (click)="scrollTimelineLeft()" 
+              class="px-2 py-0.5 rounded bg-dark-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700 text-[10px] font-bold transition-colors cursor-pointer"
+              title="Sola Kaydır">
+              ◀ Sol
+            </button>
+            <button 
+              (click)="scrollTimelineToPlayhead()" 
+              class="px-2 py-0.5 rounded bg-dark-800 text-brand-cyan hover:text-white hover:bg-slate-700 border border-slate-700 text-[10px] font-bold transition-colors cursor-pointer"
+              title="İmlece Git">
+              ⊙ İmleç
+            </button>
+            <button 
+              (click)="scrollTimelineRight()" 
+              class="px-2 py-0.5 rounded bg-dark-800 text-slate-400 hover:text-white hover:bg-slate-700 border border-slate-700 text-[10px] font-bold transition-colors cursor-pointer"
+              title="Sağa Kaydır">
+              Sağ ▶
+            </button>
+          </div>
+          
+          <!-- Sağ: Kısayol İpucu -->
+          <div class="text-[9px] text-slate-600">
+            Tekerlek: Sola/Sağa kaydır • Ctrl+Tekerlek: Yakınlaş/Uzaklaş
           </div>
         </div>
       </section>
@@ -1179,25 +1244,14 @@ export interface ContextMenuState {
 })
 export class EditorComponent implements OnInit, OnDestroy {
   isScrubbing = false;
+  private wasDragging = false;
 
   @HostListener('window:mousemove', ['$event'])
   onWindowMouseMove(event: MouseEvent) {
-    if (!this.isScrubbing || !this.timelineScrollContainerRef) return;
+    if (!this.isScrubbing) return;
+    this.wasDragging = true;
     
-    const container = this.timelineScrollContainerRef.nativeElement;
-    const rect = container.getBoundingClientRect();
-    const scrollLeft = container.scrollLeft;
-    
-    let x = event.clientX - rect.left + scrollLeft;
-    const totalW = container.scrollWidth;
-    x = Math.max(0, Math.min(x, totalW));
-    
-    const percentage = x / totalW;
-    const targetTime = percentage * this.totalDuration();
-    
-    if (this.videoRef && this.videoRef.nativeElement) {
-      this.videoRef.nativeElement.currentTime = targetTime;
-    }
+    const targetTime = this.getTimeAtClientX(event.clientX);
     this.currentTime.set(targetTime);
   }
 
@@ -1205,12 +1259,30 @@ export class EditorComponent implements OnInit, OnDestroy {
   onWindowMouseUp() {
     if (this.isScrubbing) {
       this.isScrubbing = false;
+      if (this.videoRef?.nativeElement) {
+        this.videoRef.nativeElement.currentTime = this.currentTime();
+      }
     }
   }
 
   onPlayheadDragStart(event: MouseEvent) {
-    this.isScrubbing = true;
+    if (event.button !== 0) return;
     event.preventDefault();
+    event.stopPropagation();
+    this.isScrubbing = true;
+    this.wasDragging = false;
+  }
+
+  onRulerMouseDown(event: MouseEvent) {
+    if (event.button !== 0) return;
+    event.preventDefault();
+    this.isScrubbing = true;
+    this.wasDragging = false;
+    const targetTime = this.getTimeAtClientX(event.clientX);
+    this.currentTime.set(targetTime);
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.currentTime = targetTime;
+    }
   }
 
   private route = inject(ActivatedRoute);
@@ -1299,6 +1371,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   });
 
   readonly timelineZoom = signal<number>(1);
+  readonly audioTrackHeight = signal<number>(56);
+  isResizingTrack = false;
+  resizeStartY = 0;
+  resizeStartHeight = 0;
+  
   readonly splitMarkers = signal<number[]>([]);
   readonly selectedClipIds = signal<string[]>([]);
   readonly selectedHasCuts = computed(() => {
@@ -1310,6 +1387,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     return this.clips().some(c => selIds.includes(c.id) && !c.isCut);
   });
   readonly selectedOverlayId = signal<string | null>(null);
+  readonly editingSubtitleId = signal<string | null>(null);
 
   // Çok Kanallı (Multi-Track) Katman Mimarisi
   readonly customTrackCount = signal<number>(3);
@@ -1469,6 +1547,103 @@ export class EditorComponent implements OnInit, OnDestroy {
     return result;
   });
 
+  isAnyRippleActive(): boolean {
+    return this.rippleAi() || this.rippleManual() || this.rippleRetake();
+  }
+
+  getClipLeft(clip: any): number {
+    if (!this.isAnyRippleActive()) {
+      return (clip.start / this.totalDuration()) * 100;
+    }
+    const allClips = this.clips();
+    const visDur = this.visibleDuration();
+    if (visDur <= 0) return 0;
+    let accumulatedDuration = 0;
+    for (const c of allClips) {
+      if (c.id === clip.id) break;
+      if (this.isVisible(c)) {
+        accumulatedDuration += c.duration;
+      }
+    }
+    return (accumulatedDuration / visDur) * 100;
+  }
+
+  getClipWidth(clip: any): number {
+    if (!this.isAnyRippleActive()) {
+      return ((clip.end - clip.start) / this.totalDuration()) * 100;
+    }
+    const visDur = this.visibleDuration();
+    if (visDur <= 0) return 0;
+    return (clip.duration / visDur) * 100;
+  }
+
+  getSubtitleLeft(seg: any): number {
+    if (!this.isAnyRippleActive()) {
+      return (seg.start / this.totalDuration()) * 100;
+    }
+    const visDur = this.visibleDuration();
+    if (visDur <= 0) return 0;
+    return (this.getVisTimeFromRawTime(seg.start) / visDur) * 100;
+  }
+
+  getSubtitleWidth(seg: any): number {
+    if (!this.isAnyRippleActive()) {
+      return ((seg.end - seg.start) / this.totalDuration()) * 100;
+    }
+    const visDur = this.visibleDuration();
+    if (visDur <= 0) return 0;
+    
+    const startVis = this.getVisTimeFromRawTime(seg.start);
+    const endVis = this.getVisTimeFromRawTime(seg.end);
+    const width = ((endVis - startVis) / visDur) * 100;
+    return Math.max(0, width);
+  }
+
+  getSubtitleId(seg: any): string {
+    return `sub_${seg.start}_${seg.end}`;
+  }
+
+  startEditSubtitle(seg: any): void {
+    this.editingSubtitleId.set(this.getSubtitleId(seg));
+  }
+
+  cancelSubtitleEdit(): void {
+    this.editingSubtitleId.set(null);
+  }
+
+  saveSubtitleEdit(seg: any, newText: string): void {
+    if (!newText || newText.trim() === '') {
+       this.cancelSubtitleEdit();
+       return;
+    }
+    const edl = this.activeEdl();
+    if (!edl || !edl.transcript || !edl.transcript.segments) {
+       this.cancelSubtitleEdit();
+       return;
+    }
+    const segmentIndex = edl.transcript.segments.findIndex((s: any) => s.start === seg.start && s.end === seg.end);
+    if (segmentIndex !== -1) {
+       edl.transcript.segments[segmentIndex].text = newText;
+       this.edlService.patchEdl(this.projectId, { transcript: edl.transcript } as any).subscribe(() => {
+          this.loadEdl();
+          this.cancelSubtitleEdit();
+       });
+    } else {
+       this.cancelSubtitleEdit();
+    }
+  }
+
+  getVisibleSubtitleSegments(): any[] {
+    const segments = this.activeEdl()?.transcript?.segments || [];
+    if (!this.isAnyRippleActive()) return segments;
+    
+    const visibleClips = this.clips().filter(c => this.isVisible(c));
+    return segments.filter(seg => {
+      // Bir altyazının gösterilmesi için, görünür (kesilmemiş) kliplerden en az biriyle anlamlı bir süre (>30ms) kesişmesi gerekir
+      return visibleClips.some(c => (Math.min(seg.end, c.end) - Math.max(seg.start, c.start)) > 0.03);
+    });
+  }
+
   isRetakeClip(clip: any): boolean {
     if (!clip || !clip.isCut || !clip.cutObj) return false;
     const r = (clip.cutObj.reason || '').toLowerCase();
@@ -1530,13 +1705,13 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   readonly visibleDuration = computed(() => {
      const allClips = this.clips(); 
-     let totalCut = 0;
+     let totalVisible = 0;
      for (const c of allClips) {
-         if (c.isCut && (this.isRetakeClip(c) || c.cutObj?.reason?.includes('silence') || c.cutObj?.reason?.includes('manuel'))) {
-             totalCut += c.duration;
+         if (this.isVisible(c)) {
+             totalVisible += c.duration;
          }
      }
-     return Math.max(0, this.totalDuration() - totalCut);
+     return Math.max(0.1, totalVisible);
   });
 
   // Chat
@@ -1657,7 +1832,8 @@ export class EditorComponent implements OnInit, OnDestroy {
       .then(audioBuffer => {
         const raw = audioBuffer.getChannelData(0);
         const dur = Math.max(1, audioBuffer.duration || this.totalDuration() || 60);
-        const totalPoints = Math.min(800, Math.max(160, Math.round(dur * 6)));
+        // Yüksek Hassasiyet (High Density) - Saniyede ~50 nokta
+        const totalPoints = Math.min(10000, Math.max(500, Math.round(dur * 50)));
         const blockSize = Math.floor(raw.length / totalPoints);
         const peaks: number[] = [];
 
@@ -1689,7 +1865,8 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   generateFallbackWaveform(): void {
     const dur = Math.max(1, this.totalDuration() || 60);
-    const totalPoints = Math.min(600, Math.max(120, Math.round(dur * 4)));
+    // Yüksek Hassasiyet (High Density) - Saniyede ~50 nokta
+    const totalPoints = Math.min(10000, Math.max(500, Math.round(dur * 50)));
     const edl = this.activeEdl();
     const cuts = edl?.cuts || [];
     const segments = edl?.transcript?.segments || [];
@@ -1713,33 +1890,35 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.audioPeaks.set(peaks);
   }
 
-  getWaveformPath(): string {
-    const peaks = this.audioPeaks();
-    if (!peaks || peaks.length === 0) return '';
+  getWaveformPathForClip(clip: any): string {
+    const allPeaks = this.audioPeaks();
+    if (!allPeaks || allPeaks.length === 0) return '';
     
-    const width = 1000;
+    const totalDur = Math.max(1, this.totalDuration());
+    
+    // Klip için startIndex ve endIndex hesaplama
+    const startIndex = Math.floor((clip.start / totalDur) * allPeaks.length);
+    const endIndex = Math.ceil((clip.end / totalDur) * allPeaks.length);
+    
+    const peaks = allPeaks.slice(startIndex, endIndex);
+    if (peaks.length === 0) return '';
+    
+    const width = 100;
     const height = 56;
-    const midY = height / 2;
     const numPoints = peaks.length;
-    const dx = width / (numPoints - 1);
+    const dx = width / Math.max(1, numPoints - 1);
     
-    let topPath = `M 0 ${midY}`;
+    // Asimetrik (Tek yönlü, alttan yukarıya) CapCut Style Waveform
+    let path = `M 0 ${height}`; // Sol alt köşeden başla
     for (let i = 0; i < numPoints; i++) {
       const x = i * dx;
-      const peakH = peaks[i] * (height / 2 - 3);
-      const y = midY - peakH;
-      topPath += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
+      const peakH = peaks[i] * height; 
+      const y = height - peakH; 
+      path += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
     }
+    path += ` L ${width} ${height} Z`; // Sağ alt köşeye in ve kapat
     
-    let bottomPath = '';
-    for (let i = numPoints - 1; i >= 0; i--) {
-      const x = i * dx;
-      const peakH = peaks[i] * (height / 2 - 3);
-      const y = midY + peakH;
-      bottomPath += ` L ${x.toFixed(1)} ${y.toFixed(1)}`;
-    }
-    
-    return `${topPath} ${bottomPath} Z`;
+    return path;
   }
 
   // --- OYNATMA & TRANSPORT İŞLEMLERİ ---
@@ -1946,12 +2125,47 @@ export class EditorComponent implements OnInit, OnDestroy {
       } else {
         this.zoomOut();
       }
-    } else if (event.shiftKey) {
+    } else {
+      event.preventDefault();
       const container = this.timelineScrollContainerRef?.nativeElement;
       if (container) {
-        container.scrollLeft += event.deltaY;
+        const scrollAmount = event.shiftKey ? event.deltaY : event.deltaY * 1.5;
+        container.scrollLeft += scrollAmount;
       }
     }
+  }
+
+  scrollTimelineLeft(): void {
+    const container = this.timelineScrollContainerRef?.nativeElement;
+    if (container) {
+      container.scrollBy({ left: -200, behavior: 'smooth' });
+    }
+  }
+
+  scrollTimelineRight(): void {
+    const container = this.timelineScrollContainerRef?.nativeElement;
+    if (container) {
+      container.scrollBy({ left: 200, behavior: 'smooth' });
+    }
+  }
+
+  scrollTimelineToPlayhead(): void {
+    const container = this.timelineScrollContainerRef?.nativeElement;
+    if (!container) return;
+    
+    const playheadPercent = this.getPlayheadPosition() / 100;
+    const targetScrollLeft = (playheadPercent * container.scrollWidth) - (container.clientWidth / 2);
+    
+    container.scrollTo({
+      left: Math.max(0, targetScrollLeft),
+      behavior: 'smooth'
+    });
+  }
+
+  formatTime(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   }
 
   // --- KLAVYE KISAYOLLARI (HOSTLISTENER) ---
@@ -2001,6 +2215,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (event.code === 'KeyB') {
       event.preventDefault();
       this.addSplitMarker();
+      return;
+    }
+
+    if (event.code === 'KeyV' || event.key.toLowerCase() === 'v') {
+      event.preventDefault();
+      this.rippleDeleteLeft();
       return;
     }
 
@@ -2154,6 +2374,8 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   // --- CANLI EDL SİMÜLASYONU ---
   onTimeUpdate(): void {
+    if (this.isScrubbing) return;
+    
     const video = this.videoRef?.nativeElement;
     if (!video) return;
 
@@ -2181,7 +2403,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getRawTimeFromVisTime(visTime: number): number {
-    if (!this.rippleAi() && !this.rippleManual()) {
+    if (!this.isAnyRippleActive()) {
        return Math.max(0, Math.min(this.totalDuration(), visTime));
     }
     let accumulated = 0;
@@ -2197,12 +2419,18 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getVisTimeFromRawTime(rawTime: number): number {
-    if (!this.rippleAi() && !this.rippleManual()) {
+    if (!this.isAnyRippleActive()) {
        return Math.max(0, Math.min(this.totalDuration(), rawTime));
     }
     let passed = 0;
     for (const c of this.clips()) {
-       if (rawTime >= c.start && rawTime <= c.end) {
+       if (rawTime >= c.start && rawTime < c.end) {
+          if (this.isVisible(c)) {
+             passed += (rawTime - c.start);
+          }
+          break;
+       }
+       if (rawTime === c.end && c === this.clips()[this.clips().length - 1]) {
           if (this.isVisible(c)) {
              passed += (rawTime - c.start);
           }
@@ -2222,7 +2450,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     const clickX = clientX - rect.left;
     const percentage = Math.max(0, Math.min(1, clickX / rect.width));
     
-    if (!this.rippleAi() && !this.rippleManual()) {
+    if (!this.isAnyRippleActive()) {
        return percentage * this.totalDuration();
     }
 
@@ -2232,7 +2460,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   getPlayheadPosition(): number {
     const t = this.currentTime();
-    if (!this.rippleAi() && !this.rippleManual()) {
+    if (!this.isAnyRippleActive()) {
        return (t / this.totalDuration()) * 100;
     }
     const visDur = this.visibleDuration();
@@ -2245,6 +2473,10 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   seekTimeline(event: MouseEvent): void {
+    if (this.wasDragging) {
+      this.wasDragging = false;
+      return;
+    }
     const targetTime = this.getTimeAtClientX(event.clientX);
     if (this.videoRef?.nativeElement) {
       this.videoRef.nativeElement.currentTime = targetTime;
@@ -2385,16 +2617,48 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   zoomIn(): void {
-    this.timelineZoom.update(z => Math.min(8, parseFloat((z + 0.25).toFixed(2))));
+    this.timelineZoom.update(z => Math.min(50, parseFloat((z + 0.5).toFixed(2))));
   }
 
   zoomOut(): void {
-    this.timelineZoom.update(z => Math.max(1, parseFloat((z - 0.25).toFixed(2))));
+    this.timelineZoom.update(z => Math.max(1, parseFloat((z - 0.5).toFixed(2))));
   }
 
   addSplitMarker(): void {
     const t = this.currentTime();
     this.splitMarkers.update(m => [...m, t]);
+  }
+
+  rippleDeleteLeft(): void {
+    const t = this.currentTime();
+    const allClips = this.clips();
+    
+    // İmlecin (Playhead) bulunduğu o anki "sağlam" klibi bul
+    const targetClip = allClips.find(c => t >= c.start && t < c.end);
+    if (!targetClip || targetClip.isCut) return; 
+
+    // O klibin başlangıcından (bir önceki kesiğin bittiği yer) imlece kadar olan kısmı kes
+    const cutStart = targetClip.start;
+    const cutEnd = t;
+
+    if (cutEnd - cutStart < 0.05) return; 
+
+    const edl = this.activeEdl();
+    if (!edl) return;
+
+    const newCut = {
+      id: `manual_cut_${Date.now()}`,
+      start: cutStart,
+      end: cutEnd,
+      reason: 'manual',
+      source: 'user',
+      command: 'Ripple Delete Left'
+    };
+
+    const newCuts = [...(edl.cuts || []), newCut];
+    this.edlService.patchEdl(this.projectId, { cuts: newCuts } as any).subscribe(() => {
+      this.loadEdl();
+    });
   }
 
   getOverlayTop(ov: OverlayItem): string {
@@ -2487,6 +2751,13 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.customTrackCount.set(currentMax + 1);
   }
 
+  removeTrackLane(): void {
+    const currentMax = this.overlayTrackNumbers()[0] || 1;
+    if (currentMax > 1) {
+      this.customTrackCount.set(currentMax - 1);
+    }
+  }
+
   assignAssetToSelectedOverlay(asset: ProjectAssetDto): void {
     const selId = this.selectedOverlayId();
     if (!selId) return;
@@ -2556,7 +2827,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   getOverlayStyle(ov: any): any {
      const totalDur = Math.max(1, this.totalDuration());
-     if (!this.rippleAi() && !this.rippleManual()) {
+     if (!this.isAnyRippleActive()) {
         return {
            left: `${(ov.timestamp / totalDur) * 100}%`,
            width: `${Math.max(1.0, (ov.duration / totalDur) * 100)}%`
@@ -3161,6 +3432,14 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   @HostListener('window:mousemove', ['$event'])
   onGlobalMouseMove(event: MouseEvent): void {
+     if (this.isResizingTrack) {
+        event.preventDefault();
+        const delta = event.clientY - this.resizeStartY;
+        const newHeight = Math.max(40, Math.min(400, this.resizeStartHeight + delta));
+        this.audioTrackHeight.set(newHeight);
+        return;
+     }
+
      if (this.isCanvasDragging) {
          const video = this.videoRef?.nativeElement;
          if (!video) return;
@@ -3229,7 +3508,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      if (!ov) return;
      
      if (this.isDraggingOverlay) {
-        if (!this.rippleAi() && !this.rippleManual()) {
+        if (!this.isAnyRippleActive()) {
            const track = this.timelineTrackRef?.nativeElement;
            if (!track) return;
            const rect = track.getBoundingClientRect();
@@ -3288,6 +3567,10 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   @HostListener('window:mouseup', ['$event'])
   onGlobalMouseUp(event: MouseEvent): void {
+     if (this.isResizingTrack) {
+        this.isResizingTrack = false;
+     }
+
      if (this.isCanvasDragging) {
          this.isCanvasDragging = false;
          const ovId = this.canvasDragOverlayId;
@@ -3339,6 +3622,13 @@ export class EditorComponent implements OnInit, OnDestroy {
             }
          }
      }
+  }
+
+  onTrackResizeStart(event: MouseEvent): void {
+     event.preventDefault();
+     this.isResizingTrack = true;
+     this.resizeStartY = event.clientY;
+     this.resizeStartHeight = this.audioTrackHeight();
   }
 
   isWordActive(word: TranscriptWord): boolean {
