@@ -35,6 +35,20 @@ public class PipelineErrorConsumer : IConsumer<PipelineErrorEvent>
         _logger.LogError("PipelineError: ProjectId={ProjectId}, Asama={Asama}, Hata={Hata}",
             msg.ProjectId, msg.Asama, msg.HataMesaji);
 
+        try
+        {
+            var project = await _projectService.GetByIdAsync(msg.ProjectId, context.CancellationToken);
+            if (project != null && project.Durum == ProjectDurumu.Tamamlandi)
+            {
+                _logger.LogWarning("Proje zaten başarıyla tamamlanmış, PipelineError göz ardı edildi: ProjectId={ProjectId}", msg.ProjectId);
+                return;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Proje kontrol edilirken hata: {ProjectId}", msg.ProjectId);
+        }
+
         await _projectService.UpdateStatusAsync(msg.ProjectId, ProjectDurumu.Hata, context.CancellationToken);
 
         if (msg.Asama == "Render" && msg.VideoId.HasValue)

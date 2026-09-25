@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChild, ElementRef, HostListener } from '@angular/core';
+﻿import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChild, ElementRef, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -406,12 +406,13 @@ export interface ContextMenuState {
               [style.zIndex]="getOverlayZIndex(ov)"
               class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
               [ngClass]="[
-                 selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : '',
-                 getOverlayAnimationClass(ov)
+                 selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''
               ]"
               [style.color]="ov.color || '#FFFFFF'"
               [style.backgroundColor]="ov.backgroundColor || 'transparent'"
               [style.fontFamily]="ov.font || 'Inter, sans-serif'">
+              
+              <div [ngClass]="getOverlayAnimationClass(ov)">
               
               <!-- Metin Kaplaması -->
               <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize.px]="(ov.fontSize || 48) / 2">
@@ -432,6 +433,7 @@ export interface ContextMenuState {
                   <span>🖼️</span>
                   <span>{{ ov.content || 'B-Roll Görseli' }}</span>
                 </div>
+              </div>
               </div>
 
               <!-- Canvas Resize Handle -->
@@ -967,7 +969,7 @@ export interface ContextMenuState {
                   (mousedown)="onOverlayDragStart($event, ov.id)"
                   (click)="$event.stopPropagation(); selectOverlay(ov.id)"
                   (contextmenu)="openOverlayContextMenu($event, ov)"
-                  class="overlay-item absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[70px] border"
+                  class="overlay-item absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[4px] border"
                   [ngClass]="[
                      ov.type === 'text' 
                        ? 'bg-gradient-to-r from-[#ba5748] to-[#994033] text-white border-[#e07567]/70 hover:brightness-110 shadow-rose-950/50' 
@@ -1534,6 +1536,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     return this.clips().some(c => selIds.includes(c.id) && !c.isCut);
   });
   readonly selectedOverlayId = signal<string | null>(null);
+  readonly selectedSubtitleId = signal<string | null>(null);
+  readonly selectedSubtitle = computed(() => {
+    const id = this.selectedSubtitleId();
+    if (!id) return null;
+    return this.activeEdl()?.transcript?.segments?.find((s: any) => this.getSubtitleId(s) === id) || null;
+  });
   readonly editingSubtitleId = signal<string | null>(null);
 
   // Çok Kanallı (Multi-Track) Katman Mimarisi
@@ -1768,8 +1776,9 @@ export class EditorComponent implements OnInit, OnDestroy {
        this.cancelSubtitleEdit();
        return;
     }
-    const segmentIndex = edl.transcript.segments.findIndex((s: any) => s.start === seg.start && s.end === seg.end);
+    const segmentIndex = edl.transcript.segments.findIndex((s: any) => this.getSubtitleId(s) === this.getSubtitleId(seg));
     if (segmentIndex !== -1) {
+       console.log(`[SUBTITLE:EDIT] Altyazı güncellendi: "${seg.text}" -> "${newText}"`);
        edl.transcript.segments[segmentIndex].text = newText;
        this.edlService.patchEdl(this.projectId, { transcript: edl.transcript } as any).subscribe(() => {
           this.loadEdl();
@@ -1785,10 +1794,15 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!this.isAnyRippleActive()) return segments;
     
     const visibleClips = this.clips().filter(c => this.isVisible(c));
-    return segments.filter(seg => {
+    const result = segments.filter(seg => {
       // Bir altyazının gösterilmesi için, görünür (kesilmemiş) kliplerden en az biriyle anlamlı bir süre (>30ms) kesişmesi gerekir
       return visibleClips.some(c => (Math.min(seg.end, c.end) - Math.max(seg.start, c.start)) > 0.03);
     });
+    // Sadece dizi değiştiyse konsola basmak için ufak bir hack olabilir ama şimdilik sadece timeline render'ı logla
+    if (result.length > 0 && Math.random() < 0.05) { // Log spami önlemek için %5 ihtimalle bas
+       console.log(`[SUBTITLE:TRACK_RENDER] ${result.length} adet altyazı segmenti render ediliyor.`);
+    }
+    return result;
   }
 
   isRetakeClip(clip: any): boolean {
@@ -1953,7 +1967,13 @@ export class EditorComponent implements OnInit, OnDestroy {
         }
         // Eğer waveform henüz yüklenmediyse ve transcript varsa fallback üret
         if (!this.audioPeaks()) {
-          this.generateFallbackWaveform();
+          if (res.edl.audioPeaks && res.edl.audioPeaks.length > 0) {
+            console.log('[WAVEFORM:EDL_PEAKS] EDL içerisinden gelen gerçek peaks kullanılıyor.');
+            this.audioPeaks.set(res.edl.audioPeaks);
+          } else {
+            console.log('[WAVEFORM:FALLBACK] EDL peaks eksik, transkripte dayalı fallback dalgası üretiliyor.');
+            this.generateFallbackWaveform();
+          }
         }
       },
       error: (err) => console.error('EDL yüklenemedi:', err)
@@ -2000,6 +2020,7 @@ export class EditorComponent implements OnInit, OnDestroy {
           const peak = Math.min(0.95, Math.max(0.05, max * 0.7 + rms * 1.6));
           peaks.push(parseFloat(peak.toFixed(3)));
         }
+        console.log('[WAVEFORM:DECODE] Web Audio API ile gerçek ses başarıyla çözüldü ve waveform çizildi.');
         this.audioPeaks.set(peaks);
         this.isWaveformLoading.set(false);
       })
@@ -2031,7 +2052,8 @@ export class EditorComponent implements OnInit, OnDestroy {
         const val = 0.35 + Math.abs(seed) * 0.55 + Math.random() * 0.1;
         peaks.push(parseFloat(Math.min(0.95, val).toFixed(3)));
       } else {
-        peaks.push(0.12 + Math.random() * 0.1);
+        // Fallback: Transkript dışı alanlar için dalga boyutunu biraz daha makul tut (0.25 - 0.40)
+        peaks.push(0.25 + Math.random() * 0.15);
       }
     }
     this.audioPeaks.set(peaks);
@@ -2099,6 +2121,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   seekToTranscript(time: number): void {
+    console.log(`[TRANSCRIPT:SEEK] Transkript üzerinden süreye atlandı: ${time.toFixed(2)}s`);
     if (this.videoRef?.nativeElement) {
       this.videoRef.nativeElement.currentTime = time;
     }
@@ -2895,15 +2918,15 @@ export class EditorComponent implements OnInit, OnDestroy {
     
     if (t < ov.timestamp + 0.5) {
       if (anim === 'fade') return 'animate-fade-in';
-      if (anim === 'pop-up') return 'animate-pop-up';
-      if (anim === 'slide-up') return 'animate-slide-up';
+      if (anim === 'pop-up') return 'animate-scale-in';
+      if (anim === 'slide-up') return 'animate-slide-up-forwards';
       return '';
     }
     
     if (t > (ov.timestamp + ov.duration - 0.5)) {
       if (exitAnim === 'fade') return 'animate-fade-out';
       if (exitAnim === 'scale-out') return 'animate-scale-out';
-      if (exitAnim === 'slide-down') return 'animate-slide-down';
+      if (exitAnim === 'slide-down') return 'animate-slide-down-out';
       return '';
     }
     
@@ -3037,7 +3060,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      if (!this.isAnyRippleActive()) {
         return {
            left: `${(ov.timestamp / totalDur) * 100}%`,
-           width: `${Math.max(1.0, (ov.duration / totalDur) * 100)}%`
+           width: `${Math.max(0.1, (ov.duration / totalDur) * 100)}%`
         };
      }
 
@@ -3049,7 +3072,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      
      return {
         left: `${(startVis / visDur) * 100}%`,
-        width: `${Math.max(1.0, ((endVis - startVis) / visDur) * 100)}%`
+        width: `${Math.max(0.1, ((endVis - startVis) / visDur) * 100)}%`
      };
   }
 

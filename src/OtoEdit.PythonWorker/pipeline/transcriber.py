@@ -13,7 +13,8 @@ class Transcriber:
         self.api_key = Config.OPENAI_API_KEY
         self.client = None
 
-        if self.api_key:
+        # Ensure the API key is not just a placeholder
+        if self.api_key and len(self.api_key) > 10 and not self.api_key.startswith("sk-..."):
             try:
                 import importlib
                 openai_mod = importlib.import_module("openai")
@@ -22,7 +23,7 @@ class Transcriber:
             except Exception as e:
                 logger.warning(f"OpenAI istemcisi başlatılamadı: {e}")
         else:
-            logger.warning("OPENAI_API_KEY tanımlı değil. Transkript fallback modunda çalışacak.")
+            logger.warning("OPENAI_API_KEY geçersiz veya tanımlı değil. Transkript fallback modunda çalışacak.")
 
     def transcribe(self, audio_path: str, video_id: str = "") -> TranscriptResult:
         """Ses dosyasını çözümler ve kelime bazlı zaman damgaları ile döner."""
@@ -104,7 +105,10 @@ class Transcriber:
             segments_iter, info = local_model.transcribe(
                 audio_path,
                 language="tr",
-                word_timestamps=True
+                word_timestamps=True,
+                condition_on_previous_text=False,
+                vad_filter=True,
+                repetition_penalty=1.15
             )
 
             segments = []
@@ -188,10 +192,10 @@ class Transcriber:
                 current_chunk_words.append(w)
                 
                 duration = current_chunk_words[-1].end - current_chunk_words[0].start
-                is_terminal = w.word.strip().endswith(('.', '!', '?', ',', ':'))
+                is_terminal = w.word.strip().endswith(('.', '!', '?'))
                 
-                # Eğer sınır aşıldıysa veya noktalama varsa böl
-                if len(current_chunk_words) >= max_words or duration >= max_duration or is_terminal:
+                # Eğer sınır aşıldıysa veya noktalama varsa (ve en az 3 kelimeyse) böl
+                if len(current_chunk_words) >= max_words or duration >= max_duration or (is_terminal and len(current_chunk_words) >= 3):
                     chunk_text = " ".join(cw.word for cw in current_chunk_words)
                     chunked.append(TranscriptSegment(
                         start=round(current_chunk_words[0].start, 2),

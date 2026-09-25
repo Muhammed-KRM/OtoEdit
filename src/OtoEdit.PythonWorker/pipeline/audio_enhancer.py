@@ -37,13 +37,13 @@ class AudioEnhancer:
                 samples = np.array(audio.get_array_of_samples(), dtype=np.float32)
                 rate = audio.frame_rate
 
-                cleaned = nr.reduce_noise(y=samples, sr=rate, prop_decrease=0.8)
+                cleaned = nr.reduce_noise(y=samples, sr=rate, prop_decrease=0.6)
 
                 cleaned_segment = AudioSegment(
                     cleaned.astype(np.int16).tobytes(),
                     frame_rate=rate, sample_width=2, channels=1
                 )
-                cleaned_segment.export(output_mp3, format="mp3", bitrate="32k")
+                cleaned_segment.export(output_mp3, format="mp3", bitrate="192k")
                 logger.info(f"AI gürültü temizleme tamamlandı: {output_mp3}")
             except Exception as ex:
                 logger.warning(f"noisereduce çalıştırılamadı, FFmpeg filtresi ile sıkıştırma uygulanıyor: {ex}")
@@ -51,7 +51,7 @@ class AudioEnhancer:
                 subprocess.run([
                     "ffmpeg", "-i", raw_wav,
                     "-af", "afftdn=nf=-25",
-                    "-b:a", "32k",
+                    "-b:a", "192k",
                     output_mp3, "-y"
                 ], check=True, capture_output=True)
 

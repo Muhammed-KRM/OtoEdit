@@ -120,8 +120,28 @@ public class GeminiChatProvider : IChatProvider
 
 Kullanıcı: {userMessage}";
 
-            var response = await model.GenerateContent(prompt);
-            var rawText = response.Text ?? string.Empty;
+            string rawText = string.Empty;
+            int maxRetries = 3;
+            for (int i = 0; i < maxRetries; i++)
+            {
+                try
+                {
+                    var response = await model.GenerateContent(prompt);
+                    rawText = response.Text ?? string.Empty;
+                    break;
+                }
+                catch (Exception ex) when (ex.Message.Contains("503") || ex.Message.Contains("time out") || ex.Message.Contains("Unavailable"))
+                {
+                    if (i == maxRetries - 1)
+                    {
+                        return new ChatResult
+                        {
+                            Mesaj = "Şu anda yapay zeka sunucularında yoğunluk yaşanıyor (Sistem çok meşgul). Lütfen 1-2 dakika bekleyip tekrar deneyin."
+                        };
+                    }
+                    await Task.Delay(2000 * (i + 1), cancellationToken); // Backoff retry
+                }
+            }
 
             var cleanedJson = rawText
                 .Replace("```json", "")

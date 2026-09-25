@@ -117,6 +117,7 @@ export class RenderResultComponent implements OnInit, OnDestroy {
   readonly downloadUrl = signal<string>('');
 
   private sub = new Subscription();
+  private pollTimer: any = null;
 
   ngOnInit(): void {
     this.projectId = this.route.snapshot.paramMap.get('id') || '';
@@ -125,6 +126,7 @@ export class RenderResultComponent implements OnInit, OnDestroy {
     if (this.projectId && this.renderJobId) {
       this.checkStatus();
       this.setupSignalR();
+      this.startPolling();
     }
   }
 
@@ -132,7 +134,22 @@ export class RenderResultComponent implements OnInit, OnDestroy {
     if (this.projectId) {
       this.signalr.leaveProjectGroup(this.projectId);
     }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+    }
     this.sub.unsubscribe();
+  }
+
+  private startPolling(): void {
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    this.pollTimer = setInterval(() => {
+      const s = this.renderStatus()?.durum;
+      if (s === RenderDurumu.Tamamlandi || s === RenderDurumu.Hata) {
+        clearInterval(this.pollTimer);
+        return;
+      }
+      this.checkStatus();
+    }, 3000);
   }
 
   private checkStatus(): void {
@@ -140,6 +157,8 @@ export class RenderResultComponent implements OnInit, OnDestroy {
       next: (status) => {
         this.renderStatus.set(status);
         if (status.durum === RenderDurumu.Tamamlandi) {
+          this.renderPercentage.set(100);
+          if (this.pollTimer) clearInterval(this.pollTimer);
           this.fetchDownloadUrl();
         }
       },
@@ -164,6 +183,17 @@ export class RenderResultComponent implements OnInit, OnDestroy {
         .subscribe((e) => {
           this.renderPercentage.set(100);
           this.checkStatus();
+        })
+    );
+
+    // Canlı ilerleme (progress) bildirimi
+    this.sub.add(
+      this.signalr.renderProgress$
+        .pipe(filter(e => !e.renderJobId || e.renderJobId === this.renderJobId))
+        .subscribe((prog) => {
+          if (prog.yuzde > this.renderPercentage()) {
+            this.renderPercentage.set(prog.yuzde);
+          }
         })
     );
   }

@@ -150,6 +150,12 @@ public class RenderManager : IRenderService
         var renderJob = await _context.RenderJobs.FindAsync(new object[] { renderJobId }, cancellationToken);
         if (renderJob != null)
         {
+            if (renderJob.Durum == RenderDurumu.Tamamlandi)
+            {
+                _logger.LogWarning("Render zaten başarıyla tamamlanmış, FailRenderAsync göz ardı edildi: RenderJobId={RenderJobId}", renderJobId);
+                return;
+            }
+
             renderJob.Durum = RenderDurumu.Hata;
             renderJob.HataMesaji = hataMesaji;
             renderJob.BitisZamani = DateTime.UtcNow;

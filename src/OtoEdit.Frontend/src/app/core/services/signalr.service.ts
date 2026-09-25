@@ -47,8 +47,11 @@ export class SignalrService {
 
   // RxJS Subjects
   readonly analysisCompleted$ = new Subject<AnalysisCompletedEvent>();
+  readonly renderProgress$ = new Subject<RenderProgressEvent>();
   readonly renderCompleted$ = new Subject<RenderCompletedEvent>();
   readonly pipelineError$ = new Subject<PipelineErrorEvent>();
+
+  private activeProjectGroups = new Set<string>();
 
   constructor() {
     this.initConnection();
@@ -85,6 +88,7 @@ export class SignalrService {
 
     this.hubConnection.on('RenderProgress', (data: RenderProgressEvent) => {
       this.currentRenderProgress.set(data);
+      this.renderProgress$.next(data);
     });
 
     this.hubConnection.on('RenderCompleted', (data: RenderCompletedEvent) => {
@@ -99,8 +103,9 @@ export class SignalrService {
       this.isConnected.set(false);
     });
 
-    this.hubConnection.onreconnected(() => {
+    this.hubConnection.onreconnected(async () => {
       this.isConnected.set(true);
+      await this.rejoinActiveGroups();
     });
 
     this.hubConnection.onclose(() => {
@@ -114,21 +119,45 @@ export class SignalrService {
       await this.hubConnection.start();
       this.isConnected.set(true);
       console.log('SignalR Hub bağlantısı başarılı.');
+      await this.rejoinActiveGroups();
     } catch (err) {
       console.warn('SignalR bağlantı hatası, tekrar denenecek...', err);
       setTimeout(() => this.startConnection(), 5000);
     }
   }
 
+  private async rejoinActiveGroups(): Promise<void> {
+    if (this.hubConnection?.state !== signalR.HubConnectionState.Connected) return;
+    for (const projectId of this.activeProjectGroups) {
+      try {
+        await this.hubConnection.invoke('JoinProjectGroup', projectId);
+      } catch (err) {
+        console.warn(`JoinProjectGroup (${projectId}) hatası:`, err);
+      }
+    }
+  }
+
   async joinProjectGroup(projectId: string): Promise<void> {
+    if (!projectId) return;
+    this.activeProjectGroups.add(projectId);
     if (this.hubConnection?.state === signalR.HubConnectionState.Connected) {
-      await this.hubConnection.invoke('JoinProjectGroup', projectId);
+      try {
+        await this.hubConnection.invoke('JoinProjectGroup', projectId);
+      } catch (err) {
+        console.warn(`JoinProjectGroup (${projectId}) hatası:`, err);
+      }
     }
   }
 
   async leaveProjectGroup(projectId: string): Promise<void> {
+    if (!projectId) return;
+    this.activeProjectGroups.delete(projectId);
     if (this.hubConnection?.state === signalR.HubConnectionState.Connected) {
-      await this.hubConnection.invoke('LeaveProjectGroup', projectId);
+      try {
+        await this.hubConnection.invoke('LeaveProjectGroup', projectId);
+      } catch (err) {
+        console.warn(`LeaveProjectGroup (${projectId}) hatası:`, err);
+      }
     }
   }
 }

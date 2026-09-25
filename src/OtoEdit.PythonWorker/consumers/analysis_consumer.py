@@ -191,9 +191,14 @@ class AnalysisConsumer:
 
     def _extract_audio_peaks(self, audio_path: str, num_peaks: int = 1000) -> list:
         try:
-            sample_rate, data = wavfile.read(audio_path)
-            if len(data.shape) > 1:
+            from pydub import AudioSegment
+            audio = AudioSegment.from_file(audio_path)
+            data = np.array(audio.get_array_of_samples(), dtype=np.float32)
+            
+            if audio.channels > 1:
+                data = data.reshape((-1, audio.channels))
                 data = data.mean(axis=1)
+                
             chunk_size = max(1, len(data) // num_peaks)
             peaks = []
             for i in range(num_peaks):
