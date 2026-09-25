@@ -24,7 +24,7 @@ public class VideoManager : IVideoService
     private readonly ILogger<VideoManager> _logger;
 
     private static readonly string[] AllowedExtensions = { ".mp4", ".mkv", ".avi", ".mov", ".webm" };
-    private const long MaxFileSize = 2147483648L; // 2GB
+    private const long MaxFileSize = 53687091200L; // 50GB
 
     public VideoManager(
         IVideoRepository videoRepository,
@@ -64,7 +64,7 @@ public class VideoManager : IVideoService
 
         if (file.Length > MaxFileSize)
         {
-            throw new BusinessException("Video boyutu maksimum 2GB olabilir.");
+            throw new BusinessException("Video boyutu maksimum 50GB olabilir.");
         }
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();

@@ -1,4 +1,4 @@
-﻿import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChild, ElementRef, HostListener } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, computed, ViewChild, ElementRef, HostListener } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -336,8 +336,9 @@ export interface ContextMenuState {
 
             <div 
               *ngFor="let seg of filteredTranscriptSegments()"
-              (click)="seekToTranscript(seg.start)"
-              class="p-2 rounded-lg border border-slate-800 bg-dark-900/60 hover:bg-dark-800 hover:border-brand-cyan/50 cursor-pointer transition-all space-y-1 group">
+              (click)="selectSubtitle(seg)"
+              class="p-2 rounded-lg border cursor-pointer transition-all space-y-1 group"
+              [ngClass]="isSelectedSubtitle(seg) ? 'border-brand-cyan bg-dark-800 ring-1 ring-brand-cyan shadow-glow-sm' : 'border-slate-800 bg-dark-900/60 hover:bg-dark-800 hover:border-brand-cyan/50'">
               <div class="flex items-center justify-between text-[10px] font-mono text-slate-400">
                 <span class="text-brand-cyan font-bold group-hover:underline">⏱ {{ seg.start | duration }}</span>
                 <span class="opacity-60">{{ (seg.end - seg.start).toFixed(1) }}s</span>
@@ -459,18 +460,22 @@ export interface ContextMenuState {
             <!-- TikTok / Reels Karaoke Altyazı -->
             <div 
               *ngIf="showSubtitles() && currentSubtitleSegment() as seg" 
-              class="absolute bottom-5 left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center pointer-events-none select-none px-4 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl">
+              (click)="$event.stopPropagation(); selectSubtitle(seg)"
+              class="absolute left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center cursor-pointer select-none px-4 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl hover:border-brand-cyan/80 transition-all group"
+              [style.bottom.%]="100 - subtitlePositionY()"
+              title="Altyazıyı Düzenlemek İçin Tıklayın">
               <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" [style.fontFamily]="subtitleFont()" [style.color]="subtitleColor()">
                 <ng-container *ngIf="seg.words && seg.words.length > 0; else plainText">
                   <span 
                     *ngFor="let w of seg.words"
                     class="transition-all duration-100 inline-block px-0.5 rounded text-sm md:text-base"
-                    [ngClass]="isWordActive(w) ? 'text-amber-300 font-black scale-110 bg-amber-400/20 shadow-glow-sm' : 'text-slate-100 font-semibold opacity-90'">
+                    [style.color]="isWordActive(w) ? subtitleHighlightColor() : subtitleColor()"
+                    [ngClass]="isWordActive(w) ? 'font-black scale-110 bg-white/10 shadow-glow-sm' : 'font-semibold opacity-90'">
                     {{ w.word }}
                   </span>
                 </ng-container>
                 <ng-template #plainText>
-                  <span class="font-bold text-slate-100 text-sm md:text-base drop-shadow">{{ seg.text }}</span>
+                  <span class="font-bold text-sm md:text-base drop-shadow" [style.color]="subtitleColor()">{{ seg.text }}</span>
                 </ng-template>
               </div>
             </div>
@@ -685,8 +690,209 @@ export interface ContextMenuState {
             </div>
           </div>
 
+          <!-- 1.5. Durum: Altyazı Seçili -->
+          <div *ngIf="!selectedOverlay() && selectedSubtitle()" class="space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+              <div class="flex items-center gap-2">
+                <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Altyazı Özellikleri</h3>
+                <span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  Whisper Altyazı
+                </span>
+              </div>
+              <button 
+                type="button" 
+                (click)="clearSubtitleSelection()" 
+                class="text-slate-400 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-dark-800"
+                title="Seçimi Kapat">
+                ✕
+              </button>
+            </div>
+
+            <!-- Metin İçeriği -->
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Altyazı Metni</label>
+                <span class="text-[10px] text-slate-500 font-mono">{{ subtitleInspectorData.text?.length || 0 }} kr</span>
+              </div>
+              <textarea 
+                [(ngModel)]="subtitleInspectorData.text" 
+                (ngModelChange)="onSubtitleTextChange()"
+                class="w-full bg-dark-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none focus:ring-1 focus:ring-brand-cyan leading-relaxed"
+                rows="3"
+                placeholder="Altyazı metnini girin..."></textarea>
+            </div>
+
+            <!-- Zamanlama (Başlangıç, Bitiş, Süre) -->
+            <div class="p-3 bg-dark-950 rounded-xl border border-slate-800 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-slate-400 uppercase font-semibold">⏱ Zamanlama Ayarı</span>
+                <span class="text-[10px] font-mono text-brand-cyan font-bold">
+                  {{ subtitleInspectorData.duration }} sn
+                </span>
+              </div>
+
+              <div class="grid grid-cols-2 gap-2">
+                <div class="space-y-1">
+                  <label class="text-[9px] text-slate-400 uppercase font-semibold">Başlangıç (sn)</label>
+                  <input 
+                    type="number" 
+                    step="0.05" 
+                    [(ngModel)]="subtitleInspectorData.start" 
+                    (ngModelChange)="onSubtitleStartChange()"
+                    class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan font-mono" />
+                </div>
+                <div class="space-y-1">
+                  <label class="text-[9px] text-slate-400 uppercase font-semibold">Bitiş (sn)</label>
+                  <input 
+                    type="number" 
+                    step="0.05" 
+                    [(ngModel)]="subtitleInspectorData.end" 
+                    (ngModelChange)="onSubtitleEndChange()"
+                    class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan font-mono" />
+                </div>
+              </div>
+
+              <div class="space-y-1">
+                <div class="flex justify-between text-[9px] text-slate-400 uppercase font-semibold">
+                  <span>Süre (sn)</span>
+                  <span class="font-mono text-amber-300">{{ subtitleInspectorData.duration }}s</span>
+                </div>
+                <input 
+                  type="number" 
+                  step="0.1" 
+                  min="0.1" 
+                  [(ngModel)]="subtitleInspectorData.duration" 
+                  (ngModelChange)="onSubtitleDurationChange()"
+                  class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan font-mono" />
+              </div>
+            </div>
+
+            <!-- Görünüm & Konum (Tüm Altyazılar İçin Canlı) -->
+            <div class="space-y-3 p-3 bg-dark-950/70 rounded-xl border border-slate-800/80">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
+                <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wider">🎨 Altyazı Stili & Konumu</span>
+                <span class="text-[9px] text-slate-500 font-mono">Canlı Önizleme</span>
+              </div>
+
+              <!-- Dikey Konum -->
+              <div class="space-y-1.5">
+                <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
+                  <span>Dikey Konum</span>
+                  <span class="text-brand-cyan font-mono font-bold">{{ subtitlePositionY() }}%</span>
+                </div>
+                <div class="grid grid-cols-3 gap-1">
+                  <button 
+                    type="button"
+                    (click)="subtitlePositionY.set(85)" 
+                    [ngClass]="subtitlePositionY() >= 75 ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400 hover:text-white'"
+                    class="py-1 rounded text-[10px] border border-slate-700 transition-colors">
+                    Alt (Varsayılan)
+                  </button>
+                  <button 
+                    type="button"
+                    (click)="subtitlePositionY.set(50)" 
+                    [ngClass]="subtitlePositionY() > 30 && subtitlePositionY() < 75 ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400 hover:text-white'"
+                    class="py-1 rounded text-[10px] border border-slate-700 transition-colors">
+                    Orta
+                  </button>
+                  <button 
+                    type="button"
+                    (click)="subtitlePositionY.set(15)" 
+                    [ngClass]="subtitlePositionY() <= 30 ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400 hover:text-white'"
+                    class="py-1 rounded text-[10px] border border-slate-700 transition-colors">
+                    Üst
+                  </button>
+                </div>
+                <input 
+                  type="range" 
+                  min="10" 
+                  max="90" 
+                  step="1" 
+                  [ngModel]="subtitlePositionY()" 
+                  (ngModelChange)="subtitlePositionY.set($event)"
+                  class="w-full accent-brand-cyan cursor-pointer mt-1" />
+              </div>
+
+              <!-- Tipografi & Renkler -->
+              <div class="grid grid-cols-2 gap-2">
+                <div class="space-y-1">
+                  <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Rengi</label>
+                  <div class="flex items-center gap-1.5">
+                    <input 
+                      type="color" 
+                      [ngModel]="subtitleColor()" 
+                      (ngModelChange)="subtitleColor.set($event)" 
+                      class="w-7 h-7 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                    <input 
+                      type="text" 
+                      [ngModel]="subtitleColor()" 
+                      (ngModelChange)="subtitleColor.set($event)" 
+                      class="flex-1 min-w-0 bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-[11px] text-white font-mono" />
+                  </div>
+                </div>
+
+                <div class="space-y-1">
+                  <label class="text-[10px] text-slate-400 uppercase font-semibold">Karaoke Vurgu</label>
+                  <div class="flex items-center gap-1.5">
+                    <input 
+                      type="color" 
+                      [ngModel]="subtitleHighlightColor()" 
+                      (ngModelChange)="subtitleHighlightColor.set($event)" 
+                      class="w-7 h-7 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                    <input 
+                      type="text" 
+                      [ngModel]="subtitleHighlightColor()" 
+                      (ngModelChange)="subtitleHighlightColor.set($event)" 
+                      class="flex-1 min-w-0 bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-[11px] text-white font-mono" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Yazı Tipi (Font) -->
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font)</label>
+                <select 
+                  [ngModel]="subtitleFont()" 
+                  (ngModelChange)="subtitleFont.set($event)" 
+                  class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
+                  <option value="Montserrat, sans-serif">Montserrat (Modern Kalın)</option>
+                  <option value="Poppins, sans-serif">Poppins (Temiz & Yuvarlak)</option>
+                  <option value="Bebas Neue, sans-serif">Bebas Neue (Büyük & Vurucu)</option>
+                  <option value="Anton, sans-serif">Anton (Dikkat Çekici)</option>
+                  <option value="Outfit, sans-serif">Outfit (Fütüristik Sans)</option>
+                  <option value="Inter, sans-serif">Inter (Ultra Okunabilir UI)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Eylemler -->
+            <div class="pt-2 border-t border-slate-800 flex flex-col gap-2">
+              <button 
+                type="button"
+                (click)="saveSubtitleInspector()" 
+                class="w-full py-2 bg-brand-cyan hover:bg-cyan-400 text-slate-900 font-bold rounded-lg transition-colors shadow-glow-sm cursor-pointer text-xs flex items-center justify-center gap-1.5">
+                <span>✓</span> Altyazı Değişikliklerini Kaydet
+              </button>
+
+              <button 
+                type="button"
+                (click)="convertSubtitleToOverlay()" 
+                class="w-full py-2 bg-gradient-to-r from-sky-500 to-indigo-600 hover:from-sky-400 hover:to-indigo-500 text-white font-bold rounded-lg transition-all shadow-glow-sm cursor-pointer text-xs flex items-center justify-center gap-1.5"
+                title="Bu altyazıyı bağımsız hareket edebilen, boyutlandırılabilen ve animasyonlu bir katmana dönüştürür.">
+                <span>✨</span> Serbest Katmana Dönüştür
+              </button>
+
+              <button 
+                type="button"
+                (click)="deleteSubtitleSegment()" 
+                class="w-full py-1.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 border border-rose-600/40 rounded-lg text-xs font-semibold cursor-pointer transition-colors flex items-center justify-center gap-1">
+                <span>🗑</span> Bu Altyazı Segmentini Sil
+              </button>
+            </div>
+          </div>
+
           <!-- 2. Durum: Klip Seçili -->
-          <div *ngIf="!selectedOverlay() && selectedClipIds().length > 0" class="space-y-3.5">
+          <div *ngIf="!selectedOverlay() && !selectedSubtitle() && selectedClipIds().length > 0" class="space-y-3.5">
             <div class="flex items-center justify-between border-b border-slate-800 pb-2">
               <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Klip Özellikleri</h3>
               <span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -722,7 +928,7 @@ export interface ContextMenuState {
           </div>
 
           <!-- 3. Durum: Hiçbir Şey Seçili Değil -->
-          <div *ngIf="!selectedOverlay() && selectedClipIds().length === 0" class="text-center py-8 space-y-4">
+          <div *ngIf="!selectedOverlay() && !selectedSubtitle() && selectedClipIds().length === 0" class="text-center py-8 space-y-4">
             <div class="w-12 h-12 rounded-2xl bg-dark-800 border border-slate-700/80 flex items-center justify-center mx-auto text-xl shadow-inner">
               ⚙️
             </div>
@@ -932,14 +1138,23 @@ export interface ContextMenuState {
                 <div class="absolute left-0 right-0 top-0 bottom-0 overflow-hidden">
                   <div *ngFor="let seg of getVisibleSubtitleSegments()"
                        (mousedown)="onSubtitleMouseDown($event, seg)"
-                       (click)="$event.stopPropagation()"
+                       (click)="$event.stopPropagation(); selectSubtitle(seg)"
                        (dblclick)="$event.stopPropagation(); startEditSubtitle(seg)"
-                       class="subtitle-segment absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer"
-                       [ngClass]="editingSubtitleId() === getSubtitleId(seg) ? 'ring-1 ring-white z-30 bg-amber-500/40' : 'cursor-pointer'"
+                       class="subtitle-segment group absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer select-none"
+                       [ngClass]="isSelectedSubtitle(seg) ? 'ring-2 ring-brand-cyan bg-amber-500/50 shadow-glow-sm z-30 font-bold' : (editingSubtitleId() === getSubtitleId(seg) ? 'ring-1 ring-white z-30 bg-amber-500/40' : 'cursor-pointer')"
                        [style.left.%]="getSubtitleLeft(seg)"
                        [style.width.%]="getSubtitleWidth(seg)"
-                       [title]="editingSubtitleId() === getSubtitleId(seg) ? '' : 'Çift tıklayarak düzenle: ' + seg.text">
-                       <span *ngIf="editingSubtitleId() !== getSubtitleId(seg)" class="truncate font-semibold">{{ seg.text }}</span>
+                       [title]="editingSubtitleId() === getSubtitleId(seg) ? '' : 'Düzenlemek için tıkla: ' + seg.text">
+
+                       <!-- Sol Yeniden Boyutlandırma Kolu -->
+                       <div 
+                         *ngIf="isSelectedSubtitle(seg)" 
+                         (mousedown)="onSubtitleResizeStart($event, seg, 'left')" 
+                         class="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 z-40 flex items-center justify-center">
+                         <div class="w-0.5 h-3 bg-slate-900 rounded"></div>
+                       </div>
+
+                       <span *ngIf="editingSubtitleId() !== getSubtitleId(seg)" class="truncate font-semibold px-1">{{ seg.text }}</span>
                        <input *ngIf="editingSubtitleId() === getSubtitleId(seg)" 
                               type="text" 
                               class="w-full bg-dark-950 text-white outline-none border-b border-amber-400 font-semibold h-full shadow-inner"
@@ -949,6 +1164,14 @@ export interface ContextMenuState {
                               (keydown.escape)="cancelSubtitleEdit()"
                               #subtitleInput 
                               autofocus>
+
+                       <!-- Sağ Yeniden Boyutlandırma Kolu -->
+                       <div 
+                         *ngIf="isSelectedSubtitle(seg)" 
+                         (mousedown)="onSubtitleResizeStart($event, seg, 'right')" 
+                         class="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 z-40 flex items-center justify-center">
+                         <div class="w-0.5 h-3 bg-slate-900 rounded"></div>
+                       </div>
                   </div>
                 </div>
               </div>
@@ -1402,13 +1625,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   onSubtitleMouseDown(event: MouseEvent, seg: TranscriptSegment): void {
     if (event.button !== 0) return;
-    event.stopPropagation();
-    const v = this.videoRef?.nativeElement;
-    if (v && !v.seeking) {
-      v.currentTime = seg.start;
-    }
-    this.currentTime.set(seg.start);
-    console.log(`%c[SUBTITLE:CLICK] "${seg.text}" (${seg.start}s)`, 'color: #f59e0b;');
+    this.onSubtitleDragStart(event, seg);
   }
 
   startScrubbing(clientX: number): void {
@@ -1472,6 +1689,8 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly showSubtitles = signal<boolean>(true);
   readonly subtitleFont = signal<string>('Montserrat, Inter, sans-serif');
   readonly subtitleColor = signal<string>('#FFFFFF');
+  readonly subtitleHighlightColor = signal<string>('#FCD34D');
+  readonly subtitlePositionY = signal<number>(85);
 
   readonly currentSubtitleSegment = computed<TranscriptSegment | null>(() => {
     const edl = this.activeEdl();
@@ -1537,12 +1756,34 @@ export class EditorComponent implements OnInit, OnDestroy {
   });
   readonly selectedOverlayId = signal<string | null>(null);
   readonly selectedSubtitleId = signal<string | null>(null);
+  readonly selectedSubtitleIndex = signal<number | null>(null);
   readonly selectedSubtitle = computed(() => {
+    const idx = this.selectedSubtitleIndex();
+    const segs = this.activeEdl()?.transcript?.segments;
+    if (idx !== null && segs && idx >= 0 && idx < segs.length) {
+      return segs[idx];
+    }
     const id = this.selectedSubtitleId();
     if (!id) return null;
-    return this.activeEdl()?.transcript?.segments?.find((s: any) => this.getSubtitleId(s) === id) || null;
+    return segs?.find((s: any) => this.getSubtitleId(s) === id) || null;
   });
   readonly editingSubtitleId = signal<string | null>(null);
+
+  // Subtitle Inspector Data
+  subtitleInspectorData: {
+    index: number;
+    text: string;
+    start: number;
+    end: number;
+    duration: number;
+  } = { index: -1, text: '', start: 0, end: 0, duration: 0 };
+
+  // Subtitle Drag & Drop State
+  isDraggingSubtitle = false;
+  isResizingSubtitle = false;
+  subtitleResizeEdge: 'left' | 'right' | null = null;
+  dragSubtitleOriginalStart = 0;
+  dragSubtitleOriginalEnd = 0;
 
   // Çok Kanallı (Multi-Track) Katman Mimarisi
   readonly customTrackCount = signal<number>(3);
@@ -1787,6 +2028,202 @@ export class EditorComponent implements OnInit, OnDestroy {
     } else {
        this.cancelSubtitleEdit();
     }
+  }
+
+  selectSubtitle(seg: any, index?: number): void {
+    const segs = this.activeEdl()?.transcript?.segments || [];
+    let idx = index;
+    if (idx === undefined || idx < 0) {
+      idx = segs.findIndex((s: any) => Math.abs(s.start - seg.start) < 0.05 && Math.abs(s.end - seg.end) < 0.05);
+    }
+    if (idx === -1) {
+      idx = segs.indexOf(seg);
+    }
+    if (idx !== -1) {
+      this.selectedSubtitleIndex.set(idx);
+      this.selectedSubtitleId.set(this.getSubtitleId(segs[idx]));
+      this.selectedOverlayId.set(null);
+      this.selectedClipIds.set([]);
+      
+      const s = segs[idx];
+      this.subtitleInspectorData = {
+        index: idx,
+        text: s.text,
+        start: Number(s.start.toFixed(2)),
+        end: Number(s.end.toFixed(2)),
+        duration: Number((s.end - s.start).toFixed(2))
+      };
+      
+      const v = this.videoRef?.nativeElement;
+      if (v && !v.seeking) {
+        v.currentTime = s.start;
+      }
+      this.currentTime.set(s.start);
+      console.log(`%c[SUBTITLE:SELECTED] Segment #${idx}: "${s.text}" [${s.start}s - ${s.end}s]`, 'color: #f59e0b; font-weight: bold;');
+    }
+  }
+
+  clearSubtitleSelection(): void {
+    this.selectedSubtitleIndex.set(null);
+    this.selectedSubtitleId.set(null);
+    this.subtitleInspectorData = { index: -1, text: '', start: 0, end: 0, duration: 0 };
+  }
+
+  isSelectedSubtitle(seg: any): boolean {
+    const id = this.selectedSubtitleId();
+    if (!id) return false;
+    return this.getSubtitleId(seg) === id;
+  }
+
+  onSubtitleTextChange(): void {
+    const idx = this.subtitleInspectorData.index;
+    const segs = this.activeEdl()?.transcript?.segments;
+    if (idx >= 0 && segs && segs[idx]) {
+      segs[idx].text = this.subtitleInspectorData.text;
+    }
+  }
+
+  onSubtitleStartChange(): void {
+    const s = Number(this.subtitleInspectorData.start);
+    const d = Number(this.subtitleInspectorData.duration);
+    if (!isNaN(s) && !isNaN(d)) {
+      this.subtitleInspectorData.end = Number((s + d).toFixed(2));
+      const idx = this.subtitleInspectorData.index;
+      const segs = this.activeEdl()?.transcript?.segments;
+      if (idx >= 0 && segs && segs[idx]) {
+        segs[idx].start = s;
+        segs[idx].end = this.subtitleInspectorData.end;
+      }
+    }
+  }
+
+  onSubtitleEndChange(): void {
+    const s = Number(this.subtitleInspectorData.start);
+    const e = Number(this.subtitleInspectorData.end);
+    if (!isNaN(s) && !isNaN(e) && e > s) {
+      this.subtitleInspectorData.duration = Number((e - s).toFixed(2));
+      const idx = this.subtitleInspectorData.index;
+      const segs = this.activeEdl()?.transcript?.segments;
+      if (idx >= 0 && segs && segs[idx]) {
+        segs[idx].end = e;
+      }
+    }
+  }
+
+  onSubtitleDurationChange(): void {
+    const s = Number(this.subtitleInspectorData.start);
+    const d = Number(this.subtitleInspectorData.duration);
+    if (!isNaN(s) && !isNaN(d) && d > 0) {
+      this.subtitleInspectorData.end = Number((s + d).toFixed(2));
+      const idx = this.subtitleInspectorData.index;
+      const segs = this.activeEdl()?.transcript?.segments;
+      if (idx >= 0 && segs && segs[idx]) {
+        segs[idx].end = this.subtitleInspectorData.end;
+      }
+    }
+  }
+
+  saveSubtitleInspector(): void {
+    const idx = this.subtitleInspectorData.index;
+    const edl = this.activeEdl();
+    if (idx < 0 || !edl?.transcript?.segments || idx >= edl.transcript.segments.length) return;
+
+    const seg = edl.transcript.segments[idx];
+    seg.text = this.subtitleInspectorData.text.trim();
+    seg.start = Number(this.subtitleInspectorData.start);
+    seg.end = Number(this.subtitleInspectorData.end);
+
+    this.edlService.patchEdl(this.projectId, { transcript: edl.transcript } as any).subscribe({
+      next: () => {
+        console.log('[SUBTITLE] Altyazı kaydedildi:', seg);
+        this.loadEdl();
+      },
+      error: (err) => console.error('[SUBTITLE] Altyazı kaydetme hatası:', err)
+    });
+  }
+
+  convertSubtitleToOverlay(): void {
+    const idx = this.subtitleInspectorData.index;
+    const edl = this.activeEdl();
+    if (idx < 0 || !edl?.transcript?.segments || idx >= edl.transcript.segments.length) return;
+
+    const seg = edl.transcript.segments[idx];
+    const newOverlayId = `ov_sub_${Date.now()}`;
+    const start = Number(this.subtitleInspectorData.start);
+    const end = Number(this.subtitleInspectorData.end);
+    const duration = Math.max(0.5, end - start);
+
+    const newOverlay: OverlayItem = {
+      id: newOverlayId,
+      type: 'text',
+      content: this.subtitleInspectorData.text || seg.text,
+      timestamp: start,
+      duration: duration,
+      color: this.subtitleColor() || '#FFFFFF',
+      fontSize: 42,
+      font: this.subtitleFont() || 'Montserrat',
+      positionX: 50,
+      positionY: this.subtitlePositionY() || 85,
+      animation: 'pop-up',
+      exitAnimation: 'fade',
+      trackId: 1
+    };
+
+    edl.transcript.segments.splice(idx, 1);
+    const overlays = [...(edl.overlays || []), newOverlay];
+
+    this.edlService.patchEdl(this.projectId, {
+      transcript: edl.transcript,
+      overlays: overlays as any
+    } as any).subscribe({
+      next: () => {
+        this.clearSubtitleSelection();
+        this.loadEdl();
+        setTimeout(() => {
+          this.selectOverlay(newOverlayId);
+        }, 300);
+      },
+      error: (err) => console.error('[SUBTITLE] Katmana dönüştürme hatası:', err)
+    });
+  }
+
+  deleteSubtitleSegment(): void {
+    const idx = this.subtitleInspectorData.index;
+    const edl = this.activeEdl();
+    if (idx < 0 || !edl?.transcript?.segments || idx >= edl.transcript.segments.length) return;
+
+    if (confirm('Bu altyazı parçasını silmek istediğinize emin misiniz?')) {
+      edl.transcript.segments.splice(idx, 1);
+      this.edlService.patchEdl(this.projectId, { transcript: edl.transcript } as any).subscribe({
+        next: () => {
+          this.clearSubtitleSelection();
+          this.loadEdl();
+        },
+        error: (err) => console.error('[SUBTITLE] Altyazı silme hatası:', err)
+      });
+    }
+  }
+
+  onSubtitleDragStart(event: MouseEvent, seg: any): void {
+     if (event.button !== 0) return;
+     event.stopPropagation();
+     this.selectSubtitle(seg);
+     this.isDraggingSubtitle = true;
+     this.dragStartX = event.clientX;
+     this.dragStartY = event.clientY;
+     this.dragSubtitleOriginalStart = seg.start;
+     this.dragSubtitleOriginalEnd = seg.end;
+  }
+
+  onSubtitleResizeStart(event: MouseEvent, seg: any, edge: 'left' | 'right'): void {
+     if (event.button !== 0) return;
+     event.stopPropagation();
+     this.selectSubtitle(seg);
+     this.isResizingSubtitle = true;
+     this.subtitleResizeEdge = edge;
+     this.dragStartX = event.clientX;
+     this.dragSubtitleOriginalStart = seg.start;
+     this.dragSubtitleOriginalEnd = seg.end;
   }
 
   getVisibleSubtitleSegments(): any[] {
@@ -2718,6 +3155,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   selectClip(clipId: string, event: MouseEvent): void {
     event.stopPropagation();
+    this.clearSubtitleSelection();
     this.selectedOverlayId.set(null);
     const current = this.selectedClipIds();
     
@@ -3210,6 +3648,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   selectOverlay(id: string): void {
+     this.clearSubtitleSelection();
      this.selectedOverlayId.set(id);
      const ov = this.activeEdl()?.overlays?.find(o => o.id === id);
      if (ov) {
@@ -3733,6 +4172,40 @@ export class EditorComponent implements OnInit, OnDestroy {
          return;
      }
      
+     if (this.isDraggingSubtitle || this.isResizingSubtitle) {
+        const seg = this.selectedSubtitle();
+        if (!seg) return;
+
+        const track = this.timelineTrackRef?.nativeElement;
+        if (!track) return;
+        const rect = track.getBoundingClientRect();
+        const pixelsPerSec = rect.width / this.totalDuration();
+        const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
+
+        if (this.isDraggingSubtitle) {
+           const dur = this.dragSubtitleOriginalEnd - this.dragSubtitleOriginalStart;
+           let newStart = Math.max(0, this.dragSubtitleOriginalStart + deltaSec);
+           let newEnd = newStart + dur;
+           seg.start = parseFloat(newStart.toFixed(2));
+           seg.end = parseFloat(newEnd.toFixed(2));
+           this.subtitleInspectorData.start = seg.start;
+           this.subtitleInspectorData.end = seg.end;
+        } else if (this.isResizingSubtitle) {
+           if (this.subtitleResizeEdge === 'left') {
+              let newStart = Math.max(0, Math.min(this.dragSubtitleOriginalEnd - 0.2, this.dragSubtitleOriginalStart + deltaSec));
+              seg.start = parseFloat(newStart.toFixed(2));
+              this.subtitleInspectorData.start = seg.start;
+              this.subtitleInspectorData.duration = parseFloat((seg.end - seg.start).toFixed(2));
+           } else {
+              let newEnd = Math.max(this.dragSubtitleOriginalStart + 0.2, this.dragSubtitleOriginalEnd + deltaSec);
+              seg.end = parseFloat(newEnd.toFixed(2));
+              this.subtitleInspectorData.end = seg.end;
+              this.subtitleInspectorData.duration = parseFloat((seg.end - seg.start).toFixed(2));
+           }
+        }
+        return;
+     }
+
      if (!this.isDraggingOverlay && !this.isResizingOverlay) return;
      
      const ovId = this.selectedOverlayId();
@@ -3844,6 +4317,22 @@ export class EditorComponent implements OnInit, OnDestroy {
          return;
      }
      
+     if (this.isDraggingSubtitle || this.isResizingSubtitle) {
+         this.isDraggingSubtitle = false;
+         this.isResizingSubtitle = false;
+         this.subtitleResizeEdge = null;
+
+         const edl = this.activeEdl();
+         if (edl?.transcript) {
+            this.edlService.patchEdl(this.projectId, {
+               transcript: edl.transcript
+            } as any).subscribe(() => {
+               this.loadEdl();
+            });
+         }
+         return;
+     }
+
      if (this.isDraggingOverlay || this.isResizingOverlay) {
          this.isDraggingOverlay = false;
          this.isResizingOverlay = false;

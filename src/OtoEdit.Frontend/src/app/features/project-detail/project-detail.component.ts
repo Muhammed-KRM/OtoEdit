@@ -90,7 +90,7 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
               </div>
 
               <h3 class="text-base font-bold text-white mb-1">Ham Videoyu Buraya Sürükleyin</h3>
-              <p class="text-xs text-slate-400 mb-4">MP4, MOV veya MKV (Azami 2 GB)</p>
+              <p class="text-xs text-slate-400 mb-4">MP4, MOV veya MKV (Azami 50 GB)</p>
               
               <button 
                 type="button"

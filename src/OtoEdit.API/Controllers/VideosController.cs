@@ -18,8 +18,8 @@ public class VideosController : ControllerBase
     /// Projeye ham video dosyası yükler ve analiz sürecini başlatır.
     /// </summary>
     [HttpPost("api/projects/{projectId:guid}/videos")]
-    [RequestSizeLimit(2147483648)] // 2GB
-    [RequestFormLimits(MultipartBodyLengthLimit = 2147483648)]
+    [RequestSizeLimit(53687091200L)] // 50GB
+    [RequestFormLimits(MultipartBodyLengthLimit = 53687091200L)]
     [ProducesResponseType(typeof(VideoListDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

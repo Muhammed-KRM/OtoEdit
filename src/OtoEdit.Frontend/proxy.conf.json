@@ -2,7 +2,9 @@
   "/api": {
     "target": "http://localhost:5001",
     "secure": false,
-    "changeOrigin": true
+    "changeOrigin": true,
+    "timeout": 1800000,
+    "proxyTimeout": 1800000
   },
   "/pipeline-hub": {
     "target": "http://localhost:5001",

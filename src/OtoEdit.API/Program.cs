@@ -52,16 +52,16 @@ builder.Services.AddSwaggerGen();
 // 3. SignalR Canlı Bildirim
 builder.Services.AddSignalR();
 
-// 4. Kestrel 2GB Limitleri
+// 4. Kestrel Request Body Limitleri (Azami 50GB)
 builder.WebHost.ConfigureKestrel(serverOptions =>
 {
-    serverOptions.Limits.MaxRequestBodySize = 2147483648; // 2GB
+    serverOptions.Limits.MaxRequestBodySize = 53687091200L; // 50GB
 });
 
 builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(options =>
 {
     options.ValueLengthLimit = int.MaxValue;
-    options.MultipartBodyLengthLimit = 2147483648; // 2GB
+    options.MultipartBodyLengthLimit = 53687091200L; // 50GB
     options.MultipartHeadersLengthLimit = int.MaxValue;
 });
 
