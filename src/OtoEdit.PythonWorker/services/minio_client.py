@@ -46,6 +46,10 @@ class MinioClient:
             filename = Path(object_key).name
             local_path = str(Config.TEMP_DIR / filename)
 
+        if os.path.exists(local_path) and os.path.getsize(local_path) > 1024 * 1024:
+            logger.info(f"⚡ Dosya zaten yerel diskte mevcut, MinIO indirme atlandı: {local_path}")
+            return local_path
+
         try:
             logger.info(f"MinIO indirme başlıyor: {object_key} -> {local_path}")
             self.client.fget_object(self.bucket_name, object_key, local_path)

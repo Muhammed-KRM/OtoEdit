@@ -10,6 +10,7 @@ from config import Config
 from render.video_renderer import VideoRenderer
 from services.minio_client import MinioClient
 from services.rabbitmq_publisher import RabbitMQPublisher
+from consumers.heartbeat_manager import RabbitHeartbeatKeeper
 from utils.constants import PipelineStage, RabbitMQConstants
 from utils.logger import get_logger
 
@@ -20,6 +21,7 @@ class RenderConsumer:
     """RabbitMQ'dan RenderRequestedEvent dinler, EDL JSON'a göre FFmpeg render yapar ve sonucu MinIO'ya yükler."""
 
     def __init__(self):
+        self._connection = None
         self.minio = MinioClient()
         self.publisher = RabbitMQPublisher()
         self.renderer = VideoRenderer(self.minio)
@@ -32,11 +34,12 @@ class RenderConsumer:
             port=Config.RABBITMQ_PORT,
             virtual_host=Config.RABBITMQ_VHOST,
             credentials=credentials,
-            heartbeat=60,
-            blocked_connection_timeout=300
+            heartbeat=0,
+            blocked_connection_timeout=0
         )
 
-        connection = pika.BlockingConnection(parameters)
+        self._connection = pika.BlockingConnection(parameters)
+        connection = self._connection
         channel = connection.channel()
 
         # Worker render kuyruğunu tanımla
@@ -77,6 +80,10 @@ class RenderConsumer:
                 edl_json = {}
 
         logger.info(f"🎬 RenderRequestedEvent alındı: RenderJobId={render_job_id}, ProjectId={project_id}")
+
+        # 💓 RabbitMQ Arka Plan Nabız Koruyucusu (Render sürerken soket kopmasını önler)
+        heartbeat = RabbitHeartbeatKeeper(self._connection, interval_sec=10.0)
+        heartbeat.start()
 
         try:
             self._publish_progress(render_job_id, project_id, 10, "Kaynak video indiriliyor...")
@@ -120,6 +127,8 @@ class RenderConsumer:
             logger.error(f"❌ Render işlemi başarısız oldu (RenderJobId={render_job_id}): {e}", exc_info=True)
             self.publisher.publish_pipeline_error(project_id, render_job_id, "Render", str(e))
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        finally:
+            heartbeat.stop()
 
     def _resolve_source_video(self, project_id: str, video_id: str, source_url: str) -> str:
         """MinIO veya yerel yoldan kaynak videoyu temin eder."""
