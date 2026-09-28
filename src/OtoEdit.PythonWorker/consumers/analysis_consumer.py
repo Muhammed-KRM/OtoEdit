@@ -240,23 +240,37 @@ class AnalysisConsumer:
 
             def _run_repurposing():
                 logger.info("🧵 Thread: Repurposing (viral klip) analizi başladı")
-                res = self.repurposing.analyze(transcript)
-                logger.info(f"🧵 Thread: Repurposing bitti ({len(res)} klip)")
-                return res
+                try:
+                    res = self.repurposing.analyze(transcript)
+                    clip_count = len(res.clips) if hasattr(res, 'clips') else (len(res) if isinstance(res, list) else 0)
+                    logger.info(f"🧵 Thread: Repurposing bitti ({clip_count} klip)")
+                    return res
+                except Exception as ex:
+                    logger.warning(f"Repurposing analizi sırasında hata (fallback uygulandı): {ex}")
+                    from models.edl_model import RepurposingData
+                    return RepurposingData(clips=[])
 
             def _run_suggestions():
                 logger.info("🧵 Thread: Öneri motoru başladı")
-                res = self.suggestion_engine.generate_suggestions(transcript)
-                logger.info(f"🧵 Thread: Öneri motoru bitti ({len(res)} öneri)")
-                return res
+                try:
+                    res = self.suggestion_engine.generate_suggestions(transcript)
+                    logger.info(f"🧵 Thread: Öneri motoru bitti ({len(res) if isinstance(res, list) else 0} öneri)")
+                    return res
+                except Exception as ex:
+                    logger.warning(f"Öneri motoru hatası (ihmal edildi): {ex}")
+                    return []
 
             def _run_broll():
                 if not auto_broll:
                     return []
                 logger.info("🧵 Thread: B-Roll katmanı başladı")
-                res = self.auto_broll_engine.generate_broll_overlays(transcript, video_format_str=fmt_str)
-                logger.info(f"🧵 Thread: B-Roll katmanı bitti ({len(res)} katman)")
-                return res
+                try:
+                    res = self.auto_broll_engine.generate_broll_overlays(transcript, video_format_str=fmt_str)
+                    logger.info(f"🧵 Thread: B-Roll katmanı bitti ({len(res) if isinstance(res, list) else 0} katman)")
+                    return res
+                except Exception as ex:
+                    logger.warning(f"B-Roll katmanı hatası (ihmal edildi): {ex}")
+                    return []
 
             with concurrent.futures.ThreadPoolExecutor(max_workers=5, thread_name_prefix="AnalysisGroup2") as executor:
                 f_retake = executor.submit(_run_retakes)
@@ -270,6 +284,10 @@ class AnalysisConsumer:
                 repurposing_data = f_repurpose.result()
                 suggestions = f_sugg.result()
                 broll_overlays = f_broll.result()
+
+            from models.edl_model import RepurposingData
+            if not isinstance(repurposing_data, RepurposingData):
+                repurposing_data = RepurposingData(clips=[])
 
             # -------------------------------------------------------------
             # EDL Oluşturma (Tüm paralel sonuçları birleştir)

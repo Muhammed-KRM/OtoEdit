@@ -21,7 +21,7 @@ class GeminiClient:
                 import importlib
                 genai = importlib.import_module("google.generativeai")
                 genai.configure(api_key=self.api_key)
-                model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+                model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
                 self.model = genai.GenerativeModel(model_name)
                 logger.info(f"Gemini API istemcisi başarıyla yapılandırıldı. Model: {model_name}")
             except Exception as e:

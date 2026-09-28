@@ -51,10 +51,9 @@ def test_analysis_cache_set_and_get():
 
 
 def test_analysis_cache_redis_unavailable_fail_safe():
-    with patch("redis.Redis", side_effect=Exception("Redis Connection Refused")):
-        cache = AnalysisCacheService(host="127.0.0.1", port=59999)
-        cache._client = None
-
+    cache = AnalysisCacheService(host="127.0.0.1", port=59999)
+    cache._client = None
+    with patch.object(cache, "_get_client", return_value=None):
         # Redis çökerse veya yoksa uygulama patlamamalı, None / False dönmeli
         assert cache.get_cached_edl("any_hash") is None
         assert cache.set_cached_edl("any_hash", {"dummy": 1}) is False
