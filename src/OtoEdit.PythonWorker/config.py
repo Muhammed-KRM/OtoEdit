@@ -34,6 +34,16 @@ class Config:
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
     PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 
+    # Redis Önbellek & Idempotency
+    REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+    REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+    REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+    REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+
+    # Backend API URL (Fail-Safe Pipeline Logging & SignalR)
+    API_BASE_URL = os.getenv("API_BASE_URL", "http://host.docker.internal:5000")
+    INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "otoedit-internal-secret-key-2026")
+
     # Performans ve Algılama Eşikleri
     GESTURE_FRAME_SKIP = int(os.getenv("GESTURE_FRAME_SKIP", "8"))
     GESTURE_CONFIDENCE = float(os.getenv("GESTURE_CONFIDENCE", "0.7"))
