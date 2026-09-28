@@ -77,6 +77,13 @@ services:
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
     volumes:
       - ./src/OtoEdit.PythonWorker:/app
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     restart: unless-stopped
 
 volumes:

@@ -28,16 +28,29 @@ class MultimodalCommandEngine:
         self.voice_parser = VoiceCommandParser()
 
     def detect(self, video_path: str, transcript: TranscriptResult) -> List[ParsedCommand]:
-        """Video ve transkripti paralel analiz edip sadece eşzamanlı onaylanan komutları döner."""
+        """Video ve transkripti analiz edip sadece eşzamanlı onaylanan komutları döner."""
         logger.info(f"Çoklu-modal komut algılama başlatılıyor: {video_path}")
 
-        # 1. El hareketlerini tespit et
-        gestures = self.gesture_detector.detect_gestures(video_path)
-
-        # 2. Sesli komut adaylarını transkriptten çıkar
+        # 1. Sesli komut adaylarını transkriptten çıkar (Önce metin kontrolü - Çok Hızlı)
         voice_commands = self.voice_parser.parse_transcript(transcript)
+        if not voice_commands:
+            logger.info("⚡ [SmartWindowing] Transkriptte hiçbir sesli komut adayı bulunamadı. 1 Saatlik videoyu taramaya gerek yok (Tasarruf: %100).")
+            return []
 
-        # 3. İkisini eşzamanlılık (synchronicity) filtresinden geçir
+        # 2. Akıllı Pencereleme: Yalnızca sesli komutların etrafındaki ±tolerans saniyelerini tara
+        target_windows = []
+        for vc in voice_commands:
+            ts = vc.timestamp or 0.0
+            start_win = max(0.0, ts - self.tolerance_seconds - 0.5)
+            end_win = ts + self.tolerance_seconds + 0.5
+            target_windows.append((start_win, end_win))
+
+        logger.info(f"🎯 [SmartWindowing] {len(voice_commands)} sesli komut adayı için {len(target_windows)} zaman aralığı MediaPipe ile taranıyor...")
+
+        # 3. Yalnızca hedef zaman aralıklarında el hareketlerini tespit et
+        gestures = self.gesture_detector.detect_gestures(video_path, target_windows=target_windows)
+
+        # 4. İkisini eşzamanlılık (synchronicity) filtresinden geçir
         confirmed_commands = []
 
         for g in gestures:

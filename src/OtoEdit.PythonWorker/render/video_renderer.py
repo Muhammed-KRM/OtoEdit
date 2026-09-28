@@ -106,9 +106,11 @@ class VideoRenderer:
             out = ffmpeg.output(
                 v_stream, a_stream, output_path,
                 vcodec='h264_nvenc', preset='p4',
-                acodec='aac', audio_bitrate='192k'
+                acodec='aac', audio_bitrate='192k',
+                pix_fmt='yuv420p'
             )
             out.run(overwrite_output=True, quiet=True)
+            logger.info("✅ Donanım hızlandırmalı (NVENC) render başarıyla tamamlandı.")
             return
         except Exception as nvenc_err:
             logger.warning(f"NVENC render başarısız oldu veya GPU bulunamadı ({nvenc_err}). libx264 (CPU) moduna geçiliyor.")

@@ -12,10 +12,10 @@ class FaceTracker:
         self.deadzone = deadzone      # Ani mikro titremeleri yok sayan ölü bölge eşiği
         self.ema_alpha = ema_alpha    # Yumuşatma katsayısı (küçük değer daha pürüzsüz)
 
-    def track(self, video_path: str) -> List[Dict[str, Any]]:
+    def track(self, video_path: str, sample_interval_sec: float = 0.4) -> List[Dict[str, Any]]:
         """Video boyunca konuşmacının yüzünü tespit eder ve yumuşatılmış X merkez koordinatlarını döner."""
         tracking_data = []
-        logger.info(f"Yüz takibi (Face Tracking) başlıyor: {video_path}")
+        logger.info(f"Yüz takibi (Face Tracking) başlıyor: {video_path} (Örnekleme aralığı: {sample_interval_sec}sn)")
 
         try:
             import importlib
@@ -30,19 +30,16 @@ class FaceTracker:
                 return tracking_data
 
             fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            step_frames = max(1, int(fps * sample_interval_sec))
             frame_idx = 0
             previous_x = 0.5  # Başlangıçta ekranın tam ortası varsayılır
 
             with mp_face.FaceDetection(model_selection=1, min_detection_confidence=0.6) as face_detection:
                 while cap.isOpened():
+                    cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
                     ret, frame = cap.read()
                     if not ret:
                         break
-
-                    # Her 4 frame'de bir analiz et (performans optimizasyonu)
-                    if frame_idx % 4 != 0:
-                        frame_idx += 1
-                        continue
 
                     timestamp = round(frame_idx / fps, 2)
                     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -74,7 +71,7 @@ class FaceTracker:
                         "smoothed_crop_x": round(smoothed_x, 4)
                     })
 
-                    frame_idx += 1
+                    frame_idx += step_frames
 
             cap.release()
             logger.info(f"Yüz takibi tamamlandı: {len(tracking_data)} koordinat noktası hesaplandı.")

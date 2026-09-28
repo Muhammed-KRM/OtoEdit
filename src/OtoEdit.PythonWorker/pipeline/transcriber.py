@@ -100,8 +100,23 @@ class Transcriber:
             import importlib
             fw_mod = importlib.import_module("faster_whisper")
             whisper_model_cls = getattr(fw_mod, "WhisperModel")
-            logger.info("Yerel faster-whisper modeli ile transkripsiyon başlatılıyor (model='base', device='cpu', compute_type='int8')...")
-            local_model = whisper_model_cls("base", device="cpu", compute_type="int8")
+
+            # 🚀 GPU (CUDA) Otomatik Algılama
+            device = "cpu"
+            compute_type = "int8"
+            try:
+                ct2 = importlib.import_module("ctranslate2")
+                if ct2.get_cuda_device_count() > 0:
+                    device = "cuda"
+                    compute_type = "float16"
+                    logger.info("🚀 [Transcriber] NVIDIA CUDA GPU algılandı! Donanım hızlandırma devrede (device='cuda', compute_type='float16').")
+                else:
+                    logger.info("ℹ️ [Transcriber] CUDA GPU bulunamadı, CPU modunda çalışılacak (device='cpu', compute_type='int8').")
+            except Exception:
+                pass
+
+            logger.info(f"Yerel faster-whisper modeli ile transkripsiyon başlatılıyor (model='base', device='{device}', compute_type='{compute_type}')...")
+            local_model = whisper_model_cls("base", device=device, compute_type=compute_type)
             segments_iter, info = local_model.transcribe(
                 audio_path,
                 language="tr",
