@@ -19,6 +19,7 @@ from pipeline.suggestion_engine import SuggestionEngine
 from pipeline.transcriber import Transcriber
 from services.minio_client import MinioClient
 from services.rabbitmq_publisher import RabbitMQPublisher
+from consumers.heartbeat_manager import RabbitHeartbeatKeeper
 from utils.constants import PipelineStage, RabbitMQConstants
 from utils.logger import get_logger
 
@@ -29,6 +30,7 @@ class AnalysisConsumer:
     """RabbitMQ'dan VideoUploadedEvent dinler ve tam otomatik analiz pipeline'ını yürütür."""
 
     def __init__(self):
+        self._connection = None
         self.minio = MinioClient()
         self.publisher = RabbitMQPublisher()
         self.audio_enhancer = AudioEnhancer()
@@ -54,7 +56,8 @@ class AnalysisConsumer:
             blocked_connection_timeout=0
         )
 
-        connection = pika.BlockingConnection(parameters)
+        self._connection = pika.BlockingConnection(parameters)
+        connection = self._connection
         channel = connection.channel()
 
         # Worker kuyruğu tanımla
@@ -99,6 +102,10 @@ class AnalysisConsumer:
         auto_subtitles = bool(msg.get("autoSubtitlesEnabled", False))
 
         logger.info(f"🎬 VideoUploadedEvent alındı: VideoId={video_id}, ProjectId={project_id}, Format={video_format}, JumpCut={auto_jumpcut}, Retake={auto_retake}, BRoll={auto_broll}, Subs={auto_subtitles}")
+
+        # 💓 RabbitMQ Arka Plan Nabız Koruyucusu (Uzun analizlerde soket kopmasını önler)
+        heartbeat = RabbitHeartbeatKeeper(self._connection, interval_sec=10.0)
+        heartbeat.start()
 
         try:
             # 1. Ham videoyu MinIO'dan indir
@@ -188,11 +195,20 @@ class AnalysisConsumer:
             logger.error(f"❌ Analiz pipeline hatası (VideoId={video_id}): {e}", exc_info=True)
             self.publisher.publish_pipeline_error(project_id, video_id, "Analiz", str(e))
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+        finally:
+            heartbeat.stop()
 
     def _extract_audio_peaks(self, audio_path: str, num_peaks: int = 1000) -> list:
         try:
-            from pydub import AudioSegment
-            audio = AudioSegment.from_file(audio_path)
+            # 🚀 Önbellekteki ses varsa diskten tekrar okuma
+            cached_audio = getattr(self.retake_detector.scorer, "_cached_audio", None)
+            cached_path = getattr(self.retake_detector.scorer, "_cached_path", None)
+            if cached_audio is not None and cached_path == audio_path:
+                audio = cached_audio
+            else:
+                from pydub import AudioSegment
+                audio = AudioSegment.from_file(audio_path)
+
             data = np.array(audio.get_array_of_samples(), dtype=np.float32)
             
             if audio.channels > 1:

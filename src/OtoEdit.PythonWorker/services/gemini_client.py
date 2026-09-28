@@ -1,6 +1,8 @@
+import os
 import json
 import re
-from typing import List, Dict, Any
+import time
+from typing import List, Dict, Any, Optional
 from config import Config
 from utils.logger import get_logger
 
@@ -19,13 +21,31 @@ class GeminiClient:
                 import importlib
                 genai = importlib.import_module("google.generativeai")
                 genai.configure(api_key=self.api_key)
-                model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+                model_name = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
                 self.model = genai.GenerativeModel(model_name)
                 logger.info(f"Gemini API istemcisi başarıyla yapılandırıldı. Model: {model_name}")
             except Exception as e:
                 logger.warning(f"Gemini API başlatılamadı, fallback modu kullanılacak: {e}")
         else:
             logger.warning("GEMINI_API_KEY tanımlı değil. Fallback motoru aktif.")
+
+    def _execute_with_retry(self, prompt: str, max_retries: int = 3) -> Optional[str]:
+        """Ağ veya Rate Limit durumlarında Exponential Backoff ile tekrar dener."""
+        delay = 2.0
+        for attempt in range(1, max_retries + 1):
+            try:
+                response = self.model.generate_content(prompt)
+                if response and hasattr(response, "text"):
+                    return response.text
+                return None
+            except Exception as ex:
+                logger.warning(f"Gemini API çağrı denemesi #{attempt} başarısız: {ex}")
+                if attempt < max_retries:
+                    time.sleep(delay)
+                    delay *= 2.0
+                else:
+                    logger.error(f"Gemini API tüm denemeler ({max_retries}) tükendi: {ex}")
+        return None
 
     def find_viral_clips(self, transcript_text: str, duration: float) -> List[Dict[str, Any]]:
         """Transkriptten en viral 30sn (Reels) ve 90sn (Shorts) bölümleri çıkarır."""
@@ -69,12 +89,12 @@ class GeminiClient:
         """
 
         try:
-            response = self.model.generate_content(prompt)
-            clean_json = self._extract_json(response.text)
-            parsed = json.loads(clean_json)
-            if isinstance(parsed, list):
-                logger.info(f"Gemini {len(parsed)} viral klip tespit etti.")
-                return parsed
+            raw_text = self._execute_with_retry(prompt)
+            if raw_text:
+                parsed = self._safe_parse_json(raw_text)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    logger.info(f"Gemini {len(parsed)} viral klip tespit etti.")
+                    return parsed
         except Exception as e:
             logger.error(f"Gemini viral klip analiz hatası: {e}", exc_info=True)
 
@@ -120,23 +140,49 @@ class GeminiClient:
         """
 
         try:
-            response = self.model.generate_content(prompt)
-            clean_json = self._extract_json(response.text)
-            parsed = json.loads(clean_json)
-            if isinstance(parsed, list):
-                logger.info(f"Gemini {len(parsed)} akıllı öneri üretti.")
-                return parsed
+            raw_text = self._execute_with_retry(prompt)
+            if raw_text:
+                parsed = self._safe_parse_json(raw_text)
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    logger.info(f"Gemini {len(parsed)} akıllı öneri üretti.")
+                    return parsed
         except Exception as e:
             logger.error(f"Gemini öneri üretim hatası: {e}", exc_info=True)
 
         return self._fallback_suggestions(duration)
 
+    @classmethod
+    def _safe_parse_json(cls, text: str) -> Any:
+        """Markdown ve format bozukluklarını temizleyerek güvenli JSON çözer."""
+        cleaned = cls._extract_json(text)
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Trailing comma veya ufak sözdizim hatalarını temizle
+            fixed = re.sub(r',\s*([\]}])', r'\1', cleaned)
+            try:
+                return json.loads(fixed)
+            except json.JSONDecodeError as err:
+                logger.error(f"JSON Çözme Hatası: {err}. Temizlenmiş Metin: {cleaned[:300]}")
+                return None
+
     @staticmethod
     def _extract_json(text: str) -> str:
-        """Markdown kod bloklarını temizleyerek saf JSON çıkarır."""
-        match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+        """Markdown kod bloklarını veya metin içi JSON dizilerini ayıklar."""
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text, re.IGNORECASE)
         if match:
             return match.group(1).strip()
+
+        # Doğrudan [ ... ] veya { ... } ara
+        first_bracket = min(
+            (text.find('['), text.find('{')),
+            key=lambda x: x if x != -1 else float('inf')
+        )
+        if first_bracket != float('inf'):
+            last_bracket = max(text.rfind(']'), text.rfind('}'))
+            if last_bracket > first_bracket:
+                return text[first_bracket:last_bracket + 1].strip()
+
         return text.strip()
 
     @staticmethod
