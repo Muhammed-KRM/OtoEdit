@@ -168,7 +168,7 @@ class VideoRenderer:
 
         try:
             logger.info("Donanım hızlandırmalı (NVENC) render yürütülüyor...")
-            res = subprocess.run(nvenc_cmd, capture_output=True, text=True)
+            res = subprocess.run(nvenc_cmd, capture_output=True, text=True, timeout=7200)
             if res.returncode == 0:
                 logger.info("✅ Donanım hızlandırmalı (NVENC) render başarıyla tamamlandı.")
                 return
@@ -191,7 +191,7 @@ class VideoRenderer:
             "-b:a", "192k",
             output_path
         ]
-        res = subprocess.run(cpu_cmd, capture_output=True, text=True)
+        res = subprocess.run(cpu_cmd, capture_output=True, text=True, timeout=7200)
         if res.returncode != 0:
             logger.error(f"FFmpeg CPU Render Hatası: {res.stderr}")
             raise RuntimeError(f"FFmpeg render hatası: {res.stderr[-500:]}")
@@ -220,7 +220,7 @@ class VideoRenderer:
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", output_path
         ]
         try:
-            res = subprocess.run(nvenc_cmd, capture_output=True, text=True)
+            res = subprocess.run(nvenc_cmd, capture_output=True, text=True, timeout=7200)
             if res.returncode == 0:
                 logger.info("✅ Doğrudan NVENC render başarıyla tamamlandı.")
                 return
@@ -232,7 +232,7 @@ class VideoRenderer:
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "22",
             "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", output_path
         ]
-        res = subprocess.run(cpu_cmd, capture_output=True, text=True)
+        res = subprocess.run(cpu_cmd, capture_output=True, text=True, timeout=7200)
         if res.returncode != 0:
             raise RuntimeError(f"FFmpeg doğrudan render hatası: {res.stderr[-500:]}")
 
