@@ -17,3 +17,6 @@ faster-whisper>=1.0.0
 scipy>=1.10.0
 redis>=5.0.0
 tenacity>=8.2.0
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+nvidia-cuda-nvrtc-cu12

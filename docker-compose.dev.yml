@@ -76,6 +76,7 @@ services:
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - PEXELS_API_KEY=${PEXELS_API_KEY:-}
       - NVIDIA_DRIVER_CAPABILITIES=all
+      - LD_LIBRARY_PATH=/usr/local/lib/python3.11/site-packages/nvidia/cublas/lib:/usr/local/lib/python3.11/site-packages/nvidia/cudnn/lib
     volumes:
       - ./src/OtoEdit.PythonWorker:/app
     deploy:

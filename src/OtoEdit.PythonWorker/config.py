@@ -39,6 +39,7 @@ class Config:
     REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
     REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
     REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+    ENABLE_ANALYSIS_CACHE = os.getenv("ENABLE_ANALYSIS_CACHE", "false").lower() in ("true", "1", "yes")
 
     # Backend API URL (Fail-Safe Pipeline Logging & SignalR)
     API_BASE_URL = os.getenv("API_BASE_URL", "http://host.docker.internal:5000")

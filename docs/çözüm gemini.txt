@@ -1,0 +1,201 @@
+# OtoEdit: Donanım Tabanlı (GPU/VRAM) Kurgu Motoru ve Sistem Optimizasyon Raporu
+
+---
+
+## 1. Mevcut Darboğazın Kök Neden Analizi (Root Cause Analysis)
+
+Videolarınızın yüzlerce parçaya bölündüğü senaryolarda render süresinin 1 dakikadan 30-40 dakikaya fırlamasının arkasında üç temel mimari sorun yatmaktadır:
+
+```
+[MEVCUT SORUNLU AKIŞ: PING-PONG DARBOĞAZI]
+Disk (MP4) ──> [CPU/RAM Demux] 
+                    │
+                    ▼
+          [NVDEC (VRAM'e Decode)]
+                    │
+     ❌ HWDOWNLOAD  ▼ (Her kare VRAM'den RAM'e kopyalanır - PCIe Doygunluğu)
+           [CPU RAM: filter_complex]
+           - 545 adet trim filtresi
+           - libass (Altyazı çizimi - CPU bound)
+           - concat filtresi (545 dalı birleştirme)
+                    │
+     ❌ HWUPLOAD    ▼ (Pikseller tekrar VRAM'e geri yüklenir)
+          [NVENC (VRAM'de Encode)] ──> Disk (Çıktı MP4)
+
+```
+
+1. **Filtre Grafiği Patlaması (Filtergraph Explosion):**
+FFmpeg’e `[0:v]trim=...[v0]; [0:v]trim=...[v1]; ... concat=n=545` verildiğinde, FFmpeg 545 ayrı filtre düğümü açar. Kaynak videodan gelen her bir kare, bu 545 filtre dalının tamamı tarafından kontrol edilir. Bu durum bellek karmaşıklığını ve işlemci döngülerini $O(N \times \text{Kare Sayısı})$ seviyesine çıkararak CPU çekirdeklerini kilitler.
+2. **PCIe Veri Yolu ve VRAM $\leftrightarrow$ RAM Git-Gel Maliyeti (Ping-Pong Effect):**
+`-hwaccel cuda` veya `h264_cuvid` kullansanız dahi, araya yazılımsal bir filtre (`trim`, `concat` veya `libass`) girdiğinde FFmpeg donanım yüzeyini otomatik olarak CPU RAM'ine indirir (`hwdownload`). 1080p 60fps ham NV12/YUV verisi saniyede ~180 MB, 4K'da ise ~750 MB bant genişliği tüketir. 5 GB'lık sıkıştırılmış bir videonun işlenmesi sırasında PCIe veriyolundan **yüzlerce gigabaytlık ham piksel** taşınır.
+3. **`libass` / `subtitles` Filtresinin CPU Bağımlılığı:**
+FFmpeg içerisindeki `ass` ve `subtitles` filtreleri tamamen CPU üzerinde çalışan `libass` kütüphanesine dayanır. GPU üzerinde doğrudan ASS/SSA rasterizasyonu yapan yerel bir FFmpeg filtresi bulunmamaktadır.
+
+---
+
+## 2. Donanım Bazlı (VRAM-Centric) Kurgu Motoru Çözümü
+
+Premiere Pro, DaVinci Resolve ve CapCut gibi profesyonel NLE (Non-Linear Editor) sistemleri, timeline üzerindeki yüzlerce kesimi filtre dallarına ayırmaz. Bunun yerine **sıralı bir zaman çizgisi yürütücüsü (Sequential Timeline Iterator)** ve **sıfır kopyalı VRAM boru hattı (Zero-Copy VRAM Pipeline)** kullanırlar.
+
+```
+[HEDEFLENEN SIFIR KOPYALI MİMARİ]
+Disk (MP4) ──> [NVDEC: Donanım Çözme]
+                    │
+                    ▼ (Doğrudan VRAM Bellek Adresi / CUDA Pointer)
+         [VRAM İçi Kurgu Motoru (CUDA / PyTorch / CuPy)]
+         - Sıralı EDL Okuma (Tek Decoder, Sadece İlgili Kareler Çözülür)
+         - GPU Texture Overlay (Dinamik Altyazı & B-Roll Alpha Blending)
+         - Scale / Crop / Transform (CUDA Kernel)
+                    │
+                    ▼ (Sıfır RAM Kopyası)
+         [NVENC: Donanım Kodlama] ──> Disk (Çıktı MP4)
+
+```
+
+Bu amaca ulaşmak için uygulanabilecek **3 farklı seviyedeki çözüm yaklaşımı**:
+
+---
+
+### Seviye A: Hızlı & Pragmatik Çözüm — FFmpeg Concat Demuxer + `overlay_cuda`
+
+Mevcut Python Worker kod tabanını tamamen değiştirmeden, sadece FFmpeg komut mimarisini düzelterek süreyi **30-40 dakikadan 1-2 dakikaya** indirebilirsiniz.
+
+#### 1. `filter_complex [trim][concat]` Yerine "Concat Demuxer" Kullanımı
+
+FFmpeg, bir metin dosyasından `inpoint` ve `outpoint` değerlerini okuyarak videoları tek bir akışta sıralı decode edebilir. Bu işlem grafiği şişirmez, bellek kullanımı sabittir ($O(1)$).
+
+`cuts.txt`:
+
+```txt
+ffconcat version 1.0
+file '/path/to/input.mp4'
+inpoint 10.250
+outpoint 14.800
+file '/path/to/input.mp4'
+inpoint 18.100
+outpoint 25.400
+# ... 545 kesim buraya alt alta yazılır
+
+```
+
+#### 2. Altyazıyı GPU'da Bindirme (`overlay_cuda`)
+
+Altyazıyı video üzerine CPU'daki `ass` filtresiyle yakmak yerine:
+
+* Altyazı katmanı Python tarafında şeffaf bir video akışı (örneğin donanım destekli alpha kanallı format veya optimize edilmiş resim dizisi/WebP) olarak hazırlanır.
+* FFmpeg'e ikinci bir girdi olarak verilip `overlay_cuda` ile tamamen VRAM içinde bindirilir:
+
+```bash
+ffmpeg -hwaccel cuda -hwaccel_output_format cuda \
+  -f concat -safe 0 -i cuts.txt \
+  -i subtitles_alpha.mov \
+  -filter_complex "[0:v][1:v]overlay_cuda=0:0" \
+  -c:v h264_nvenc -preset p4 -b:v 6M \
+  -c:a aac output.mp4
+
+```
+
+*Bu sayede pikseller VRAM'den CPU RAM'ine asla inmez.*
+
+---
+
+### Seviye B: Kalıcı & Endüstriyel Çözüm — `PyNvVideoCodec` + CuPy/PyTorch Tabanlı Python NLE Motoru
+
+NVIDIA'nın resmi Python kütüphanesi olan **PyNvVideoCodec**, Video Codec SDK'nın doğrudan Python arayüzüdür. FFmpeg süreç yönetimini (process spawning) aradan çıkararak Python içerisinde saf GPU gücüyle bir NLE motoru inşa etmenizi sağlar.
+
+#### Çalışma Prensibi:
+
+1. **Demux & Donanım Çözme (NVDEC):**
+* Video dosyası açılır. EDL (Edit Decision List) içerisindeki zaman aralıklarına göre `seek` yapılır.
+* `PyNvVideoCodec.Decoder` kareleri doğrudan **CUDA bellek işaretçisi (CUdeviceptr)** olarak VRAM'de döndürür. Kesilen/atlanan kısımlar hiç decode edilmez.
+
+
+2. **VRAM İçi Kompozisyon (CuPy / PyTorch):**
+* Elde edilen VRAM tamponu sıfır kopyalama ile bir `torch.Tensor` veya `cupy.ndarray` dizisine dönüştürülür.
+* **Altyazı & Metin Çizimi:** Dinamik kelime vurguları veya logolar GPU belleğinde birer doku (Texture Atlas) olarak tutulur. Alpha blending işlemi basit bir tensör işlemiyle mikrosaniyeler içinde gerçekleştirilir:
+
+$$\text{Frame}_{\text{out}} = \text{Frame}_{\text{in}} \times (1 - \alpha) + \text{Subtitle} \times \alpha$$
+
+
+
+
+3. **Donanım Kodlama (NVENC):**
+* İşlenen tensör VRAM'den hiç çıkarılmadan `PyNvVideoCodec.Encoder` nesnesine verilir.
+* Donanım encoder'ı saniyede 300-600 FPS hızında sıkıştırılmış H.264/HEVC paketlerini üretir.
+
+
+4. **Sonuç:** RAM tüketimi minimal kalır, PCIe veri yolu transferi sıfırlanır, 545 kesimli 10 dakikalık bir video 15-30 saniyede tamamlanır.
+
+---
+
+### Seviye C: Hibrit Akıllı Kesim (Smart Rendering / GOP-Aware Cut)
+
+Eğer videonun tamamında altyazı yoksa veya altyazı sadece belirli bölümlere basılıyorsa:
+
+* Kesim noktaları I-Frame (Keyframe) sınırlarına denk gelen yerlerde yeniden encode yapılmaz (`-c copy` / bitstream kopyalama).
+* Yalnızca kesim sınırındaki eksik kareler (GOP başı ve sonu) donanımla encode edilir ve akışlar kayıpsız birleştirilir. Bu, render süresini saniyenin altına indirebilir.
+
+---
+
+## 3. Geliştirilmeye Açık Diğer Kritik Noktalar İçin Eylem Planı
+
+### 1. Transkripsiyon ve AI Analiz Darboğazı (Whisper & CTranslate2)
+
+* **Mevcut Durum:** Standart OpenAI Whisper modelleri uzun videolarda ciddi VRAM ve zaman harcar.
+* **Çözüm:** Python Worker içerisindeki `transcriber.py` modülü doğrudan **`faster-whisper`** kütüphanesine (CTranslate2 backend) taşınmalıdır.
+* `float16` veya `int8_float16` kuantizasyonu ile transkripsiyon süresi 4 kat hızlanır, VRAM tüketimi %60 azalır.
+* `batched inference` kullanılarak ses parçaları paralel işlenmelidir.
+
+
+
+### 2. Tarayıcı (Frontend) Zaman Çizgisi ve Önizleme Optimizasyonu (Proxy Pipeline)
+
+* **Mevcut Durum:** 545 kesimli ve 4K/yüksek bitrate'li bir videonun web tarayıcısında (HTML5 video player) akıcı şekilde oynatılması, anlık scrub (ileri-geri sarma) yapması imkansızdır; tarayıcı kilitlenir.
+* **Çözüm (Proxy Video):**
+* Video sisteme yüklendiği anda (arka planda NVENC ile 5-10 saniyede) **720p 30fps düşük bitrate (H.264 / fastdecode)** bir **proxy kopya** oluşturulmalıdır.
+* Angular arayüzü ve timeline önizlemesi yalnızca bu proxy videoyu oynatmalıdır.
+* Nihai render istendiğinde Python Worker orijinal yüksek kaliteli ham videoyu kullanarak çıktıyı üretmelidir.
+
+
+
+### 3. EDL & Snapshot Çift Yönlü Senkronizasyonu
+
+* **Mevcut Durum:** Kullanıcı arayüzde manuel kesim yaparken aynı anda "Yönetmen AI" arkada yeni öneriler (B-roll, sessizlik kırpma) getirdiğinde durum çakışmaları (race conditions) yaşanabilir.
+* **Çözüm:**
+* **Tahribatsız Kurgu (Non-Destructive Editing):** Orijinal video dosyası asla doğrudan kesilmemeli; tüm operasyonlar milisaniye hassasiyetinde bir `Timeline State Tree` üzerinde tutulmalıdır.
+* Snapshot yapısına `version` ve `client_timestamp` eklenmeli; AI müdahale ettiğinde yeni bir versiyon ID'si üretilip kullanıcıya "Öneri kabul edilsin mi?" onayı sunulmalıdır.
+
+
+
+### 4. Disk ve Scratch Depolama Yönetimi (Garbage Collection)
+
+* **Mevcut Durum:** 5 GB'lık videolar, geçici ses WAV dosyaları, transkript ara çıktıları Docker konteynerlerinde veya MinIO'da hızla disk tüketir.
+* **Çözüm:**
+* Python Worker için her bir pipeline aşamasına özel `scratch/job_{id}` dizini tanımlanmalı.
+* İşlem başarılı da olsa hata da alsa `finally` bloğu ve arka plan kuyruk temizleyicisi ile geçici ara dosyalar derhal silinmelidir.
+* MinIO üzerinde geçici bucket'lar için 24-48 saatlik **Lifecycle Expiration (TTL)** kuralları uygulanmalıdır.
+
+
+
+### 5. Gemini API & Çoklu Modlu (Multimodal) Token Optimizasyonu
+
+* **Mevcut Durum:** Uzun video kareleri ve transkript metinleri LLM'e sık sık gönderildiğinde API gecikmesi artar ve token maliyetleri yükselir.
+* **Çözüm:**
+* Transkript metinleri tek seferde gönderilmek yerine anlamsal paragraflara (semantic chunking) bölünerek yalnızca ilgili kısımlar analiz edilmelidir.
+* Gemini 1.5/2.0 API'sinde transkript ve video bağlamı için **Context Caching** kullanılmalıdır. Böylece aynı video üzerinde yapılan art arda sohbet ve komutlarda token maliyeti %70-80 oranında düşer.
+
+
+
+---
+
+## 4. Önerilen Uygulama Yol Haritası
+
+| Aşama | Görev | Hedef Süre / Kazanç | Zorluk |
+| --- | --- | --- | --- |
+| **Aşama 1 (Acil)** | FFmpeg `filter_complex [trim]` mantığını kaldırıp **Concat Demuxer (`ffconcat`)** yapısına geçmek. | 35 dk $\rightarrow$ **3-5 dk** | Düşük |
+| **Aşama 2** | Altyazı ve bindirmeleri `overlay_cuda` ile VRAM içine taşımak. | 5 dk $\rightarrow$ **1-2 dk** | Orta |
+| **Aşama 3** | Frontend için otomatik **Proxy Video** üretim mekanizmasını devreye almak. | Anlık tarayıcı akıcılığı | Düşük-Orta |
+| **Aşama 4** | `faster-whisper` entegrasyonu ile transkripsiyonu hızlandırmak. | 4x analiz hızı | Düşük |
+| **Aşama 5 (Uzun Vade)** | Python Worker'da **`PyNvVideoCodec` + CuPy** ile yerel GPU NLE render motorunu inşa etmek. | Render süresi: **15-30 sn** | İleri Düzey |
+
+Bu yol haritasında ilk adım olarak **Aşama 1 (Concat Demuxer)** değişikliğinin uygulanması, mevcut CPU tıkanıklığını en az eforla derhal çözecektir. Ardından Seviye B (PyNvVideoCodec) mimarisine kademeli geçiş yapılması OtoEdit'i SaaS ölçeğinde küresel rakipleriyle (CapCut/Descript) aynı teknik lige taşıyacaktır.

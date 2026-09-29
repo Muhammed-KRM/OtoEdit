@@ -128,17 +128,20 @@ class AnalysisConsumer:
 
             # 🚀 REDIS IDEMPOTENCY KONTROLÜ (SHA-256 İle Mükerrer Analizi Önleme)
             video_hash = self.cache.compute_video_hash(local_video_path)
-            cached_edl = self.cache.get_cached_edl(video_hash)
-            if cached_edl:
-                logger.info(f"⚡ Mükerrer dosya tespit edildi! Redis önbelleğinden anında sonuç dönülüyor (VideoId={video_id})")
-                self.publisher.publish_analysis_completed(project_id, video_id, cached_edl)
-                self.pipeline_logger.log_progress(
-                    project_id, video_id, PipelineStage.TAMAMLANDI, 100,
-                    status="Completed",
-                    message="Analiz sonucu önbellekten (Redis) anında yüklendi!"
-                )
-                ch.basic_ack(delivery_tag=method.delivery_tag)
-                return
+            if Config.ENABLE_ANALYSIS_CACHE:
+                cached_edl = self.cache.get_cached_edl(video_hash)
+                if cached_edl:
+                    logger.info(f"⚡ Mükerrer dosya tespit edildi! Redis önbelleğinden anında sonuç dönülüyor (VideoId={video_id})")
+                    self.publisher.publish_analysis_completed(project_id, video_id, cached_edl)
+                    self.pipeline_logger.log_progress(
+                        project_id, video_id, PipelineStage.TAMAMLANDI, 100,
+                        status="Completed",
+                        message="Analiz sonucu önbellekten (Redis) anında yüklendi!"
+                    )
+                    ch.basic_ack(delivery_tag=method.delivery_tag)
+                    return
+            else:
+                logger.info(f"ℹ️ Redis analiz önbelleği devre dışı (ENABLE_ANALYSIS_CACHE=False). Sıfırdan taze analiz yürütülüyor...")
 
             # 2. Aşama 0: Ses İyileştirme (Opsiyonel)
             clean_audio_path = local_video_path
@@ -312,7 +315,8 @@ class AnalysisConsumer:
             )
 
             # 💾 REDIS ÖNBELLEĞE KAYDET
-            self.cache.set_cached_edl(video_hash, edl_dict)
+            if Config.ENABLE_ANALYSIS_CACHE:
+                self.cache.set_cached_edl(video_hash, edl_dict)
 
             # 10. Tamamlandı Bildirimi ve EDL'yi .NET API'ye Gönder
             self.publisher.publish_analysis_completed(project_id, video_id, edl_dict)

@@ -98,6 +98,34 @@ class Transcriber:
         # 2. Yerel faster-whisper motorunu dene (API anahtarı yoksa veya hata verdiyse)
         try:
             import importlib
+
+            # 🔧 pip ile kurulan NVIDIA kütüphanelerinin yolunu LD_LIBRARY_PATH'e ekle
+            # (ctranslate2 import edilmeden ÖNCE yapılmalı)
+            _nvidia_lib_dirs = []
+            for _pkg in ["nvidia.cublas.lib", "nvidia.cudnn.lib", "nvidia.cuda_nvrtc.lib"]:
+                try:
+                    _mod = importlib.import_module(_pkg.rsplit(".", 1)[0])
+                    _lib_dir = os.path.join(os.path.dirname(_mod.__file__), "lib")
+                    if os.path.isdir(_lib_dir):
+                        _nvidia_lib_dirs.append(_lib_dir)
+                except Exception:
+                    pass
+            if _nvidia_lib_dirs:
+                _current_ld = os.environ.get("LD_LIBRARY_PATH", "")
+                _new_paths = [p for p in _nvidia_lib_dirs if p not in _current_ld]
+                if _new_paths:
+                    os.environ["LD_LIBRARY_PATH"] = ":".join(_new_paths) + (":" + _current_ld if _current_ld else "")
+                    logger.info(f"🔧 [Transcriber] NVIDIA pip kütüphane yolları LD_LIBRARY_PATH'e eklendi: {_new_paths}")
+                    import ctypes
+                    for _lib_dir in _new_paths:
+                        for _so_file in os.listdir(_lib_dir):
+                            if _so_file.endswith(".so") or ".so." in _so_file:
+                                try:
+                                    ctypes.CDLL(os.path.join(_lib_dir, _so_file), mode=ctypes.RTLD_GLOBAL)
+                                except Exception:
+                                    pass
+
+            # Şimdi faster_whisper ve ctranslate2'yi güvenle import edebiliriz
             fw_mod = importlib.import_module("faster_whisper")
             whisper_model_cls = getattr(fw_mod, "WhisperModel")
 
@@ -162,6 +190,13 @@ class Transcriber:
             segments = self._chunk_segments(segments, max_words=6, max_duration=3.0)
 
             logger.info(f"Yerel Whisper transkripsiyonu tamamlandı: {len(words)} kelime, {len(segments)} parçalanmış segment, süre={duration:.1f}s")
+            
+            # VRAM Yönetimi (Garbage Collection)
+            del local_model
+            import gc
+            gc.collect()
+            logger.info("🧹 GPU VRAM temizlendi (Model nesnesi bellekten atıldı).")
+                
             return TranscriptResult(
                 full_text=full_text,
                 segments=segments,
@@ -170,6 +205,14 @@ class Transcriber:
             )
         except Exception as local_ex:
             logger.warning(f"Yerel faster-whisper transkripsiyonu başarısız oldu: {local_ex}")
+            # Hata durumunda da temizle
+            try:
+                if 'local_model' in locals():
+                    del local_model
+                import gc
+                gc.collect()
+            except:
+                pass
 
         logger.info("Transkript fallback üretiliyor...")
         return self._generate_fallback_transcript(audio_path)
