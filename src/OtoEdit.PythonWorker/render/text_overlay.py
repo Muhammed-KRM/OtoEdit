@@ -106,9 +106,9 @@ class TextOverlay:
             "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
             "Alignment, MarginL, MarginR, MarginV, Encoding",
             # Varsayılan şablon stilleri
-            "Style: Default,Montserrat-Bold,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,40,40,60,1",
-            "Style: Subtitle,Montserrat-Bold,42,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,1,2,30,30,40,1",
-            "Style: TitleTop,Montserrat-Bold,56,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,3,3,8,40,40,40,1",
+            "Style: Default,Inter,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,40,40,60,1",
+            "Style: Subtitle,Inter,42,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,1,2,30,30,40,1",
+            "Style: TitleTop,Inter,56,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,3,3,8,40,40,40,1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -132,7 +132,7 @@ class TextOverlay:
             start_ass = cls.seconds_to_ass_time(start_sec)
             end_ass = cls.seconds_to_ass_time(end_sec)
 
-            font = ov.get("font", "Montserrat-Bold")
+            font = ov.get("font", "Inter")
             size = int(ov.get("fontSize", 48))
             color_ass = cls.hex_to_ass_color(ov.get("color", "#FFFFFF"))
             bg_ass = cls.hex_to_ass_color(ov.get("backgroundColor", "#00000080"))

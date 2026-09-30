@@ -51,22 +51,25 @@ class VideoRenderer:
         overlays = edl_json.get("overlays", [])
         transcript = edl_json.get("transcript")
         text_overlays = [ov for ov in overlays if ov.get("type") == "text"]
+        image_overlays = [ov for ov in overlays if ov.get("type") == "image"]
 
         # Zaman haritalama (Timeline Remapping) - Kesilmiş videonun zaman çizgisine uyarla
         if keep_segments and len(keep_segments) > 0:
             logger.info(f"⏱️ TimelineMapper uygulanıyor: {len(keep_segments)} segment baz alınarak altyazılar senkronlanıyor.")
             mapped_transcript = TimelineMapper.remap_transcript(transcript, keep_segments)
-            mapped_overlays = TimelineMapper.remap_overlays(text_overlays, keep_segments)
+            mapped_text_overlays = TimelineMapper.remap_overlays(text_overlays, keep_segments)
+            mapped_image_overlays = TimelineMapper.remap_overlays(image_overlays, keep_segments)
         else:
             mapped_transcript = transcript
-            mapped_overlays = text_overlays
+            mapped_text_overlays = text_overlays
+            mapped_image_overlays = image_overlays
 
         ass_path = None
         
-        if mapped_overlays or mapped_transcript:
+        if mapped_text_overlays or mapped_transcript:
             candidate_ass = os.path.join(temp_dir, f"subtitles_{os.path.basename(output_path)}.ass")
             TextOverlay.generate_ass(
-                overlays=mapped_overlays,
+                overlays=mapped_text_overlays,
                 transcript=mapped_transcript,
                 output_path=candidate_ass
             )
@@ -102,7 +105,64 @@ class VideoRenderer:
                 output_path=output_path
             )
 
-        logger.info(f"Render başarıyla tamamlandı: {output_path}")
+        logger.info(f"Base render tamamlandı: {output_path}")
+
+        # 2. İkinci Geçiş (Görsel Overlay'leri Varsa)
+        if mapped_image_overlays:
+            logger.info(f"🎨 {len(mapped_image_overlays)} görsel overlay için ikinci pass yürütülüyor...")
+            temp_no_images = os.path.join(temp_dir, f"no_img_{os.path.basename(output_path)}")
+            if os.path.exists(output_path):
+                os.rename(output_path, temp_no_images)
+                try:
+                    import ffmpeg
+                    probe = ffmpeg.probe(temp_no_images)
+                    video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
+                    base_w = int(video_info['width'])
+                    base_h = int(video_info['height'])
+
+                    in_node = ffmpeg.input(temp_no_images)
+                    v_stream = in_node.video
+                    a_stream = in_node.audio
+
+                    v_stream = self.image_overlay.apply_image_overlays(
+                        v_stream, 
+                        mapped_image_overlays, 
+                        temp_dir=temp_dir,
+                        base_w=base_w,
+                        base_h=base_h
+                    )
+
+                    out_cmd_nvenc = ffmpeg.output(
+                        v_stream, a_stream, output_path,
+                        vcodec="h264_nvenc", preset="p4", video_bitrate="6M", maxrate="8M", bufsize="12M",
+                        acodec="copy", shortest=None
+                    ).overwrite_output().compile()
+
+                    out_cmd_cpu = ffmpeg.output(
+                        v_stream, a_stream, output_path,
+                        vcodec="libx264", preset="veryfast", crf="22",
+                        acodec="copy", shortest=None
+                    ).overwrite_output().compile()
+
+                    logger.info("Donanım hızlandırmalı (NVENC) image overlay yürütülüyor...")
+                    res = subprocess.run(out_cmd_nvenc, capture_output=True, text=True, timeout=7200)
+                    if res.returncode == 0:
+                        logger.info("✅ Görsel kaplamalar eklendi (NVENC).")
+                        os.remove(temp_no_images)
+                    else:
+                        logger.warning("NVENC overlay başarısız oldu. CPU moduna geçiliyor.")
+                        res_cpu = subprocess.run(out_cmd_cpu, capture_output=True, text=True, timeout=7200)
+                        if res_cpu.returncode == 0:
+                            logger.info("✅ Görsel kaplamalar eklendi (CPU).")
+                            os.remove(temp_no_images)
+                        else:
+                            raise RuntimeError("CPU overlay pass başarısız oldu.")
+                except Exception as e:
+                    logger.error(f"Görsel overlay eklenirken hata: {e}")
+                    if os.path.exists(temp_no_images):
+                        os.rename(temp_no_images, output_path)
+
+        logger.info(f"Render tamamen başarıyla tamamlandı: {output_path}")
         return output_path
 
     def _execute_ffmpeg_with_concat(self, concat_txt_path: str, target_format: str,
@@ -132,8 +192,8 @@ class VideoRenderer:
             duration = end - start
             seg_cmd = [
                 "ffmpeg", "-y",
-                "-ss", str(start),
                 "-i", video_path,
+                "-ss", str(start),
                 "-t", str(duration),
                 "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
                 "-pix_fmt", "yuv420p",
