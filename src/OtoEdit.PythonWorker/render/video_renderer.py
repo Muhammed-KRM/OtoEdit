@@ -9,6 +9,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from render.image_overlay import ImageOverlay
 from render.template_applier import TemplateApplier
 from render.text_overlay import TextOverlay
+from render.timeline_mapper import TimelineMapper
 from services.minio_client import MinioClient
 from utils.logger import get_logger
 
@@ -50,13 +51,23 @@ class VideoRenderer:
         overlays = edl_json.get("overlays", [])
         transcript = edl_json.get("transcript")
         text_overlays = [ov for ov in overlays if ov.get("type") == "text"]
+
+        # Zaman haritalama (Timeline Remapping) - Kesilmiş videonun zaman çizgisine uyarla
+        if keep_segments and len(keep_segments) > 0:
+            logger.info(f"⏱️ TimelineMapper uygulanıyor: {len(keep_segments)} segment baz alınarak altyazılar senkronlanıyor.")
+            mapped_transcript = TimelineMapper.remap_transcript(transcript, keep_segments)
+            mapped_overlays = TimelineMapper.remap_overlays(text_overlays, keep_segments)
+        else:
+            mapped_transcript = transcript
+            mapped_overlays = text_overlays
+
         ass_path = None
         
-        if text_overlays or transcript:
+        if mapped_overlays or mapped_transcript:
             candidate_ass = os.path.join(temp_dir, f"subtitles_{os.path.basename(output_path)}.ass")
             TextOverlay.generate_ass(
-                overlays=text_overlays,
-                transcript=transcript,
+                overlays=mapped_overlays,
+                transcript=mapped_transcript,
                 output_path=candidate_ass
             )
             if os.path.isfile(candidate_ass):

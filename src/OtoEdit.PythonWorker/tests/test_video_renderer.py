@@ -44,7 +44,8 @@ def test_video_renderer_create_concat_file():
         with open(concat_file, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
-        assert len(lines) == 6
+        assert len(lines) == 7
+        assert lines[0] == "ffconcat version 1.0\n"
         assert "inpoint 0.0\n" in lines
         assert "outpoint 10.0\n" in lines
         assert "inpoint 15.0\n" in lines
