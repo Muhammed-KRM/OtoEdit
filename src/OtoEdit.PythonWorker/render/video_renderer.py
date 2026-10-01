@@ -38,6 +38,15 @@ class VideoRenderer:
         # 0. Şablon verisini EDL'e işle
         edl_json = TemplateApplier.enrich_edl_with_template(edl_json)
 
+        # Fontları Logla (Sorun Teşhisi İçin Sadece Bir Kere)
+        try:
+            fc_match = subprocess.run(["fc-match", "Inter V"], capture_output=True, text=True)
+            fc_match_cinzel = subprocess.run(["fc-match", "Cinzel"], capture_output=True, text=True)
+            logger.info(f"[DEBUG-FONT] fc-match 'Inter V': {fc_match.stdout.strip()}")
+            logger.info(f"[DEBUG-FONT] fc-match 'Cinzel': {fc_match_cinzel.stdout.strip()}")
+        except Exception as e:
+            logger.warning(f"[DEBUG-FONT] Font kontrolü başarısız: {e}")
+
         # Toplam süre tespiti
         total_duration = float(edl_json.get("duration", 0.0))
         if total_duration <= 0:
@@ -53,12 +62,30 @@ class VideoRenderer:
         text_overlays = [ov for ov in overlays if ov.get("type") == "text"]
         image_overlays = [ov for ov in overlays if ov.get("type") == "image"]
 
+        # 1. Segmentleri Kes ve Gerçek Süreleri Ölç
+        actual_durations = None
+        segment_files = []
+        merge_concat = None
+        
+        has_cuts = keep_segments and len(keep_segments) > 0 and not (len(keep_segments) == 1 and keep_segments[0][0] == 0.0 and abs(keep_segments[0][1] - total_duration) < 0.1)
+
+        if has_cuts:
+            logger.info(f"🚀 Frame-Accurate Kesim başlıyor: {len(keep_segments)} korunan segment")
+            concat_txt_path = os.path.join(temp_dir, f"cuts_{os.path.basename(output_path)}.txt")
+            self._create_concat_file(keep_segments, video_path, concat_txt_path)
+            
+            segment_files, actual_durations, merge_concat = self._cut_segments(
+                concat_txt_path=concat_txt_path,
+                temp_dir=temp_dir
+            )
+            trimmed_duration = sum(actual_durations) if actual_durations else trimmed_duration
+
         # Zaman haritalama (Timeline Remapping) - Kesilmiş videonun zaman çizgisine uyarla
         if keep_segments and len(keep_segments) > 0:
             logger.info(f"⏱️ TimelineMapper uygulanıyor: {len(keep_segments)} segment baz alınarak altyazılar senkronlanıyor.")
-            mapped_transcript = TimelineMapper.remap_transcript(transcript, keep_segments)
-            mapped_text_overlays = TimelineMapper.remap_overlays(text_overlays, keep_segments)
-            mapped_image_overlays = TimelineMapper.remap_overlays(image_overlays, keep_segments)
+            mapped_transcript = TimelineMapper.remap_transcript(transcript, keep_segments, actual_durations)
+            mapped_text_overlays = TimelineMapper.remap_overlays(text_overlays, keep_segments, actual_durations)
+            mapped_image_overlays = TimelineMapper.remap_overlays(image_overlays, keep_segments, actual_durations)
         else:
             mapped_transcript = transcript
             mapped_text_overlays = text_overlays
@@ -81,14 +108,12 @@ class VideoRenderer:
         target_format = settings.get("targetFormat", "16:9")
         face_data = edl_json.get("repurposing", {}).get("faceTrackingData", [])
 
-        # 1. Kesim Listesi Varsa: Paralel Frame-Accurate Trim + Concat + NVENC
-        if keep_segments and len(keep_segments) > 0 and not (len(keep_segments) == 1 and keep_segments[0][0] == 0.0 and abs(keep_segments[0][1] - total_duration) < 0.1):
-            logger.info(f"🚀 Frame-Accurate Concat uygulanıyor: {len(keep_segments)} korunan segment, tahmini süre={trimmed_duration:.1f}s")
-            concat_txt_path = os.path.join(temp_dir, f"cuts_{os.path.basename(output_path)}.txt")
-            self._create_concat_file(keep_segments, video_path, concat_txt_path)
-            
-            self._execute_ffmpeg_with_concat(
-                concat_txt_path=concat_txt_path,
+        # 2. Birleştirme (Concat) İşlemi
+        if has_cuts and segment_files and merge_concat:
+            logger.info(f"🚀 Birleştirme ve Render uygulanıyor, tahmini süre={trimmed_duration:.1f}s")
+            self._concat_segments(
+                merge_concat=merge_concat,
+                segment_files=segment_files,
                 target_format=target_format,
                 face_data=face_data,
                 ass_path=ass_path,
@@ -114,7 +139,8 @@ class VideoRenderer:
             if os.path.exists(output_path):
                 os.rename(output_path, temp_no_images)
                 try:
-                    import ffmpeg
+                    if ffmpeg is None:
+                        raise ImportError("ffmpeg-python modülü yüklü değil")
                     probe = ffmpeg.probe(temp_no_images)
                     video_info = next(s for s in probe['streams'] if s['codec_type'] == 'video')
                     base_w = int(video_info['width'])
@@ -165,50 +191,45 @@ class VideoRenderer:
         logger.info(f"Render tamamen başarıyla tamamlandı: {output_path}")
         return output_path
 
-    def _execute_ffmpeg_with_concat(self, concat_txt_path: str, target_format: str,
-                                    face_data: Optional[List[Dict[str, Any]]], 
-                                    ass_path: Optional[str], 
-                                    output_path: str,
-                                    trimmed_duration: float = 0.0):
+    def _cut_segments(self, concat_txt_path: str, temp_dir: str) -> Tuple[List[str], List[float], str]:
         """
-        Frame-accurate trim + concat render motoru.
-        
-        Her segment ThreadPoolExecutor ile paralel olarak frame-accurate kesilir (-ss input seeking + re-encode),
-        ardından concat demuxer ile birleştirilir. Altyazı ASS filtresi doğrudan uygulanır.
+        Segmentleri keser ve sürelerini ölçer. 
+        Geri dönüş: (segment_files, actual_durations, merge_concat_path)
         """
-        temp_dir = os.path.dirname(concat_txt_path)
-        
-        # 1. Concat dosyasından segmentleri parse et
         segments = self._parse_concat_file(concat_txt_path)
         if not segments:
             raise RuntimeError("Concat dosyası boş veya okunamadı!")
         
-        max_workers = min(os.cpu_count() or 4, 8)
-        logger.info(f"🎬 Frame-accurate paralel kesim başlıyor: {len(segments)} segment, {max_workers} thread")
+        # NVIDIA consumer GPU'lar genellikle en fazla 3-8 eşzamanlı NVENC session destekler.
+        # Çok fazla thread açılırsa session limiti aşılır ve sistem gizlice (fallback) CPU'ya geçer, bu da render'ı 45 dakikaya uzatır!
+        # Limiti 2'de tutarak NVENC'in tüm segmentleri çok yüksek hızda, CPU'ya düşmeden işlemesini sağlıyoruz.
+        max_workers = 2
+        logger.info(f"🎬 Frame-accurate paralel kesim başlıyor: {len(segments)} segment, {max_workers} thread (NVENC limiti koruması)")
         
         def _cut_single_segment(item: Tuple[int, Tuple[str, float, float]]) -> Optional[Tuple[int, str]]:
             idx, (video_path, start, end) = item
             seg_out = os.path.join(temp_dir, f"seg_{idx:04d}.mp4")
             duration = end - start
-            seg_cmd = [
-                "ffmpeg", "-y",
-                "-i", video_path,
-                "-ss", str(start),
-                "-t", str(duration),
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
-                "-pix_fmt", "yuv420p",
-                "-c:a", "aac", "-b:a", "192k",
-                "-fps_mode", "cfr",
-                "-avoid_negative_ts", "make_zero",
-                seg_out
-            ]
-            res = subprocess.run(seg_cmd, capture_output=True, text=True, timeout=600)
+            
+            base_args = ["ffmpeg", "-y", "-ss", str(start), "-i", video_path, "-t", str(duration)]
+            
+            nvenc_cmd = base_args + ["-c:v", "h264_nvenc", "-preset", "p1", "-b:v", "8M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
+            res = subprocess.run(nvenc_cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0 and os.path.isfile(seg_out) and os.path.getsize(seg_out) > 1000:
                 return (idx, seg_out)
-            logger.warning(f"Segment {idx} kesimi başarısız: {res.stderr[-200:] if res.stderr else 'Bilinmeyen hata'}")
+                
+            cpu_cmd = base_args + ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
+            res_cpu = subprocess.run(cpu_cmd, capture_output=True, text=True, timeout=300)
+            if res_cpu.returncode == 0 and os.path.isfile(seg_out) and os.path.getsize(seg_out) > 1000:
+                return (idx, seg_out)
+                
+            if os.path.isfile(seg_out):
+                try: os.remove(seg_out)
+                except Exception: pass
+                
+            logger.warning(f"Segment {idx} kesimi başarısız: {res_cpu.stderr[-200:] if res_cpu.stderr else ''}")
             return None
 
-        # 2. Paralel kesim yürüt
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
             cut_results = list(executor.map(_cut_single_segment, enumerate(segments)))
 
@@ -220,59 +241,55 @@ class VideoRenderer:
         
         logger.info(f"✂ {len(segment_files)}/{len(segments)} segment başarıyla paralel kesildi.")
         
-        # 3. Kesilmiş segmentleri birleştirmek için yeni concat dosyası oluştur
+        actual_durations = []
+        for idx, seg_file in enumerate(segment_files):
+            try:
+                probe_cmd = ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", seg_file]
+                result = subprocess.run(probe_cmd, capture_output=True, text=True)
+                actual_dur = float(result.stdout.strip()) if result.stdout.strip() else 0.0
+                expected_dur = segments[idx][2] - segments[idx][1]
+                drift = abs(actual_dur - expected_dur)
+                if drift > 0.05:
+                    logger.warning(f"[SYNC-DRIFT] Segment {idx}: beklenen={expected_dur:.3f}s, gerçek={actual_dur:.3f}s, sapma={drift:.3f}s")
+                else:
+                    logger.debug(f"[SYNC-OK] Segment {idx}: {actual_dur:.3f}s ≈ {expected_dur:.3f}s")
+                actual_durations.append(actual_dur)
+            except Exception as e:
+                logger.warning(f"[SYNC-CHECK] Segment {idx} kontrol edilemedi: {e}")
+                actual_durations.append(segments[idx][2] - segments[idx][1])
+        
         merge_concat = os.path.join(temp_dir, "merge_concat.txt")
         with open(merge_concat, "w", encoding="utf-8") as f:
             f.write("ffconcat version 1.0\n")
             for seg_file in segment_files:
-                clean_path = os.path.abspath(seg_file).replace("\\", "/")
-                f.write(f"file '{clean_path}'\n")
-        
-        # 4. VF hazırlığı (Kırpma + Doğrudan ASS Altyazı)
+                f.write(f"file '{os.path.abspath(seg_file).replace(chr(92), '/')}'\n")
+                
+        return segment_files, actual_durations, merge_concat
+
+    def _concat_segments(self, merge_concat: str, segment_files: List[str], target_format: str, face_data: Optional[List[Dict[str, Any]]], ass_path: Optional[str], output_path: str, trimmed_duration: float):
+        """Hazırlanan segmentleri FFmpeg concat demuxer ve filtreler ile birleştirir."""
         vf = []
         if target_format == "9:16":
             crop_cmd = self._get_crop_str(face_data, "9:16").lstrip(",")
-            if crop_cmd:
-                vf.append(crop_cmd)
+            if crop_cmd: vf.append(crop_cmd)
         elif target_format == "1:1":
             crop_cmd = self._get_crop_str(face_data, "1:1").lstrip(",")
-            if crop_cmd:
-                vf.append(crop_cmd)
+            if crop_cmd: vf.append(crop_cmd)
         
         if ass_path and os.path.isfile(ass_path):
             safe_ass = ass_path.replace("\\", "/").replace(":", "\\:")
             vf.append(f"ass='{safe_ass}'")
         
-        # 5. Birleştirme komutu
-        base_cmd = [
-            "ffmpeg", "-y",
-            "-f", "concat", "-safe", "0",
-            "-i", merge_concat
-        ]
-        
+        base_cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", merge_concat]
         if vf:
             base_cmd.extend(["-vf", ",".join(vf)])
             
-        base_cmd.extend([
-            "-fps_mode", "cfr",
-            "-af", "aresample=async=1000"
-        ])
+        base_cmd.extend(["-fps_mode", "cfr", "-af", "aresample=async=1000"])
         if trimmed_duration > 0:
             base_cmd.extend(["-t", str(trimmed_duration)])
         base_cmd.append("-shortest")
         
-        # NVENC Denemesi
-        nvenc_cmd = list(base_cmd) + [
-            "-c:v", "h264_nvenc",
-            "-preset", "p4",
-            "-b:v", "6M",
-            "-maxrate", "8M",
-            "-bufsize", "12M",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            output_path
-        ]
+        nvenc_cmd = base_cmd + ["-c:v", "h264_nvenc", "-preset", "p4", "-b:v", "6M", "-maxrate", "8M", "-bufsize", "12M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", output_path]
 
         try:
             logger.info("Donanım hızlandırmalı (NVENC) render yürütülüyor...")
@@ -281,26 +298,15 @@ class VideoRenderer:
                 logger.info("✅ Donanım hızlandırmalı (NVENC) render başarıyla tamamlandı.")
                 self._cleanup_segment_files(segment_files, merge_concat)
                 return
-            logger.warning(f"NVENC render başarısız oldu. CPU moduna (libx264) geçiliyor. Hata: {res.stderr[-300:] if res.stderr else ''}")
-        except Exception as nvenc_err:
-            logger.warning(f"NVENC başlatılamadı ({nvenc_err}). CPU moduna geçiliyor.")
+            logger.warning(f"NVENC render başarısız oldu. CPU moduna geçiliyor. Hata: {res.stderr[-300:] if res.stderr else ''}")
+        except Exception as err:
+            logger.warning(f"NVENC başlatılamadı ({err}). CPU moduna geçiliyor.")
 
-        # CPU Fallback
-        cpu_cmd = list(base_cmd) + [
-            "-c:v", "libx264",
-            "-preset", "veryfast",
-            "-crf", "22",
-            "-pix_fmt", "yuv420p",
-            "-c:a", "aac",
-            "-b:a", "192k",
-            output_path
-        ]
-        
+        cpu_cmd = base_cmd + ["-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", output_path]
         logger.info("CPU Fallback komutu yürütülüyor...")
         res = subprocess.run(cpu_cmd, capture_output=True, text=True, timeout=7200)
         self._cleanup_segment_files(segment_files, merge_concat)
         if res.returncode != 0:
-            logger.error(f"FFmpeg CPU Render Hatası: {res.stderr[-500:]}")
             raise RuntimeError(f"FFmpeg render hatası: {res.stderr[-500:]}")
         logger.info("✅ CPU render başarıyla tamamlandı.")
     

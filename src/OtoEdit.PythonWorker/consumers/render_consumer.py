@@ -81,6 +81,24 @@ class RenderConsumer:
 
         logger.info(f"🎬 RenderRequestedEvent alındı: RenderJobId={render_job_id}, ProjectId={project_id}")
 
+        # EDL Loglama (Sorun teşhisi için)
+        temp_dir_debug = str(Config.TEMP_DIR / f"render_{render_job_id}")
+        os.makedirs(temp_dir_debug, exist_ok=True)
+        edl_dump_path = os.path.join(temp_dir_debug, "edl_debug.json")
+        with open(edl_dump_path, "w", encoding="utf-8") as f:
+            json.dump(edl_json, f, indent=2, ensure_ascii=False)
+        logger.info(f"[DEBUG-EDL] EDL JSON kaydedildi: {edl_dump_path}")
+        
+        # EDL İstatistikleri
+        text_overlays_count = len([o for o in edl_json.get('overlays',[]) if o.get('type')=='text'])
+        img_overlays_count = len([o for o in edl_json.get('overlays',[]) if o.get('type')=='image'])
+        cuts_count = len(edl_json.get('cuts', []))
+        transcript_segments_count = len(edl_json.get('transcript',{}).get('segments', []))
+        
+        logger.info(f"[DEBUG-EDL] Overlay sayıları: text={text_overlays_count}, image={img_overlays_count}")
+        logger.info(f"[DEBUG-EDL] Cut sayısı: {cuts_count}")
+        logger.info(f"[DEBUG-EDL] Transcript segment sayısı: {transcript_segments_count}")
+
         # 💓 RabbitMQ Arka Plan Nabız Koruyucusu (Render sürerken soket kopmasını önler)
         heartbeat = RabbitHeartbeatKeeper(self._connection, interval_sec=10.0)
         heartbeat.start()

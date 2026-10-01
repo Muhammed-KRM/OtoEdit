@@ -106,9 +106,9 @@ class TextOverlay:
             "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
             "Alignment, MarginL, MarginR, MarginV, Encoding",
             # Varsayılan şablon stilleri
-            "Style: Default,Inter,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,40,40,60,1",
-            "Style: Subtitle,Inter,42,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,1,2,30,30,40,1",
-            "Style: TitleTop,Inter,56,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,3,3,8,40,40,40,1",
+            "Style: Default,Inter V,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,40,40,60,1",
+            "Style: Subtitle,Inter V,42,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,1,2,30,30,40,1",
+            "Style: TitleTop,Inter V,56,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,3,3,8,40,40,40,1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -132,7 +132,12 @@ class TextOverlay:
             start_ass = cls.seconds_to_ass_time(start_sec)
             end_ass = cls.seconds_to_ass_time(end_sec)
 
-            font = ov.get("font", "Inter")
+            font = ov.get("font", "Inter V")
+            font_map = {
+                "Inter": "Inter V",
+                "inter": "Inter V"
+            }
+            font = font_map.get(font, font)
             size = int(ov.get("fontSize", 48))
             color_ass = cls.hex_to_ass_color(ov.get("color", "#FFFFFF"))
             bg_ass = cls.hex_to_ass_color(ov.get("backgroundColor", "#00000080"))
@@ -145,19 +150,20 @@ class TextOverlay:
 
             anim_tags = AnimationEffects.get_ass_tags(animation, duration_sec, exit_anim_type=exit_animation)
 
+            # Convert position to tag
             pos_tag = ""
             if posX is not None and posY is not None:
-                # Convert percentage to actual pixels
                 px = int(float(posX) / 100.0 * play_res_x)
                 py = int(float(posY) / 100.0 * play_res_y)
                 pos_tag = f"\\pos({px},{py})"
 
             # Özel stil tagleri (inline override)
+            # \\c is primary color, \\3c is outline color, \\4c is shadow color, \\b1 is bold
+            outline_color = "&H00000000" # Black outline
             if pos_tag:
-                # If absolute pos is given, alignment usually needs to be center-center (5) so it centers on the mouse cursor
-                inline_tags = f"{{\\an5\\fn{font}\\fs{size}\\c{color_ass}\\4c{bg_ass}{pos_tag}{anim_tags}}}"
+                inline_tags = f"{{\\an5\\b1\\fn{font}\\fs{size}\\c{color_ass}\\3c{outline_color}\\4c{bg_ass}{pos_tag}{anim_tags}}}"
             else:
-                inline_tags = f"{{\\an{align}\\fn{font}\\fs{size}\\c{color_ass}\\4c{bg_ass}{anim_tags}}}"
+                inline_tags = f"{{\\an{align}\\b1\\fn{font}\\fs{size}\\c{color_ass}\\3c{outline_color}\\4c{bg_ass}{anim_tags}}}"
                 
             clean_content = content.replace("\n", "\\N")
             track_layer = int(ov.get("trackId") or ov.get("track_id") or 1)

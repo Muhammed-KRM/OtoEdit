@@ -194,7 +194,7 @@ Tüm render akışını `ffmpeg-python` kütüphanesine taşımak. Bu daha temiz
 ## ✅ Uygulanan Çözümler (30 Eylül 2026)
 
 **Sorun 1 (Altyazı Kayması) Çözümü:**  
-- `video_renderer.py` içindeki segment kesim mantığında (`_cut_single_segment`) kullanılan `ffmpeg` komutunda `-ss` (seek) parametresi `-i` girdisinden sonraki satıra alınarak **Output Seeking** yöntemi uygulandı. Bu sayede keyframe atlama ve PTS kayması engellenerek tam frame-accurate birleştirme yapılması sağlandı.
+- `video_renderer.py` içindeki segment kesim mantığında (`_cut_single_segment`) kullanılan `ffmpeg` komutunda `-ss` (seek) parametresi **Input Seeking** yapacak şekilde `-i` girdisinden önceye alındı. Re-encode işlemi uygulandığı için Input Seeking + re-encode yöntemi hem aşırı hızlı (keyframe bazlı seek) çalışır hem de `-avoid_negative_ts` ile tam frame-accurate birleştirme sağlar. (Önceki yanlış "Output Seeking" denemesi %2000 hız kaybına sebep olmuştu, bu düzeltildi.)
 
 **Sorun 2 (Font Uyumsuzluğu) Çözümü:**  
 - `text_overlay.py` içinde `Montserrat-Bold` olarak ayarlanmış ASS varsayılanı ve stil tanımları, frontend ile birebir eşleşmesi için `Inter` ile değiştirildi.

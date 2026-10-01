@@ -15,7 +15,7 @@ class TimelineMapper:
     """Orijinal video zaman çizgisini kesilmiş nihai video zaman çizgisine dönüştürür."""
 
     @staticmethod
-    def remap_timestamp(t: float, keep_segments: List[Tuple[float, float]], tolerance: float = 0.02) -> Optional[float]:
+    def remap_timestamp(t: float, keep_segments: List[Tuple[float, float]], tolerance: float = 0.02, actual_durations: Optional[List[float]] = None) -> Optional[float]:
         """
         Orijinal videodaki 't' saniyesini kesilmiş videodaki yeni saniyesine dönüştürür.
         Eğer 't' kesilen/silinen bir bölgedeyse None döner.
@@ -25,18 +25,23 @@ class TimelineMapper:
 
         accumulated_duration = 0.0
 
-        for (start, end) in keep_segments:
+        for i, (start, end) in enumerate(keep_segments):
+            expected_dur = end - start
+            actual_dur = actual_durations[i] if actual_durations and i < len(actual_durations) else expected_dur
+            
             # Segment sınırlarında küçük kaymalar için toleranslı kontrol
             if (start - tolerance) <= t <= (end + tolerance):
                 clamped_t = max(start, min(end, t))
-                return round(accumulated_duration + (clamped_t - start), 3)
+                # Segment içindeki offset, videonun kendisi esnemediği için sabittir
+                offset = clamped_t - start
+                return round(accumulated_duration + offset, 3)
 
-            accumulated_duration += (end - start)
+            accumulated_duration += actual_dur
 
         return None
 
     @staticmethod
-    def remap_range(start: float, end: float, keep_segments: List[Tuple[float, float]]) -> Optional[Tuple[float, float]]:
+    def remap_range(start: float, end: float, keep_segments: List[Tuple[float, float]], actual_durations: Optional[List[float]] = None) -> Optional[Tuple[float, float]]:
         """
         Bir zaman aralığını [start, end] kesilmiş videodaki yeni aralığına dönüştürür.
         Eğer aralık tamamen kesilmiş bir bölgedeyse None döner.
@@ -49,31 +54,35 @@ class TimelineMapper:
         best_overlap = 0.0
         best_range: Optional[Tuple[float, float]] = None
 
-        for (seg_start, seg_end) in keep_segments:
+        for i, (seg_start, seg_end) in enumerate(keep_segments):
+            expected_dur = seg_end - seg_start
+            actual_dur = actual_durations[i] if actual_durations and i < len(actual_durations) else expected_dur
+            
             inter_start = max(start, seg_start)
             inter_end = min(end, seg_end)
             overlap = inter_end - inter_start
 
             if overlap > best_overlap:
                 best_overlap = overlap
-                new_start = accumulated_duration + (inter_start - seg_start)
-                new_end = accumulated_duration + (inter_end - seg_start)
+                # İç offsetler sabittir
+                start_offset = inter_start - seg_start
+                end_offset = inter_end - seg_start
+                
+                new_start = accumulated_duration + start_offset
+                new_end = accumulated_duration + end_offset
                 best_range = (round(new_start, 3), round(new_end, 3))
 
-            accumulated_duration += (seg_end - seg_start)
+            accumulated_duration += actual_dur
 
-        # Eğer overlap çok küçükse (örn. sıfır süre veya tek nokta) remap_timestamp ile bak
+        # Eğer overlap çok küçükse (anlamlı kesişim yok)
         if best_overlap <= 0.01:
-            t_mapped = TimelineMapper.remap_timestamp(start, keep_segments)
-            if t_mapped is not None and end >= start:
-                dur = max(0.01, end - start)
-                return (round(t_mapped, 3), round(t_mapped + dur, 3))
+            # Tolerans sayesinde yanlış haritalamayı engellemek için doğrudan elenir
             return None
 
         return best_range
 
     @staticmethod
-    def remap_overlays(overlays: List[Dict[str, Any]], keep_segments: List[Tuple[float, float]]) -> List[Dict[str, Any]]:
+    def remap_overlays(overlays: List[Dict[str, Any]], keep_segments: List[Tuple[float, float]], actual_durations: Optional[List[float]] = None) -> List[Dict[str, Any]]:
         """
         Kullanıcının eklediği metin, logo ve görsel kaplamaların zamanlarını yeni videoya göre ayarlar.
         Kesilen bölgelerde kalan objeler otomatik olarak elenir.
@@ -90,7 +99,7 @@ class TimelineMapper:
             except (ValueError, TypeError):
                 continue
 
-            new_t = TimelineMapper.remap_timestamp(orig_t, keep_segments)
+            new_t = TimelineMapper.remap_timestamp(orig_t, keep_segments, actual_durations=actual_durations)
             if new_t is not None:
                 new_ov = dict(ov)
                 new_ov["timestamp"] = new_t
@@ -102,7 +111,7 @@ class TimelineMapper:
         return remapped_overlays
 
     @staticmethod
-    def remap_transcript(transcript: Optional[Dict[str, Any]], keep_segments: List[Tuple[float, float]]) -> Optional[Dict[str, Any]]:
+    def remap_transcript(transcript: Optional[Dict[str, Any]], keep_segments: List[Tuple[float, float]], actual_durations: Optional[List[float]] = None) -> Optional[Dict[str, Any]]:
         """
         Whisper transkriptindeki cümle ve kelime (karaoke) zamanlarını yeni videoya haritalar.
         Kesilen kısımlardaki kelimeleri ve silinen cümleleri temizler.
@@ -132,7 +141,7 @@ class TimelineMapper:
                     except (ValueError, TypeError):
                         continue
 
-                    mapped_w = TimelineMapper.remap_range(w_start, w_end, keep_segments)
+                    mapped_w = TimelineMapper.remap_range(w_start, w_end, keep_segments, actual_durations=actual_durations)
                     if mapped_w is not None:
                         new_w = dict(word)
                         new_w["start"] = mapped_w[0]
@@ -146,7 +155,7 @@ class TimelineMapper:
                     new_seg["words"] = remapped_words
                     remapped_segments.append(new_seg)
             else:
-                mapped_range = TimelineMapper.remap_range(orig_start, orig_end, keep_segments)
+                mapped_range = TimelineMapper.remap_range(orig_start, orig_end, keep_segments, actual_durations=actual_durations)
                 if mapped_range is not None:
                     new_seg = dict(segment)
                     new_seg["start"] = mapped_range[0]

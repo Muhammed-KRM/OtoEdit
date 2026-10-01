@@ -20,6 +20,9 @@ RUN mkdir -p /usr/share/fonts/truetype/custom && \
     unzip -o montserrat.zip -d mont_fonts && \
     cp mont_fonts/Montserrat-master/fonts/ttf/*.ttf /usr/share/fonts/truetype/custom/ || true && \
     rm -rf montserrat.zip mont_fonts && \
+    curl -sL "https://fonts.google.com/download?family=Cinzel" -o cinzel.zip && \
+    unzip -o cinzel.zip -d /usr/share/fonts/truetype/custom/ || true && \
+    rm -rf cinzel.zip && \
     fc-cache -f -v
 
 WORKDIR /app

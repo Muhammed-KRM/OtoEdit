@@ -40,8 +40,27 @@ class ImageOverlay:
             return local_target
 
         try:
+            from urllib.parse import urlparse
+            
+            # Eğer URL ise ve otoedit bucket adını içeriyorsa (presigned url) SDK ile indir
+            if source.startswith("http") and "otoedit" in source:
+                parsed = urlparse(source.split("?")[0])
+                path_parts = parsed.path.lstrip("/").split("/", 1)
+                if len(path_parts) == 2:
+                    bucket = path_parts[0]
+                    key = path_parts[1]
+                    logger.info(f"MinIO SDK ile presigned URL indiriliyor: bucket={bucket}, key={key}")
+                    self.minio.client.fget_object(bucket, key, local_target)
+                    return local_target
+
+            # HTTP / HTTPS URL (dış bağlantılar)
+            if source.startswith("http://") or source.startswith("https://"):
+                logger.info(f"URL'den görsel indiriliyor: {source}")
+                urllib.request.urlretrieve(source, local_target)
+                return local_target
+
             # S3 / MinIO URI
-            if source.startswith("s3://") or "otoedit" in source:
+            elif source.startswith("s3://"):
                 clean_key = source.replace("s3://", "").lstrip("/")
                 if "/" in clean_key:
                     bucket, key = clean_key.split("/", 1)
@@ -49,12 +68,6 @@ class ImageOverlay:
                     bucket, key = "otoedit", clean_key
                 logger.info(f"MinIO'dan görsel indiriliyor: bucket={bucket}, key={key}")
                 self.minio.client.fget_object(bucket, key, local_target)
-                return local_target
-
-            # HTTP / HTTPS URL
-            elif source.startswith("http://") or source.startswith("https://"):
-                logger.info(f"URL'den görsel indiriliyor: {source}")
-                urllib.request.urlretrieve(source, local_target)
                 return local_target
 
         except Exception as ex:
@@ -112,9 +125,9 @@ class ImageOverlay:
             pos_x = ov.get("positionX")
             pos_y = ov.get("positionY")
             if pos_x is not None and pos_y is not None:
-                # 0.0 - 1.0 normalize koordinatları piksele çevir (merkezi hizala)
-                center_px_x = int(float(pos_x) * base_w)
-                center_px_y = int(float(pos_y) * base_h)
+                # 0-100 normalize koordinatları piksele çevir (merkezi hizala)
+                center_px_x = int((float(pos_x) / 100.0) * base_w)
+                center_px_y = int((float(pos_y) / 100.0) * base_h)
                 x_expr = f"{center_px_x} - (w/2)"
                 y_expr = f"{center_px_y} - (h/2)"
             else:
