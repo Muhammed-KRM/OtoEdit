@@ -189,11 +189,24 @@ class TextOverlay:
                 words = seg.get("words", [])
                 if words and len(words) > 0:
                     karaoke_text = ""
+                    current_time = s_start
                     for w in words:
                         w_text = w.get("word", "")
-                        w_dur_cs = int(round((w.get("end", s_end) - w.get("start", s_start)) * 100))
-                        w_dur_cs = max(10, min(500, w_dur_cs))
+                        w_start = float(w.get("start", current_time))
+                        w_end = float(w.get("end", w_start + 0.1))
+                        
+                        # Aradaki boşluğu (gap) doldur, yoksa vurgu (sarı renk) erken başlar
+                        gap = w_start - current_time
+                        if gap > 0.01:
+                            gap_cs = int(round(gap * 100))
+                            karaoke_text += f"{{\\k{gap_cs}}}"
+                            
+                        w_dur_cs = int(round((w_end - w_start) * 100))
+                        w_dur_cs = max(1, min(1000, w_dur_cs))
                         karaoke_text += f"{{\\k{w_dur_cs}}}{w_text} "
+                        
+                        current_time = w_end
+                        
                     dialogue_lines.append(f"Dialogue: 1,{start_ass},{end_ass},Subtitle,,0,0,0,,{karaoke_text.strip()}")
                 else:
                     dialogue_lines.append(f"Dialogue: 1,{start_ass},{end_ass},Subtitle,,0,0,0,,{text}")

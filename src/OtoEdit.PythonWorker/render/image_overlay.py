@@ -114,12 +114,13 @@ class ImageOverlay:
 
             img_input = ffmpeg.input(local_path)
 
-            # Ölçeklendirme
-            if scale > 0 and scale != 1.0:
-                scale_w = int(base_w * scale)
-                # Çift sayıya yuvarlama (FFmpeg gereksinimi)
-                scale_w = scale_w if scale_w % 2 == 0 else scale_w + 1
-                img_input = img_input.filter("scale", scale_w, -1)
+            # UI'da scale=1.0 demek, 860px genişliğindeki player'da 160px genişlik kaplamak demek (160/860 = ~%18.6).
+            # Backend render motoru da bu oranı baz alarak gerçek video genişliğine (base_w) uyarlamalıdır.
+            base_ui_ratio = 160.0 / 860.0
+            scale_w = int(base_w * base_ui_ratio * scale)
+            # FFmpeg x264/nvenc scale gereksinimi: çift sayı olmalı
+            scale_w = scale_w if scale_w % 2 == 0 else scale_w + 1
+            img_input = img_input.filter("scale", scale_w, -1)
 
             # Konum ve animasyon
             pos_x = ov.get("positionX")

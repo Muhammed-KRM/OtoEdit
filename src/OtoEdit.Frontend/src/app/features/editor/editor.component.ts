@@ -383,7 +383,7 @@ export interface ContextMenuState {
         <!-- 2. ORTA PANEL: Video Önizleme Monitörü + CapCut Oynatma Barı -->
         <section class="flex-1 flex flex-col bg-black/95 relative items-center justify-between p-3 min-w-0 overflow-hidden">
           <!-- Monitör Sahnesi -->
-          <div class="relative w-full flex-1 max-w-[860px] bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800/80 flex items-center justify-center min-h-0">
+          <div style="container-type: inline-size; container-name: player;" class="relative w-full flex-1 max-w-[860px] bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800/80 flex items-center justify-center min-h-0">
             <video 
               #videoPlayer
               [src]="videoUrl()"
@@ -416,7 +416,7 @@ export interface ContextMenuState {
               <div [ngClass]="getOverlayAnimationClass(ov)">
               
               <!-- Metin Kaplaması -->
-              <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize.px]="(ov.fontSize || 48) / 2">
+              <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize]="((ov.fontSize || 48) / 2 / 8.6) + 'cqi'">
                 {{ ov.content }}
               </span>
 
@@ -427,8 +427,8 @@ export interface ContextMenuState {
                   [src]="ov.source" 
                   [alt]="ov.content || 'Görsel'" 
                   class="rounded-lg shadow-xl border border-brand-cyan/50 pointer-events-none object-cover"
-                  [style.width.px]="(160 * (ov.scale || 1.0))"
-                  [style.maxHeight.px]="(120 * (ov.scale || 1.0))" />
+                  [style.width]="(160 * (ov.scale || 1.0) / 8.6) + 'cqi'"
+                  [style.maxHeight]="(120 * (ov.scale || 1.0) / 8.6) + 'cqi'" />
                 
                 <div *ngIf="!ov.source" class="px-3 py-2 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-1.5">
                   <span>🖼️</span>
