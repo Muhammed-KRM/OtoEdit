@@ -9,8 +9,6 @@ REM Angular CLI Analytics promptunu kapat
 set "NG_CLI_ANALYTICS=false"
 
 echo [1/4] Eski acik servisler temizleniyor (Eger varsa)...
-taskkill /F /IM "dotnet.exe" /T > nul 2>&1
-taskkill /F /IM "node.exe" /T > nul 2>&1
 taskkill /F /IM "OtoEdit.API.exe" /T > nul 2>&1
 taskkill /FI "WINDOWTITLE eq OtoEdit-*" /F /T > nul 2>&1
 
