@@ -150,7 +150,11 @@ class TextOverlay:
                 "Arial": "DejaVu Sans"
             }
             font = font_map.get(cleaned_font, cleaned_font)
-            size = int(ov.get("fontSize", 48))
+            raw_size = int(ov.get("fontSize", 48))
+            # Editördeki font boyutu CSS pikseli (96 DPI) bazlıdır. ASS \fs ise FreeType pt (72 DPI) bazlıdır.
+            # 96 / 72 = 4 / 3 ≈ 1.333333 oranı ile ölçeklendiğinde CSS pikseli ile ASS çıktı boyutu %100 birebir eşitlenir.
+            size = max(12, int(round(raw_size * (96.0 / 72.0))))
+
             color_ass = cls.hex_to_ass_color(ov.get("color", "#FFFFFF"))
             align = cls.position_to_ass_alignment(ov.get("position", ["center", "bottom"]))
             animation = ov.get("animation", "pop-up")
@@ -159,26 +163,30 @@ class TextOverlay:
             posX = ov.get("positionX")
             posY = ov.get("positionY")
 
-            anim_tags = AnimationEffects.get_ass_tags(animation, duration_sec, exit_anim_type=exit_animation)
+            px = int(float(posX) / 100.0 * play_res_x) if posX is not None else 0
+            py = int(float(posY) / 100.0 * play_res_y) if posY is not None else 0
+            
+            has_custom_pos = (posX is not None and posY is not None)
+            target_align = 5 if has_custom_pos else align
 
-            # Convert position to tag
-            pos_tag = ""
-            if posX is not None and posY is not None:
-                px = int(float(posX) / 100.0 * play_res_x)
-                py = int(float(posY) / 100.0 * play_res_y)
-                pos_tag = f"\\pos({px},{py})"
+            anim_tags = AnimationEffects.get_ass_tags(
+                animation, duration_sec, pos_x=px, pos_y=py, exit_anim_type=exit_animation
+            )
+            # ASS standardında \move ve \pos aynı anda kullanılamaz (\move koordinatları zaten yönetir)
+            pos_tag = "" if ("\\move" in anim_tags or not has_custom_pos) else f"\\pos({px},{py})"
 
             logger.info(
                 f"[TextOverlay:Trace] ov_id={ov.get('id')} raw_font='{raw_font}' -> mapped_font='{font}', "
-                f"size={size}, pos=({posX}%, {posY}%) -> px=({px if pos_tag else 'align'}, {py if pos_tag else 'align'})"
+                f"raw_size={raw_size} -> ass_size={size}, pos=({posX}%, {posY}%) -> px=({px if has_custom_pos else 'align'}, {py if has_custom_pos else 'align'}), align=\\an{target_align}"
             )
 
             # Özel stil tagleri (inline override)
-            # \\c: font rengi, \\bord0: kaba siyah çizgiyi kaldır, \\shad3\\4c&H90000000: CSS drop-shadow benzeri yumuşak gölge
+            # \\c: font rengi, \\bord0: kaba siyah çizgiyi kaldır, \\shad4\\blur2\\4c&H000000&: CSS drop-shadow paritesi derin yumuşak siyah gölge
+            shadow_tags = "\\bord0\\shad4\\blur2\\4c&H000000&"
             if pos_tag:
-                inline_tags = f"{{\\an5\\b1\\fn{font}\\fs{size}\\c{color_ass}\\bord0\\shad3\\4c&H90000000{pos_tag}{anim_tags}}}"
+                inline_tags = f"{{\\an{target_align}\\b1\\fn{font}\\fs{size}\\c{color_ass}{shadow_tags}{pos_tag}{anim_tags}}}"
             else:
-                inline_tags = f"{{\\an{align}\\b1\\fn{font}\\fs{size}\\c{color_ass}\\bord0\\shad3\\4c&H90000000{anim_tags}}}"
+                inline_tags = f"{{\\an{target_align}\\b1\\fn{font}\\fs{size}\\c{color_ass}{shadow_tags}{anim_tags}}}"
                 
             clean_content = content.replace("\n", "\\N")
             track_layer = int(ov.get("trackId") or ov.get("track_id") or 1)
