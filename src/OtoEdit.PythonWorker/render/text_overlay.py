@@ -106,9 +106,11 @@ class TextOverlay:
             "Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
             "Alignment, MarginL, MarginR, MarginV, Encoding",
             # Varsayılan şablon stilleri
-            "Style: Default,Inter V,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,2,2,40,40,60,1",
-            "Style: Subtitle,Inter V,42,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,2,1,2,30,30,40,1",
-            "Style: TitleTop,Inter V,56,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,3,3,8,40,40,40,1",
+            # Default: Kenarlıksız, doğal drop-shadow gölgeli (CSS drop-shadow paritesi)
+            "Style: Default,Inter,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,0,3,5,40,40,60,1",
+            # Subtitle: Göğüs hizasında (%80-85), yarı saydam şık siyah kapsül (BorderStyle: 3, BackColour: &HB0101010)
+            "Style: Subtitle,Montserrat,44,&H00FFFFFF,&H0000FFFF,&H00000000,&HB0101010,1,0,0,0,100,100,0,0,3,10,0,2,30,30,160,1",
+            "Style: TitleTop,Inter,56,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,0,3,8,40,40,40,1",
             "",
             "[Events]",
             "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
@@ -132,15 +134,24 @@ class TextOverlay:
             start_ass = cls.seconds_to_ass_time(start_sec)
             end_ass = cls.seconds_to_ass_time(end_sec)
 
-            font = ov.get("font", "Inter V")
+            raw_font = ov.get("font", "Inter")
+            # CSS fallback'leri temizle (örn: "Cinzel, serif" -> "Cinzel")
+            cleaned_font = raw_font.split(",")[0].strip().replace("'", "").replace('"', '')
             font_map = {
-                "Inter": "Inter V",
-                "inter": "Inter V"
+                "Inter": "Inter",
+                "inter": "Inter",
+                "Inter V": "Inter",
+                "Montserrat": "Montserrat",
+                "Cinzel": "Cinzel",
+                "Bebas Neue": "Bebas Neue",
+                "Anton": "Anton",
+                "Poppins": "Poppins",
+                "Outfit": "Outfit",
+                "Arial": "DejaVu Sans"
             }
-            font = font_map.get(font, font)
+            font = font_map.get(cleaned_font, cleaned_font)
             size = int(ov.get("fontSize", 48))
             color_ass = cls.hex_to_ass_color(ov.get("color", "#FFFFFF"))
-            bg_ass = cls.hex_to_ass_color(ov.get("backgroundColor", "#00000080"))
             align = cls.position_to_ass_alignment(ov.get("position", ["center", "bottom"]))
             animation = ov.get("animation", "pop-up")
             exit_animation = ov.get("exitAnimation") or ov.get("exit_animation") or "fade"
@@ -157,13 +168,17 @@ class TextOverlay:
                 py = int(float(posY) / 100.0 * play_res_y)
                 pos_tag = f"\\pos({px},{py})"
 
+            logger.info(
+                f"[TextOverlay:Trace] ov_id={ov.get('id')} raw_font='{raw_font}' -> mapped_font='{font}', "
+                f"size={size}, pos=({posX}%, {posY}%) -> px=({px if pos_tag else 'align'}, {py if pos_tag else 'align'})"
+            )
+
             # Özel stil tagleri (inline override)
-            # \\c is primary color, \\3c is outline color, \\4c is shadow color, \\b1 is bold
-            outline_color = "&H00000000" # Black outline
+            # \\c: font rengi, \\bord0: kaba siyah çizgiyi kaldır, \\shad3\\4c&H90000000: CSS drop-shadow benzeri yumuşak gölge
             if pos_tag:
-                inline_tags = f"{{\\an5\\b1\\fn{font}\\fs{size}\\c{color_ass}\\3c{outline_color}\\4c{bg_ass}{pos_tag}{anim_tags}}}"
+                inline_tags = f"{{\\an5\\b1\\fn{font}\\fs{size}\\c{color_ass}\\bord0\\shad3\\4c&H90000000{pos_tag}{anim_tags}}}"
             else:
-                inline_tags = f"{{\\an{align}\\b1\\fn{font}\\fs{size}\\c{color_ass}\\3c{outline_color}\\4c{bg_ass}{anim_tags}}}"
+                inline_tags = f"{{\\an{align}\\b1\\fn{font}\\fs{size}\\c{color_ass}\\bord0\\shad3\\4c&H90000000{anim_tags}}}"
                 
             clean_content = content.replace("\n", "\\N")
             track_layer = int(ov.get("trackId") or ov.get("track_id") or 1)
@@ -185,31 +200,74 @@ class TextOverlay:
                 start_ass = cls.seconds_to_ass_time(s_start)
                 end_ass = cls.seconds_to_ass_time(s_end)
 
-                # Kelime bazlı karaoke (varsa)
+                # Kelime bazlı karaoke / dinamik vurgu (varsa)
                 words = seg.get("words", [])
-                if words and len(words) > 0:
-                    karaoke_text = ""
-                    current_time = s_start
-                    for w in words:
-                        w_text = w.get("word", "")
-                        w_start = float(w.get("start", current_time))
-                        w_end = float(w.get("end", w_start + 0.1))
-                        
-                        # Aradaki boşluğu (gap) doldur, yoksa vurgu (sarı renk) erken başlar
-                        gap = w_start - current_time
-                        if gap > 0.01:
-                            gap_cs = int(round(gap * 100))
-                            karaoke_text += f"{{\\k{gap_cs}}}"
-                            
-                        w_dur_cs = int(round((w_end - w_start) * 100))
-                        w_dur_cs = max(1, min(1000, w_dur_cs))
-                        karaoke_text += f"{{\\k{w_dur_cs}}}{w_text} "
-                        
-                        current_time = w_end
-                        
-                    dialogue_lines.append(f"Dialogue: 1,{start_ass},{end_ass},Subtitle,,0,0,0,,{karaoke_text.strip()}")
+                valid_words = []
+                for w in words or []:
+                    w_text = w.get("word", "").strip()
+                    if not w_text:
+                        continue
+                    w_s = float(w.get("start", s_start))
+                    w_e = float(w.get("end", w_s + 0.1))
+                    if w_e <= w_s:
+                        w_e = w_s + 0.1
+                    valid_words.append({"word": w_text, "start": w_s, "end": w_e})
+
+                if valid_words and len(valid_words) > 0:
+                    # TikTok / Reels / CapCut tarzı hareketli kelime vurgusu:
+                    # 1. İlk kelimeden önce boşluk varsa tümü beyaz
+                    first_start = valid_words[0]["start"]
+                    if first_start > s_start + 0.05:
+                        all_white = " ".join([w["word"] for w in valid_words])
+                        dialogue_lines.append(
+                            f"Dialogue: 1,{cls.seconds_to_ass_time(s_start)},{cls.seconds_to_ass_time(first_start)},Subtitle,,0,0,0,,{all_white}"
+                        )
+
+                    # 2. Her bir kelime için o kelimenin telaffuz edildiği aralıkta sarı vurgu
+                    for i, cur_w in enumerate(valid_words):
+                        w_start_time = max(s_start, cur_w["start"])
+                        w_end_time = min(s_end, cur_w["end"])
+
+                        next_start = valid_words[i + 1]["start"] if (i + 1 < len(valid_words)) else s_end
+
+                        # Küçük duraklamaları bir sonraki kelimeye kadar uzat (altyazı kutusunun titremesini önle)
+                        if next_start > w_end_time and (next_start - w_end_time) < 0.25:
+                            display_end = next_start
+                        else:
+                            display_end = w_end_time
+
+                        if display_end <= w_start_time:
+                            display_end = w_start_time + 0.05
+
+                        styled_parts = []
+                        for j, w in enumerate(valid_words):
+                            if j == i:
+                                styled_parts.append(f"{{\\c&H0000FFFF&}}{w['word']}{{\\c&H00FFFFFF&}}")
+                            else:
+                                styled_parts.append(w["word"])
+
+                        word_line = " ".join(styled_parts)
+                        dialogue_lines.append(
+                            f"Dialogue: 1,{cls.seconds_to_ass_time(w_start_time)},{cls.seconds_to_ass_time(display_end)},Subtitle,,0,0,0,,{word_line}"
+                        )
+
+                        # Uzun duraklama varsa ara aralıkta tümü beyaz
+                        if next_start > display_end + 0.05:
+                            all_white = " ".join([w["word"] for w in valid_words])
+                            dialogue_lines.append(
+                                f"Dialogue: 1,{cls.seconds_to_ass_time(display_end)},{cls.seconds_to_ass_time(next_start)},Subtitle,,0,0,0,,{all_white}"
+                            )
+
+                    # 3. Son kelimeden sonra kalan süre varsa tümü beyaz
+                    last_end = valid_words[-1]["end"]
+                    if s_end > last_end + 0.05:
+                        all_white = " ".join([w["word"] for w in valid_words])
+                        dialogue_lines.append(
+                            f"Dialogue: 1,{cls.seconds_to_ass_time(last_end)},{cls.seconds_to_ass_time(s_end)},Subtitle,,0,0,0,,{all_white}"
+                        )
                 else:
-                    dialogue_lines.append(f"Dialogue: 1,{start_ass},{end_ass},Subtitle,,0,0,0,,{text}")
+                    clean_text = text.replace("\n", " ")
+                    dialogue_lines.append(f"Dialogue: 1,{start_ass},{end_ass},Subtitle,,0,0,0,,{clean_text}")
 
         # Dosyayı kaydet
         os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)

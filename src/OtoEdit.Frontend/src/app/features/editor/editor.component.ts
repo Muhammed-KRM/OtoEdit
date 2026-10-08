@@ -11,6 +11,7 @@ import { RenderService } from '../../core/services/render.service';
 import { AssetService } from '../../core/services/asset.service';
 import { SignalrService } from '../../core/services/signalr.service';
 import { ProjectDetailDto } from '../../core/models/project.model';
+import { DiagnosticsService } from '../../core/services/diagnostics.service';
 import { VideoDetailDto } from '../../core/models/video.model';
 import { CutItem, EdlContent, EdlDto, OverlayItem, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
 import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
@@ -382,101 +383,108 @@ export interface ContextMenuState {
 
         <!-- 2. ORTA PANEL: Video Önizleme Monitörü + CapCut Oynatma Barı -->
         <section class="flex-1 flex flex-col bg-black/95 relative items-center justify-between p-3 min-w-0 overflow-hidden">
-          <!-- Monitör Sahnesi -->
-          <div style="container-type: inline-size; container-name: player;" class="relative w-full flex-1 max-w-[860px] bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800/80 flex items-center justify-center min-h-0">
-            <video 
-              #videoPlayer
-              [src]="videoUrl()"
-              (timeupdate)="onTimeUpdate()"
-              (seeked)="onVideoSeeked()"
-              (loadedmetadata)="onMetadataLoaded()"
-              (play)="isPlaying.set(true)"
-              (pause)="isPlaying.set(false)"
-              class="w-full h-full object-contain max-h-[460px]">
-              
-            </video>
-
-            <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
+          <!-- Monitör Sahnesi Dış Çerçevesi -->
+          <div class="relative w-full flex-1 max-w-[860px] bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800/80 flex items-center justify-center min-h-0">
+            <!-- Video En-Boy Oranına Kilitli Sahne (Video & Kaplamalar Birebir Kilitli) -->
             <div 
-              *ngFor="let ov of activeOverlays()" 
-              (mousedown)="onCanvasDragStart($event, ov.id)"
-              (click)="$event.stopPropagation(); selectOverlay(ov.id)"
-              (contextmenu)="openOverlayContextMenu($event, ov)"
-              [style.top]="getOverlayTop(ov)"
-              [style.left]="getOverlayLeft(ov)"
-              [style.zIndex]="getOverlayZIndex(ov)"
-              class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
-              [ngClass]="[
-                 selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''
-              ]"
-              [style.color]="ov.color || '#FFFFFF'"
-              [style.backgroundColor]="ov.backgroundColor || 'transparent'"
-              [style.fontFamily]="ov.font || 'Inter, sans-serif'">
+              style="container-type: inline-size; container-name: player;"
+              class="relative flex items-center justify-center w-full max-h-[460px] shadow-2xl"
+              [style.aspectRatio]="videoAspectRatio()"
+              [style.maxWidth]="'calc(460px * (' + videoAspectRatio() + '))'">
               
-              <div [ngClass]="getOverlayAnimationClass(ov)">
-              
-              <!-- Metin Kaplaması -->
-              <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize]="((ov.fontSize || 48) / 2 / 8.6) + 'cqi'">
-                {{ ov.content }}
-              </span>
+              <video 
+                #videoPlayer
+                [src]="videoUrl()"
+                (timeupdate)="onTimeUpdate()"
+                (seeked)="onVideoSeeked()"
+                (loadedmetadata)="onMetadataLoaded()"
+                (play)="isPlaying.set(true)"
+                (pause)="isPlaying.set(false)"
+                class="w-full h-full object-contain rounded pointer-events-auto">
+              </video>
 
-              <!-- Görsel / B-Roll Kaplaması -->
-              <div *ngIf="ov.type === 'image'" class="relative group">
-                <img 
-                  *ngIf="ov.source" 
-                  [src]="ov.source" 
-                  [alt]="ov.content || 'Görsel'" 
-                  class="rounded-lg shadow-xl border border-brand-cyan/50 pointer-events-none object-cover"
-                  [style.width]="(160 * (ov.scale || 1.0) / 8.6) + 'cqi'"
-                  [style.maxHeight]="(120 * (ov.scale || 1.0) / 8.6) + 'cqi'" />
+              <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
+              <div 
+                *ngFor="let ov of activeOverlays()" 
+                (mousedown)="onCanvasDragStart($event, ov.id)"
+                (click)="$event.stopPropagation(); selectOverlay(ov.id)"
+                (contextmenu)="openOverlayContextMenu($event, ov)"
+                [style.top]="getOverlayTop(ov)"
+                [style.left]="getOverlayLeft(ov)"
+                [style.zIndex]="getOverlayZIndex(ov)"
+                class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
+                [ngClass]="[
+                   selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''
+                ]"
+                [style.color]="ov.color || '#FFFFFF'"
+                [style.backgroundColor]="ov.backgroundColor || 'transparent'"
+                [style.fontFamily]="ov.font || 'Inter, sans-serif'">
                 
-                <div *ngIf="!ov.source" class="px-3 py-2 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-1.5">
-                  <span>🖼️</span>
-                  <span>{{ ov.content || 'B-Roll Görseli' }}</span>
+                <div [ngClass]="getOverlayAnimationClass(ov)">
+                
+                <!-- Metin Kaplaması -->
+                <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize]="((ov.fontSize || 48) / 19.2) + 'cqi'">
+                  {{ ov.content }}
+                </span>
+
+                <!-- Görsel / B-Roll Kaplaması -->
+                <div *ngIf="ov.type === 'image'" class="relative group">
+                  <img 
+                    *ngIf="ov.source" 
+                    [src]="ov.source" 
+                    [alt]="ov.content || 'Görsel'" 
+                    class="rounded-lg shadow-xl border border-brand-cyan/50 pointer-events-none object-contain"
+                    [style.width]="(160 * (ov.scale || 1.0) / 8.6) + 'cqi'"
+                    style="height: auto; max-width: none;" />
+                  
+                  <div *ngIf="!ov.source" class="px-3 py-2 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-1.5">
+                    <span>🖼️</span>
+                    <span>{{ ov.content || 'B-Roll Görseli' }}</span>
+                  </div>
+                </div>
+                </div>
+
+                <!-- Canvas Resize Handle -->
+                <div *ngIf="selectedOverlayId() === ov.id"
+                     (mousedown)="onCanvasResizeStart($event, ov.id)"
+                     class="absolute -bottom-2 -right-2 w-5 h-5 bg-white border-2 border-brand-cyan rounded-full cursor-nwse-resize z-30 shadow-md hover:scale-125 transition-transform flex items-center justify-center">
+                     <span class="text-[8px] text-brand-cyan font-bold">⤡</span>
                 </div>
               </div>
+
+              <!-- Canlı Taslak (Ghost Layer) -->
+              <div 
+                *ngIf="ghostPreview() as ghost" 
+                class="absolute pointer-events-none z-30 -translate-x-1/2 -translate-y-1/2 select-none border-2 border-dashed border-brand-cyan bg-black/70 backdrop-blur-xs px-3 py-1.5 rounded-lg shadow-glow-sm"
+                [style.left.%]="ghost.posX"
+                [style.top.%]="ghost.posY"
+                [style.color]="ghost.color"
+                [style.fontFamily]="ghost.font">
+                <span class="font-bold whitespace-nowrap block drop-shadow text-base">{{ ghost.text }}</span>
+                <span class="absolute -top-3 -right-3 text-[8px] bg-brand-cyan text-slate-900 font-extrabold px-1 rounded">📍 Taslak</span>
               </div>
 
-              <!-- Canvas Resize Handle -->
-              <div *ngIf="selectedOverlayId() === ov.id"
-                   (mousedown)="onCanvasResizeStart($event, ov.id)"
-                   class="absolute -bottom-2 -right-2 w-5 h-5 bg-white border-2 border-brand-cyan rounded-full cursor-nwse-resize z-30 shadow-md hover:scale-125 transition-transform flex items-center justify-center">
-                   <span class="text-[8px] text-brand-cyan font-bold">⤡</span>
-              </div>
-            </div>
-
-            <!-- Canlı Taslak (Ghost Layer) -->
-            <div 
-              *ngIf="ghostPreview() as ghost" 
-              class="absolute pointer-events-none z-30 -translate-x-1/2 -translate-y-1/2 select-none border-2 border-dashed border-brand-cyan bg-black/70 backdrop-blur-xs px-3 py-1.5 rounded-lg shadow-glow-sm"
-              [style.left.%]="ghost.posX"
-              [style.top.%]="ghost.posY"
-              [style.color]="ghost.color"
-              [style.fontFamily]="ghost.font">
-              <span class="font-bold whitespace-nowrap block drop-shadow text-base">{{ ghost.text }}</span>
-              <span class="absolute -top-3 -right-3 text-[8px] bg-brand-cyan text-slate-900 font-extrabold px-1 rounded">📍 Taslak</span>
-            </div>
-
-            <!-- TikTok / Reels Karaoke Altyazı -->
-            <div 
-              *ngIf="showSubtitles() && currentSubtitleSegment() as seg" 
-              (click)="$event.stopPropagation(); selectSubtitle(seg)"
-              class="absolute left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center cursor-pointer select-none px-4 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl hover:border-brand-cyan/80 transition-all group"
-              [style.bottom.%]="100 - subtitlePositionY()"
-              title="Altyazıyı Düzenlemek İçin Tıklayın">
-              <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" [style.fontFamily]="subtitleFont()" [style.color]="subtitleColor()">
-                <ng-container *ngIf="seg.words && seg.words.length > 0; else plainText">
-                  <span 
-                    *ngFor="let w of seg.words"
-                    class="transition-all duration-100 inline-block px-0.5 rounded text-sm md:text-base"
-                    [style.color]="isWordActive(w) ? subtitleHighlightColor() : subtitleColor()"
-                    [ngClass]="isWordActive(w) ? 'font-black scale-110 bg-white/10 shadow-glow-sm' : 'font-semibold opacity-90'">
-                    {{ w.word }}
-                  </span>
-                </ng-container>
-                <ng-template #plainText>
-                  <span class="font-bold text-sm md:text-base drop-shadow" [style.color]="subtitleColor()">{{ seg.text }}</span>
-                </ng-template>
+              <!-- TikTok / Reels Karaoke Altyazı -->
+              <div 
+                *ngIf="showSubtitles() && currentSubtitleSegment() as seg" 
+                (click)="$event.stopPropagation(); selectSubtitle(seg)"
+                class="absolute left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center cursor-pointer select-none px-4 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl hover:border-brand-cyan/80 transition-all group"
+                [style.bottom.%]="100 - subtitlePositionY()"
+                title="Altyazıyı Düzenlemek İçin Tıklayın">
+                <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" [style.fontFamily]="subtitleFont()" [style.color]="subtitleColor()">
+                  <ng-container *ngIf="seg.words && seg.words.length > 0; else plainText">
+                    <span 
+                      *ngFor="let w of seg.words"
+                      class="transition-all duration-100 inline-block px-0.5 rounded text-sm md:text-base"
+                      [style.color]="isWordActive(w) ? subtitleHighlightColor() : subtitleColor()"
+                      [ngClass]="isWordActive(w) ? 'font-black scale-110 bg-white/10 shadow-glow-sm' : 'font-semibold opacity-90'">
+                      {{ w.word }}
+                    </span>
+                  </ng-container>
+                  <ng-template #plainText>
+                    <span class="font-bold text-sm md:text-base drop-shadow" [style.color]="subtitleColor()">{{ seg.text }}</span>
+                  </ng-template>
+                </div>
               </div>
             </div>
           </div>
@@ -1660,6 +1668,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   private renderService = inject(RenderService);
   private assetService = inject(AssetService);
   private signalr = inject(SignalrService);
+  private diagnostics = inject(DiagnosticsService);
 
   @ViewChild('videoPlayer') videoRef!: ElementRef<HTMLVideoElement>;
   @ViewChild('chatMessagesContainer') chatContainer!: ElementRef<HTMLDivElement>;
@@ -1675,6 +1684,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly project = signal<ProjectDetailDto | null>(null);
   readonly edl = signal<EdlContent | null>(null);
   readonly videoUrl = signal<string>('');
+  readonly videoAspectRatio = signal<string>('16 / 9');
   readonly currentTime = signal<number>(0);
   readonly totalDuration = signal<number>(100);
 
@@ -3029,6 +3039,16 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (video && video.duration && !isNaN(video.duration)) {
       this.totalDuration.set(video.duration);
     }
+    if (video && video.videoWidth && video.videoHeight) {
+      const ratio = `${video.videoWidth} / ${video.videoHeight}`;
+      this.videoAspectRatio.set(ratio);
+      this.diagnostics.logTrace('GEOMETRY', 'Video Metadatası Yüklendi', {
+        videoWidth: video.videoWidth,
+        videoHeight: video.videoHeight,
+        aspectRatio: ratio,
+        duration: video.duration
+      });
+    }
     if (!this.audioPeaks()) {
       const url = this.videoUrl();
       if (url) this.loadAudioWaveform(url);
@@ -3699,7 +3719,15 @@ export class EditorComponent implements OnInit, OnDestroy {
       ov.duration = Number(this.inspectorData.duration);
       ov.trackId = Number(this.inspectorData.trackId) || 1;
       
-      this.edl.update(e => e ? { ...e } : null);
+      this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
+      this.diagnostics.logTrace('INSPECTOR', 'Overlay Değiştirildi', {
+        id: selId,
+        type: ov.type,
+        font: ov.font,
+        scale: ov.scale,
+        posX: ov.positionX,
+        posY: ov.positionY
+      });
     }
   }
 
@@ -4140,6 +4168,7 @@ export class EditorComponent implements OnInit, OnDestroy {
                  this.inspectorData.positionX = parseFloat(newX.toFixed(2));
                  this.inspectorData.positionY = parseFloat(newY.toFixed(2));
              }
+             this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
          }
          return;
      }
@@ -4147,27 +4176,28 @@ export class EditorComponent implements OnInit, OnDestroy {
      if (this.isCanvasResizing) {
          const deltaX = event.clientX - this.canvasResizeStartX;
          const deltaY = event.clientY - this.canvasResizeStartY;
-         const delta = Math.abs(deltaX) >= Math.abs(deltaY) ? deltaX : deltaY;
+         const delta = (deltaX + deltaY) / 2;
 
          const ov = this.activeEdl()?.overlays?.find(o => o.id === this.canvasResizeOverlayId);
          if (ov) {
              if (ov.type === 'image') {
-                 let newScale = this.canvasResizeOriginalScale + (delta / 100);
+                 let newScale = this.canvasResizeOriginalScale + (delta / 120);
                  if (newScale < 0.2) newScale = 0.2;
                  if (newScale > 5.0) newScale = 5.0;
-                 ov.scale = newScale;
+                 ov.scale = parseFloat(newScale.toFixed(2));
                  if (this.inspectorData && this.inspectorData.id === ov.id) {
-                     this.inspectorData.scale = parseFloat(newScale.toFixed(2));
+                     this.inspectorData.scale = ov.scale;
                  }
              } else if (ov.type === 'text') {
                  let newSize = this.canvasResizeOriginalFontSize + delta;
                  if (newSize < 10) newSize = 10;
                  if (newSize > 400) newSize = 400;
-                 ov.fontSize = newSize;
+                 ov.fontSize = Math.round(newSize);
                  if (this.inspectorData && this.inspectorData.id === ov.id) {
-                     this.inspectorData.fontSize = Math.round(newSize);
+                     this.inspectorData.fontSize = ov.fontSize;
                  }
              }
+             this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
          }
          return;
      }
@@ -4361,7 +4391,8 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   isWordActive(word: TranscriptWord): boolean {
     const t = this.currentTime();
-    return t >= word.start && t <= word.end;
+    // 50ms akustik ve kare geçiş toleransı ile kelime tam telaffuz edilirken sarı parlar
+    return t >= (word.start - 0.05) && t <= (word.end + 0.05);
   }
 
   toggleSubtitles(): void {
