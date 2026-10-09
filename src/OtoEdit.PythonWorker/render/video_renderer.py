@@ -91,22 +91,28 @@ class VideoRenderer:
             mapped_text_overlays = text_overlays
             mapped_image_overlays = image_overlays
 
+        settings = edl_json.get("settings", {})
+        target_format = settings.get("targetFormat", "16:9")
+        face_data = edl_json.get("repurposing", {}).get("faceTrackingData", [])
+        subtitles_enabled = settings.get("subtitlesEnabled", True)
+
+        # Eğer kullanıcı altyazıları devre dışı bırakmışsa transkripti None yap (renderda basılmasın)
+        final_transcript = mapped_transcript if subtitles_enabled else None
+        if not subtitles_enabled:
+            logger.info("🚫 Altyazılar kullanıcı ayarı nedeniyle devre dışı bırakıldı (subtitlesEnabled=False). Render çıktısına konuşma altyazıları basılmayacak.")
+
         ass_path = None
         
-        if mapped_text_overlays or mapped_transcript:
+        if mapped_text_overlays or final_transcript:
             candidate_ass = os.path.join(temp_dir, f"subtitles_{os.path.basename(output_path)}.ass")
             TextOverlay.generate_ass(
                 overlays=mapped_text_overlays,
-                transcript=mapped_transcript,
+                transcript=final_transcript,
                 output_path=candidate_ass
             )
             if os.path.isfile(candidate_ass):
                 ass_path = candidate_ass
                 logger.info(f"✅ Altyazı ASS dosyası üretildi: {ass_path}")
-
-        settings = edl_json.get("settings", {})
-        target_format = settings.get("targetFormat", "16:9")
-        face_data = edl_json.get("repurposing", {}).get("faceTrackingData", [])
 
         # 2. Birleştirme (Concat) İşlemi
         if has_cuts and segment_files and merge_concat:

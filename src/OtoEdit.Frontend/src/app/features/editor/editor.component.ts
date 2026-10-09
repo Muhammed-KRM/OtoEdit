@@ -1079,6 +1079,14 @@ export interface ContextMenuState {
             <!-- Altyazı Kanalı Başlığı -->
             <div class="h-10 border-b border-slate-800/70 px-2.5 flex items-center justify-between text-xs bg-dark-900/40 hover:bg-dark-800/60 transition-colors shadow-md z-10">
               <span class="text-[10px] font-bold text-amber-400">💬 Altyazı</span>
+              <button 
+                type="button"
+                (click)="toggleSubtitles()" 
+                [title]="showSubtitles() ? 'Altyazıyı Devre Dışı Bırak (Renderda Çıkmaz)' : 'Altyazıyı Etkinleştir (Renderda Çıkar)'"
+                class="px-1.5 py-0.5 rounded text-[9px] font-bold transition-all cursor-pointer border"
+                [ngClass]="showSubtitles() ? 'text-amber-300 bg-amber-400/20 border-amber-400/40 hover:bg-amber-400/30' : 'text-slate-500 bg-dark-800 border-slate-700 hover:text-slate-300'">
+                {{ showSubtitles() ? 'Açık' : 'Kapalı' }}
+              </button>
             </div>
 
             <!-- Overlay Katman Başlıkları (T3, T2, T1) -->
@@ -1140,7 +1148,8 @@ export interface ContextMenuState {
 
               
               <!-- Altyazı Kanalı (Subtitle Track) -->
-              <div class="relative h-10 bg-dark-900/40 border-b border-slate-800/60 overflow-hidden flex items-center hover:bg-dark-900/70 transition-colors">
+              <div [ngClass]="showSubtitles() ? 'opacity-100' : 'opacity-40'"
+                   class="relative h-10 bg-dark-900/40 border-b border-slate-800/60 overflow-hidden flex items-center hover:bg-dark-900/70 transition-all">
                 <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
                 
                 <div class="absolute left-0 right-0 top-0 bottom-0 overflow-hidden">
@@ -2402,6 +2411,9 @@ export class EditorComponent implements OnInit, OnDestroy {
           }
         }
         this.edl.set(res.edl);
+        if (res.edl.settings?.subtitlesEnabled !== undefined) {
+          this.showSubtitles.set(res.edl.settings.subtitlesEnabled);
+        }
         if (res.edl.duration && res.edl.duration > 5) {
           this.totalDuration.set(res.edl.duration);
         }
@@ -3856,14 +3868,34 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   requestExport(): void {
     this.rendering.set(true);
-    this.renderService.requestRender(this.projectId).subscribe({
-      next: (res) => {
-        this.rendering.set(false);
-        this.router.navigate(['/project', this.projectId, 'render', res.renderJobId]);
+    const isSubActive = this.showSubtitles();
+    // Render öncesi güncel altyazı tercihini EDL'e garantile
+    this.edlService.patchEdl(this.projectId, {
+      settings: { subtitlesEnabled: isSubActive }
+    }).subscribe({
+      next: () => {
+        this.renderService.requestRender(this.projectId).subscribe({
+          next: (res) => {
+            this.rendering.set(false);
+            this.router.navigate(['/project', this.projectId, 'render', res.renderJobId]);
+          },
+          error: (err) => {
+            this.rendering.set(false);
+            alert('Render talebi başlatılamadı: ' + (err.error?.detail || err.message));
+          }
+        });
       },
-      error: (err) => {
-        this.rendering.set(false);
-        alert('Render talebi başlatılamadı: ' + (err.error?.detail || err.message));
+      error: () => {
+        this.renderService.requestRender(this.projectId).subscribe({
+          next: (res) => {
+            this.rendering.set(false);
+            this.router.navigate(['/project', this.projectId, 'render', res.renderJobId]);
+          },
+          error: (err) => {
+            this.rendering.set(false);
+            alert('Render talebi başlatılamadı: ' + (err.error?.detail || err.message));
+          }
+        });
       }
     });
   }
@@ -4396,7 +4428,24 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   toggleSubtitles(): void {
-    this.showSubtitles.update(v => !v);
+    const nextVal = !this.showSubtitles();
+    this.showSubtitles.set(nextVal);
+
+    // EDL yerel nesnesini güncelle
+    const edl = this.edl();
+    if (edl) {
+      if (!edl.settings) edl.settings = {};
+      edl.settings.subtitlesEnabled = nextVal;
+      this.edl.set({ ...edl });
+    }
+
+    // Backend'e kaydet (böylece render motoru subtitlesEnabled ayarını okur)
+    this.edlService.patchEdl(this.projectId, {
+      settings: { subtitlesEnabled: nextVal }
+    }).subscribe({
+      next: () => console.log(`[SUBTITLE:TOGGLE] Altyazı ayarı kaydedildi: subtitlesEnabled=${nextVal}`),
+      error: (err) => console.error('[SUBTITLE:TOGGLE] Altyazı ayarı kaydedilemedi:', err)
+    });
   }
 
   private formatVttTimestamp(seconds: number): string {

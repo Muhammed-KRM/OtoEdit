@@ -75,6 +75,7 @@ export interface EdlSettings {
   faceTrackingEnabled?: boolean;
   audioEnhancement?: boolean;
   gestureCommandsEnabled?: boolean;
+  subtitlesEnabled?: boolean;
 }
 
 export interface EdlTemplate {

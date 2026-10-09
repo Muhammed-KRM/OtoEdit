@@ -79,6 +79,7 @@ class EdlSettings(BaseModel):
     faceTrackingEnabled: bool = True
     audioEnhancement: bool = True
     gestureCommandsEnabled: bool = True
+    subtitlesEnabled: bool = True
 
 
 class EdlDocument(BaseModel):
