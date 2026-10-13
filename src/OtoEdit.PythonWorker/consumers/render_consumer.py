@@ -147,6 +147,9 @@ class RenderConsumer:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         finally:
             heartbeat.stop()
+            if getattr(Config, "TEMP_RETENTION", "after_job") == "after_job":
+                from utils.janitor import cleanup_files
+                cleanup_files(temp_dir_debug)
 
     def _resolve_source_video(self, project_id: str, video_id: str, source_url: str) -> str:
         """MinIO veya yerel yoldan kaynak videoyu temin eder."""

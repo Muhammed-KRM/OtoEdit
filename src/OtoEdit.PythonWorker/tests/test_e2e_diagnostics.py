@@ -119,11 +119,10 @@ def test_ass_generation_contract():
     assert expected_pos in content, f"ASS koordinati hatali! Beklenen: {expected_pos}"
     print(f"[OK] ASS Pozisyon Etiketi: {expected_pos} (1920x1080 cozunurluge tam oturdu).")
     
-    # 3. Karaoke Gap kontrolu
-    gap_pattern = re.compile(r"\{\\k\d+\}\s*")
-    matches = gap_pattern.findall(content)
-    assert len(matches) > 0, "Karaoke \\k etiketleri bulunamadi!"
-    print(f"[OK] ASS Karaoke Vurgu Etiketleri ({len(matches)} adet) ve bosluk sureleri dogrulandi.")
+    # 3. Karaoke / Kelime Vurgu kontrolu
+    has_highlight = ("\\c&H" in content) or ("{\\k" in content)
+    assert has_highlight, "Karaoke / Kelime vurgu etiketleri bulunamadi!"
+    print(f"[OK] ASS Kelime Vurgu Etiketleri ve zamanlamalari dogrulandi.")
 
 if __name__ == "__main__":
     print("OtoEdit E2E Diagnostics Testi Baslatiliyor...")

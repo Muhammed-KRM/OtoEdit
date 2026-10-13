@@ -32,7 +32,33 @@ class Config:
     # Yapay Zeka ve Harici API Anahtarları
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
     GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+    GEMINI_API_KEYS = [k.strip() for k in os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", "")).split(",") if k.strip()]
+    GEMINI_TRANSCRIBE_RPM = int(os.getenv("GEMINI_TRANSCRIBE_RPM", "3"))
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    ANTIGRAVITY_PROXY_URL = os.getenv("ANTIGRAVITY_PROXY_URL", "http://host.docker.internal:8045/v1")
+    ANTIGRAVITY_PROXY_KEY = os.getenv("ANTIGRAVITY_PROXY_KEY", "")
+    ANTIGRAVITY_PROXY_MODEL = os.getenv("ANTIGRAVITY_PROXY_MODEL", "gemini-3.8-flash-tiered")
     PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
+
+    # STT Motor Zinciri ve Parçalama
+    STT_ENGINE_ORDER = [e.strip() for e in os.getenv("STT_ENGINE_ORDER", "gemini_transcribe,groq,proxy_gemini,local_whisper").split(",") if e.strip()]
+    STT_CHUNK_MAX_SEC = int(os.getenv("STT_CHUNK_MAX_SEC", "600"))
+    LOCAL_WHISPER_MODEL = os.getenv("LOCAL_WHISPER_MODEL", "large-v3-turbo")
+
+    # Ses Analizi & VAD Eşikleri
+    VAD_THRESHOLD = float(os.getenv("VAD_THRESHOLD", "0.4"))
+    VAD_MIN_SILENCE_MS = int(os.getenv("VAD_MIN_SILENCE_MS", "500"))
+
+    # Jump-Cut v2 Parametreleri
+    JUMPCUT_ENGINE = os.getenv("JUMPCUT_ENGINE", "v2")
+    JUMPCUT_MIN_SILENCE_MS = int(os.getenv("JUMPCUT_MIN_SILENCE_MS", "700"))
+    JUMPCUT_PAD_MS = int(os.getenv("JUMPCUT_PAD_MS", "200"))
+    JUMPCUT_PAD_LEAD_MS = int(os.getenv("JUMPCUT_PAD_LEAD_MS", "350"))
+    JUMPCUT_PAD_TRAILING_MS = int(os.getenv("JUMPCUT_PAD_TRAILING_MS", "200"))
+    JUMPCUT_WORD_GUARD_MS = int(os.getenv("JUMPCUT_WORD_GUARD_MS", "150"))
+    JUMPCUT_MIN_ISLAND_MS = int(os.getenv("JUMPCUT_MIN_ISLAND_MS", "300"))
+    GEMINI_TRANSCRIBE_MAX_WAIT_SEC = float(os.getenv("GEMINI_TRANSCRIBE_MAX_WAIT_SEC", "180.0"))
+    TEMP_RETENTION = os.getenv("TEMP_RETENTION", "after_job")
 
     # Redis Önbellek & Idempotency
     REDIS_HOST = os.getenv("REDIS_HOST", "redis")
@@ -45,7 +71,7 @@ class Config:
     API_BASE_URL = os.getenv("API_BASE_URL", "http://host.docker.internal:5000")
     INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "otoedit-internal-secret-key-2026")
 
-    # Performans ve Algılama Eşikleri
+    # Performans ve Algılama Eşikleri (Legacy / Gesture)
     GESTURE_FRAME_SKIP = int(os.getenv("GESTURE_FRAME_SKIP", "8"))
     GESTURE_CONFIDENCE = float(os.getenv("GESTURE_CONFIDENCE", "0.7"))
     SILENCE_MIN_LEN_MS = int(os.getenv("SILENCE_MIN_LEN_MS", "500"))

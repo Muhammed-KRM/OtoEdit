@@ -12,6 +12,7 @@ def mock_consumer():
          patch("consumers.analysis_consumer.PipelineLogger"), \
          patch("consumers.analysis_consumer.AnalysisCacheService"), \
          patch("consumers.analysis_consumer.AudioEnhancer"), \
+         patch("consumers.analysis_consumer.AudioAnalyzer"), \
          patch("consumers.analysis_consumer.Transcriber"), \
          patch("consumers.analysis_consumer.SilenceDetector"), \
          patch("consumers.analysis_consumer.RetakeDetector"), \
@@ -47,12 +48,13 @@ def test_consumer_cache_hit_bypasses_pipeline(mock_consumer):
     mock_consumer.cache.get_cached_edl.return_value = {"edl": "cached_version_1"}
 
     # Mock heartbeat keeper
-    with patch("consumers.analysis_consumer.RabbitHeartbeatKeeper") as mock_hb:
+    with patch("consumers.analysis_consumer.RabbitHeartbeatKeeper"), \
+         patch("consumers.analysis_consumer.Config.ENABLE_ANALYSIS_CACHE", True):
         mock_consumer._on_message(mock_ch, mock_method, None, body)
 
     # Verify: Transcriber or heavy steps should NOT be called on cache hit
     mock_consumer.transcriber.transcribe.assert_not_called()
-    mock_consumer.silence_detector.detect.assert_not_called()
+    mock_consumer.silence_detector.detect_v2.assert_not_called()
 
     # Verify: Completed event published and message acknowledged
     mock_consumer.publisher.publish_analysis_completed.assert_called_once_with(
@@ -83,9 +85,16 @@ def test_consumer_full_parallel_pipeline_execution(mock_consumer):
     mock_consumer.cache.get_cached_edl.return_value = None  # Cache miss
 
     # Pipeline mock returns
+    mock_analysis = MagicMock()
+    mock_analysis.peaks = [0.1, 0.5]
+    mock_consumer.audio_analyzer.analyze.return_value = mock_analysis
+
+    mock_transcript = MagicMock()
+    mock_transcript.words = []
+    mock_transcript.segments = []
     mock_consumer.audio_enhancer.enhance.return_value = "/tmp/clean.wav"
-    mock_consumer.transcriber.transcribe.return_value = [{"text": "merhaba", "start": 0.0, "end": 2.0}]
-    mock_consumer.silence_detector.detect.return_value = [{"start": 2.1, "end": 3.5}]
+    mock_consumer.transcriber.transcribe.return_value = mock_transcript
+    mock_consumer.silence_detector.detect_v2.return_value = [{"start": 2.1, "end": 3.5}]
     mock_consumer.face_tracker.track.return_value = [{"time": 1.0, "box": [10, 10, 50, 50]}]
     mock_consumer.retake_detector.detect_retakes.return_value = []
     mock_consumer.command_engine.detect.return_value = []
@@ -94,13 +103,13 @@ def test_consumer_full_parallel_pipeline_execution(mock_consumer):
     mock_consumer.auto_broll_engine.generate_broll_overlays.return_value = []
     mock_consumer.edl_builder.build.return_value = {"status": "ok", "tracks": []}
 
-    with patch.object(mock_consumer, "_extract_audio_peaks", return_value=[0.1, 0.5]):
-        with patch("consumers.analysis_consumer.RabbitHeartbeatKeeper"):
-            mock_consumer._on_message(mock_ch, mock_method, None, body)
+    with patch("consumers.analysis_consumer.RabbitHeartbeatKeeper"), \
+         patch("consumers.analysis_consumer.Config.ENABLE_ANALYSIS_CACHE", True):
+        mock_consumer._on_message(mock_ch, mock_method, None, body)
 
     # All parallel components must have been executed
     mock_consumer.transcriber.transcribe.assert_called_once()
-    mock_consumer.silence_detector.detect.assert_called_once()
+    mock_consumer.silence_detector.detect_v2.assert_called_once()
     mock_consumer.face_tracker.track.assert_called_once()
     mock_consumer.retake_detector.detect_retakes.assert_called_once()
     mock_consumer.command_engine.detect.assert_called_once()

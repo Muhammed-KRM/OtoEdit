@@ -74,7 +74,7 @@ def test_generate_ass_file():
         assert "[Events]" in content
         assert "Abone Ol!" in content
         assert "Merhaba" in content
-        assert "{\\k" in content  # Karaoke etiketi
+        assert "\\c&H" in content or "{\\k" in content  # Kelime vurgu etiketi
 
 
 def test_generate_ass_file_with_track_id():

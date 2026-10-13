@@ -8,6 +8,7 @@ except Exception:
 import numpy as np
 from config import Config
 from pipeline.audio_enhancer import AudioEnhancer
+from pipeline.audio_analysis import AudioAnalyzer, AudioAnalysis
 from pipeline.edl_builder import EdlBuilder
 from pipeline.face_tracker import FaceTracker
 from pipeline.multimodal_command_engine import MultimodalCommandEngine
@@ -41,6 +42,7 @@ class AnalysisConsumer:
         self.pipeline_logger = PipelineLogger(publisher=self.publisher)
         self.cache = AnalysisCacheService()
         self.audio_enhancer = AudioEnhancer()
+        self.audio_analyzer = AudioAnalyzer()
         self.transcriber = Transcriber()
         self.silence_detector = SilenceDetector()
         self.retake_detector = RetakeDetector()
@@ -157,31 +159,31 @@ class AnalysisConsumer:
                     logger.warning(f"Temiz ses MinIO'ya yüklenirken uyarı: {ex}")
 
             # -------------------------------------------------------------
-            # 🚀 FAZ 3.1: PARALEL GRUP 1 (STT, Sessizlik, Yüz Takibi, Waveform)
-            # Bağımsız ilk analiz aşamalarını eşzamanlı olarak paralel koştur
+            # 🚀 ADIM 1: SES ANALİZİ (VAD + RMS Zarfı + Waveform Peaks)
+            # Orijinal videodan tek seferde PCM ve Silero VAD analizi yapılır
             # -------------------------------------------------------------
             self.pipeline_logger.log_progress(
-                project_id, video_id, PipelineStage.STT, 20,
-                message="Eşzamanlı analiz grubu 1 başlatıldı (Transkripsiyon, Sessizlik, Kadraj)..."
+                project_id, video_id, PipelineStage.SES_IYILESTIRME, 18,
+                message="Akustik enerji ve VAD ses analizi yapılıyor..."
+            )
+            analysis = self.audio_analyzer.analyze(local_video_path)
+            audio_peaks = analysis.peaks
+
+            # -------------------------------------------------------------
+            # 🚀 FAZ 3.1: PARALEL GRUP 1 (STT + Yüz Takibi)
+            # -------------------------------------------------------------
+            self.pipeline_logger.log_progress(
+                project_id, video_id, PipelineStage.STT, 25,
+                message="Eşzamanlı analiz grubu 1 başlatıldı (Transkripsiyon, Kadraj)..."
             )
 
-            transcript = []
-            silence_cuts = []
+            transcript = None
             face_data = []
-            audio_peaks = []
 
             def _run_transcribe():
-                logger.info("🧵 Thread: Whisper transkripsiyon başladı")
-                res = self.transcriber.transcribe(clean_audio_path, video_id=video_id)
-                logger.info("🧵 Thread: Whisper transkripsiyon bitti")
-                return res
-
-            def _run_silence():
-                if not auto_jumpcut:
-                    return []
-                logger.info("🧵 Thread: Sessizlik tespiti başladı")
-                res = self.silence_detector.detect(clean_audio_path)
-                logger.info(f"🧵 Thread: Sessizlik tespiti bitti ({len(res)} kesik)")
+                logger.info("🧵 Thread: STT orkestrasyonu başladı")
+                res = self.transcriber.transcribe(clean_audio_path, analysis=analysis, video_id=video_id)
+                logger.info("🧵 Thread: STT orkestrasyonu bitti")
                 return res
 
             def _run_face():
@@ -192,32 +194,29 @@ class AnalysisConsumer:
                 logger.info(f"🧵 Thread: Yüz takibi bitti ({len(res)} veri)")
                 return res
 
-            def _run_peaks():
-                logger.info("🧵 Thread: Dalga formu (Audio peaks) çıkarımı başladı")
-                res = self._extract_audio_peaks(clean_audio_path)
-                logger.info("🧵 Thread: Dalga formu çıkarımı bitti")
-                return res
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="AnalysisGroup1") as executor:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="AnalysisGroup1") as executor:
                 f_transcribe = executor.submit(_run_transcribe)
-                f_silence = executor.submit(_run_silence)
                 f_face = executor.submit(_run_face)
-                f_peaks = executor.submit(_run_peaks)
 
                 transcript = f_transcribe.result()
-                silence_cuts = f_silence.result()
                 face_data = f_face.result()
-                audio_peaks = f_peaks.result()
 
             self.pipeline_logger.log_progress(
-                project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 50,
-                message="Grup 1 tamamlandı. Yapay zeka ve öneri motorları başlatılıyor..."
+                project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 55,
+                message="Transkript tamamlandı. Akıllı kesimler (Jump-Cut v2, Retake) ve yapay zeka önerileri hazırlanıyor..."
             )
 
             # -------------------------------------------------------------
-            # 🚀 FAZ 3.1: PARALEL GRUP 2 (Retake, Gestures, Repurposing, Suggestions, BRoll)
-            # Transkript bağımlı yapay zeka modellerini eşzamanlı olarak paralel koştur
+            # 🚀 FAZ 3.2: PARALEL GRUP 2 (Jump-Cut v2, Retake, Gestures, Repurposing, Suggestions, BRoll)
             # -------------------------------------------------------------
+            silence_cuts = []
+            if auto_jumpcut:
+                logger.info("✂️ Jump-Cut v2 hesaplanıyor (kelime korumalı)...")
+                silence_cuts = self.silence_detector.detect_v2(
+                    analysis=analysis,
+                    transcript_words=transcript.words
+                )
+
             retake_cuts = []
             commands = []
             repurposing_data = []
@@ -229,7 +228,12 @@ class AnalysisConsumer:
                 if not auto_retake:
                     return []
                 logger.info("🧵 Thread: Akıllı retake analizi başladı")
-                res = self.retake_detector.detect_retakes(clean_audio_path, transcript, silence_cuts=silence_cuts)
+                res = self.retake_detector.detect_retakes(
+                    clean_audio_path,
+                    transcript,
+                    silence_cuts=silence_cuts,
+                    analysis=analysis
+                )
                 logger.info(f"🧵 Thread: Akıllı retake analizi bitti ({len(res)} kesik)")
                 return res
 
@@ -340,6 +344,14 @@ class AnalysisConsumer:
             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
         finally:
             heartbeat.stop()
+            if getattr(Config, "TEMP_RETENTION", "after_job") == "after_job":
+                from utils.janitor import cleanup_files
+                to_clean = []
+                if 'clean_audio_path' in locals() and clean_audio_path != local_video_path:
+                    to_clean.append(clean_audio_path)
+                if 'local_video_path' in locals():
+                    to_clean.append(local_video_path)
+                cleanup_files(*to_clean)
 
     def _extract_audio_peaks(self, audio_path: str, num_peaks: int = 1000) -> list:
         try:

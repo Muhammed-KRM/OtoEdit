@@ -34,6 +34,8 @@ def test_retake_detector_identifies_meta_and_keeps_clean_speech():
         "clipping_score": 95.0,
         "current_rms_db": -20.0
     }
+    detector.transcript_verifier = MagicMock()
+    detector.transcript_verifier.audit_transcript.return_value = []
 
     segments = [
         TranscriptSegment(start=10.0, end=14.0, text="Bu da olmadı başasar."),

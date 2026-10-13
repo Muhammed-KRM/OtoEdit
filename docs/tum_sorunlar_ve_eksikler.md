@@ -41,30 +41,55 @@ Uygulamanın şu an çalışan kısımlarında tespit edilen ve düzeltilmesi ge
 
 ---
 
-### A4. OtoCut Nadiren Erken Kesiyor
-- **Konum:** Sessizlik algılama modülü (silence_detector.py / pipeline)
-- **Belirti:** OtoCut sessizlik algılama genel olarak iyi çalışıyor, ancak bazı durumlarda ses çok alçaldığında (fısıldama, düşük tonlu konuşma) sistemi sessizlik olarak algılayıp konuşmayı biraz erken kesiyor. Konuşmacının son hecesi veya son kelimesi bazen budanıyor.
-- **Kök Neden:** Sessizlik eşik değeri (threshold) sabit veya çok katı ayarlanmış olabilir. Ses seviyesi aşırı düşük olmadığı sürece (yumuşak konuşma, alçalan ton) bu bölgeleri ses olarak kabul edip kesim noktasını en son mümkün noktaya (konuşmanın tam bitişine) taşıması gerekiyor.
-- **Olası Çözüm:** Sessizlik algılama eşik değerine dinamik bir tolerans marjı eklemek. Ses seviyesi düşük olsa bile belirli bir minimumun üzerindeyse "sessizlik" yerine "ses" olarak kabul edip kesimi birkaç yüz milisaniye geç yapmak (trailing buffer / padding).
-- **Öncelik:** 🟡 Orta
+### A4. OtoCut Nadiren Erken Kesiyor — ✅ ÇÖZÜLDÜ (13 Ekim 2026)
+- **Konum:** Sessizlik algılama modülü (`pipeline/silence_detector.py`, `pipeline/audio_analysis.py`)
+- **Belirti:** OtoCut sessizlik algılama konuşmanın son hecesini veya düşük tondaki kelimeleri erken kesiyordu.
+- **Kök Neden:** Sabit dBFS pydub eşiği konuşmacının fısıltı ve ton düşüşlerini sessizlik sanıyordu.
+- **Uygulanan Çözüm (Jump-Cut v2):**
+  1. **Silero VAD:** Tek kaynak `AudioAnalyzer` ile konuşma bölgeleri tespit edilir.
+  2. **Kelime Koruması (Word Guard):** Transkript kelimeleri `±150ms` koruma kalkanıyla korunur; hiçbir kesim kelimeye değemez.
+  3. **Güvenlik Payı (Padding):** Konuşma sınırlarından içeri `200ms` çekilir.
+  4. **Kenar İnce Ayarı:** Kesim kenarları lokal RMS minimumuna oturtularak tık/patlama sesleri yok edilir.
+  5. **Ada Birleştirme:** 300ms'den kısa yetim konuşma adaları birleştirilerek mikro-klip sayısı 0'a indirildi.
+- **Detaylı Rehber:** [Çözüm Rehberi — Transkript Motoru ve Oto Jump-Cut](file:///d:/OtoEdit/OtoEdit/docs/cozum_rehberi_transkript_ve_jumpcut.md)
+- **Durum:** ✅ Tamamen Çözüldü ve Test Edildi (74 test passed, 0 micro-clips).
 
 ---
 
 ### A5. Retake (Hatalı Tekrar) Algılama Sonucu Doğrudan Kullanılabilir Değil
-- **Konum:** Retake detector modülü (retake_detector.py / pipeline)
-- **Belirti:** Retake algılama mekanizması çalışıyor ve hatalı tekrarları buluyor, ancak sonuç doğrudan kullanılabilir, temiz bir video üretmiyor. Bazen anlamsız kesimler, kendini tekrar eden cümleler veya bağlam kopuklukları kalıyor.
-- **Kök Neden:** Retake algılama sonrasında kesilen parçaların ardından kalan transkriptin anlamlılığının kontrol edilmemesi. Sistem "retake buldum, kestim" diyor ama "kalan metin tutarlı mı?" sorusunu sormadan bırakıyor.
-- **Olası Çözüm:** Tüm kesim ve retake işlemleri bittikten sonra yapay zekanın (Gemini) kalan transkripti gözden geçirip anlamlı bir bütün oluşturup oluşturmadığını kontrol etmesi. Tekrar eden cümleler, saçma kesimler veya bağlam kopuklukları varsa bunları düzeltmesi gerekiyor.
-- **Öncelik:** 🟡 Orta
+- **Konum:** Retake detector modülü (`pipeline/retake_detector.py`, `pipeline/transcript_verifier.py`)
+- **Belirti:** Retake algılama mekanizması çalışıyor ve hatalı tekrarları buluyordu, ancak farklı kelimelerle yapılan takılmalar (semantic retake) ve askıda kalan yetim bağlaçlar ("Ve burada aslında...") temizlenemiyordu.
+- **Kök Neden:** Transkript üzerinde anlamsal (LLM) bütünlük denetimi olmaması ve sadece lokal kelime benzerliğine bakılması.
+- **Uygulanan Çözüm:** Gemini 3.8 Flash kurgu denetçisi (`TranscriptVerifier`) geliştirildi. Yarım kalan cümleler, anlamsal tekrarlar ve stüdyo outtake'leri tespit edilip kelime sınırlarına ve lokal RMS dip noktalarına oturtularak temiz kesimler üretildi.
+- **Durum:** ✅ **Çözüldü ve Test Edildi** (86 test geçti).
 
 ---
 
 ### A6. Katman Ekleme/Silme Seçimi Yapılamıyor
-- **Konum:** Editor frontend (editor.component.ts)
-- **Belirti:** Editörde "Katman Ekle" ve "Katman Sil" butonları mevcut, ancak kullanıcı hangi katmanı silmek istediğini seçemiyor. Silme işlemi her zaman en son katmanı siliyor. Araya eklenmiş bir katmanı (örn: Katman #2) silmek mümkün değil.
-- **Kök Neden:** Katman silme mantığı, belirli bir katman ID'si veya indeksini parametre olarak almak yerine, her zaman listenin son elemanını siliyor.
-- **Olası Çözüm:** Silme fonksiyonuna aktif seçili katmanın ID'sini geçirmek. Kullanıcı bir katmana tıklayarak veya sağ tık menüsünden "Bu katmanı sil" seçerek belirli bir katmanı hedefleyebilmeli.
-- **Öncelik:** 🟢 Düşük-Orta
+- **Konum:** Editor frontend (`editor.component.ts`)
+- **Belirti:** Editörde "Katman Ekle" ve "Katman Sil" butonları mevcuttu, ancak kullanıcı hangi katmanı silmek istediğini seçemiyordu; her zaman en son katman siliniyordu.
+- **Kök Neden:** Katman silme mantığının parametre almayıp sadece `customTrackCount - 1` yapması.
+- **Uygulanan Çözüm:** Her katman başlığına özel hedefli silme butonu (`deleteTrackLane(trackNum)`), gizleme (`👁️`) ve kilitleme (`🔒`) kontrolleri eklendi. Silinen katmandaki öğeler kaldırılıp üst katman indeksleri otomatik olarak aşağı kaydırıldı ve backend senkronizasyonu sağlandı.
+- **Durum:** ✅ **Çözüldü ve Test Edildi** (Production build başarılı).
+
+---
+
+### A7. Ses Başlangıcı (Lead-in) Kesilmesi ve STT Kotası Kaynaklı Transkript Çökmesi
+- **Konum:** `pipeline/audio_analysis.py`, `pipeline/silence_detector.py`, `pipeline/stt/rate_limiter.py`, `pipeline/stt/gemini_transcribe.py`, `pipeline/transcriber.py`
+- **Belirti:** Konuşma başlangıçlarındaki ilk heceler/harfler kırmızı kesim alanı içine taşıyordu (kesimden konuşmaya sadece 86ms kalıyordu). Uzun videolarda STT ikinci parçada 429 kotasına çarpınca tüm transkript çöpe atılıp ekrana `[TRANSKRİPT ÇIKARILAMADI]` basılıyordu.
+- **Kök Neden:**
+  1. Silero VAD'de `speech_pad_ms=0` olması sebebiyle yumuşak ünsüzlerin ve nefesin 150ms geç algılanması.
+  2. Jump-Cut v2 simetrik padding'inin konuşma başlangıcında yetersiz kalması.
+  3. STT hız sınırlayıcısının `max_wait_sec=45s` olması (Google'ın 50s soğuma süresini beklememesi).
+  4. `transcriber.py` içinde parça bazlı hata izolasyonu olmaması (tek parça hatasında tüm kelimelerin silinmesi).
+- **Uygulanan Çözüm:**
+  1. `speech_pad_ms=150` yapılarak ünsüzler erken yakalandı.
+  2. Asimetrik padding getirildi: Konuşma öncesi `pad_lead_sec=0.35` (350ms pay), konuşma sonrası `pad_trailing_sec=0.20` (200ms pay). Kalan güvenlik payı 86ms'den **386ms'ye** çıkarıldı.
+  3. Snapping (`find_energy_minimum`) tek yönlü hale getirilerek kesim kenarlarının konuşma içine kayması engellendi.
+  4. `GeminiKeyRotator` maksimum bekleme süresi 180s'ye çıkarıldı; `gemini_transcribe` içine 429 retry eklendi.
+  5. `transcriber.py` parça bazlı izole edildi; bir parça hata alsa dahi önceki parçaların kelimeleri korunur.
+- **Detaylı Rapor:** [Teşhis ve Kesin Çözüm Raporu](file:///d:/OtoEdit/OtoEdit/docs/teshis_ve_kesin_cozum_ses_kesilmesi_ve_transkript.md)
+- **Durum:** ✅ **Çözüldü ve Test Edildi** (90 test geçti).
 
 ---
 
@@ -198,30 +223,31 @@ Tasarlanmış ve kısmen geliştirilmiş ancak tam olarak çalışır hale getir
 
 ## Özet Tablo — Tüm Sorunlar ve Öncelikler
 
-| # | Kategori | Sorun / Eksiklik | Öncelik |
-|---|---|---|---|
-| A1 | 🐛 Bug | Altyazılar ~1 sn erken görünüyor | 🔴 Yüksek |
-| A2 | 🐛 Bug | Metin overlay fontu editördekinden farklı | 🟡 Orta |
-| A3 | 🐛 Bug | Görsel overlay'ler render edilen videoda yok | 🔴 En Yüksek |
-| A4 | 🐛 Bug | OtoCut nadiren konuşmayı erken kesiyor | 🟡 Orta |
-| A5 | 🐛 Bug | Retake sonucu doğrudan kullanılabilir video çıkmıyor | 🟡 Orta |
-| A6 | 🐛 Bug | Katman silme seçimi yapılamıyor (hep son katman) | 🟢 Düşük-Orta |
-| B1 | ⭐ Eksik | Görsel otomatik arkaplan kaldırma | 🟡 Orta |
-| B2 | ⭐ Eksik | Renk ayarları (color grading) | 🟢 Düşük |
-| B3 | ⭐ Eksik | Gelişmiş yazı editörü (gölge, border, spacing vb.) | 🟡 Orta |
-| B4 | ⭐ Eksik | Gelişmiş altyazı özelleştirme (font, renk, konum) | 🟡 Orta |
-| B5 | ⭐ Eksik | Ses ayarları ve kontrolleri | 🟡 Orta |
-| B6 | ⭐ Eksik | Hız kontrolü (speed ramp) | 🟡 Orta |
-| B7 | ⭐ Eksik | Katman kontrolü (mute, hide, lock) | 🟢 Düşük-Orta |
-| C1 | 🔧 Yarım | OtoEdit AI otomatik düzenleme tam çalışmıyor | 🔴 Yüksek |
-| C2 | 🔧 Yarım | AI transkript doğrulama (post-processing) | 🟡 Orta |
+| # | Kategori | Sorun / Eksiklik | Öncelik | Durum (13 Ekim 2026) |
+|---|---|---|---|---|
+| A1 | 🐛 Bug | Altyazılar ~1 sn erken görünüyor | 🔴 Yüksek | ✅ **Çözüldü** (Frame-accurate seek + remapping) |
+| A2 | 🐛 Bug | Metin overlay fontu editördekinden farklı | 🟡 Orta | ✅ **Çözüldü** (Google fontları yüklendi, 4/3 DPI kalibrasyonu yapıldı) |
+| A3 | 🐛 Bug | Görsel overlay'ler render edilen videoda yok | 🔴 En Yüksek | ✅ **Çözüldü** (2-pass filter_complex ile render'a eklendi) |
+| A4 | 🐛 Bug | OtoCut konuşmayı erken kesiyor (fısıltı/hece) | 🔴 Acil | ✅ **Çözüldü** (Silero VAD + Jump-Cut v2 + 150ms Word Guard) |
+| A5 | 🐛 Bug | Retake sonucu doğrudan kullanılabilir video çıkmıyor | 🟡 Orta | ✅ **Çözüldü** (Gemini 3.8 Flash kurgu denetçisi + RMS dip hizalaması) |
+| A6 | 🐛 Bug | Katman silme seçimi yapılamıyor (hep son katman) | 🟢 Düşük-Orta | ✅ **Çözüldü** (Hedefli katman silme `deleteTrackLane`) |
+| B1 | ⭐ Eksik | Görsel otomatik arkaplan kaldırma | 🟡 Orta | ⏳ Beklemede |
+| B2 | ⭐ Eksik | Renk ayarları (color grading) | 🟢 Düşük | ⏳ Beklemede |
+| B3 | ⭐ Eksik | Gelişmiş yazı editörü (gölge, border, spacing vb.) | 🟡 Orta | ⚠️ Kısmen yapıldı (Gölge ve font boyutu tamamlandı) |
+| B4 | ⭐ Eksik | Gelişmiş altyazı özelleştirme (font, renk, konum) | 🟡 Orta | ⚠️ Kısmen yapıldı (TikTok sarı stil & gizleme toggle tamamlandı) |
+| B5 | ⭐ Eksik | Ses ayarları ve kontrolleri | 🟡 Orta | ⏳ Beklemede |
+| B6 | ⭐ Eksik | Hız kontrolü (speed ramp) | 🟡 Orta | ⏳ Beklemede |
+| B7 | ⭐ Eksik | Katman kontrolü (mute, hide, lock) | 🟢 Düşük-Orta | ✅ **Çözüldü** (Göz 👁️, Kilit 🔒, Sil ✕ kontrolleri tamamlandı) |
+| C1 | 🔧 Yarım | OtoEdit AI otomatik düzenleme tam çalışmıyor | 🔴 Yüksek | ⏳ Beklemede (Pexels 401 hatası ve AI döngüsü) |
+| C2 | 🔧 Yarım | AI transkript doğrulama (post-processing) | 🟡 Orta | ✅ **Çözüldü** (`TranscriptVerifier` ile post-cut denetimi aktif) |
+
 
 ---
 
-## Hemen Çözülmesi Gerekenler (İlk 3)
+## Güncel Öncelikler (13 Ekim 2026 İtibarıyla)
 
-1. **A3 — Görsel Overlay Render Entegrasyonu** → Kullanıcının eklediği görseller videoda hiç görünmüyor.
-2. **A1 — Altyazı Zamanlama Düzeltmesi** → Altyazılar konuşmadan ~1 sn önce çıkıyor.
-3. **A2 — Font Uyumsuzluğu Giderme** → Yazılar editörde başka, videoda başka font ile çıkıyor.
+1. **A4 — Sessizlik Kesimi (Jump-Cut) İyileştirmesi:** Konuşmacının hecelerini ve fısıltılarını kesmemesi için `-50 dBFS`, `800ms min_silence` ve `250ms padding` parametrelerinin Python Worker'a işlenmesi ve servisin yeniden başlatılması.
+2. **Pexels API 401 Hatası Giderme:** `.env` dosyasındaki geçersiz Pexels API anahtarının güncellenmesi.
+3. **A5 & C2 — Retake ve Transkript Bütünlüğü:** Gemini tabanlı kurgu denetiminin devreye alınması.
 
-Bu üç sorunun detaylı teşhis ve çözüm planı: [`docs/kritik_3_sorun_cozum_plani.md`](file:///d:/OtoEdit/OtoEdit/docs/kritik_3_sorun_cozum_plani.md)
+Detaylı konsol incelemesi ve dalga formu görsel analizi için bakınız: [`docs/guncel_durum_ve_kalan_sorunlar_raporu.md`](file:///d:/OtoEdit/OtoEdit/docs/guncel_durum_ve_kalan_sorunlar_raporu.md)

@@ -151,6 +151,69 @@ class GeminiClient:
 
         return self._fallback_suggestions(duration)
 
+    def audit_transcript_coherence(self, segments_data: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Transkripti anlamsal bütünlük, takılmalar (semantic retake),
+        yarım kalan yetim cümle parçaları (orphaned fragments) ve
+        montaj outtake'leri açısından denetler.
+        Elenmesi önerilen segmentlerin listesini döndürür.
+        """
+        if not self.model or not segments_data:
+            return []
+
+        compact_segments = [
+            {
+                "id": s.get("id"),
+                "start": round(float(s.get("start", 0)), 2),
+                "end": round(float(s.get("end", 0)), 2),
+                "text": s.get("text", "").strip()
+            }
+            for s in segments_data
+            if s.get("text", "").strip()
+        ]
+
+        if not compact_segments:
+            return []
+
+        prompt = f"""
+Sen profesyonel bir video kurgu yönetmenisin. Aşağıda bir konuşmacının video kaydına ait transkript segmentleri yer almaktadır.
+Görevin: Videonun nihai kurgusunda DİNLENME AKICILIĞINI BOZAN ve ATILMASI (kesilmesi) gereken segmentleri tespit etmektir.
+
+Hangi durumları tespit edeceksin?
+1. "semantic_retake": Konuşmacı bir cümleye başlamış fakat kekelemiş, takılmış veya vazgeçip aynı düşünceyi hemen sonraki cümlede (farklı kelimeler kullansa bile) yeniden söylemiş. İlk (başarısız/terk edilmiş) cümleyi ele.
+2. "aborted_sentence": Cümleye başlanmış fakat bitirilmeden yarıda bırakılmış, havada kalmış (örn: "Biz burada aslında...", "Şimdi şey...").
+3. "orphaned_fragment": Tek başına kalmış, hiçbir yere bağlanmayan bağlaç, takılma veya bozuk kelime kırıntısı.
+4. "meta_speech": Konuşmacının montajcıya, kendine veya stüdyo ekibine söylediği sözler (örn: "Pardon baştan alıyorum", "Bunu montajda kesersiniz", "Slaytı göremedim").
+
+KURALLAR:
+- Başarılı, anlamlı ve tamamlanmış cümleleri KESİNLİKLE KESME. Şüphede kalırsan koru.
+- Sadece açıkça elenmesi gereken hatalı veya yarım cümleleri listele.
+- Yanıtını SADECE aşağıdaki JSON dizisi formatında ver:
+[
+  {{
+    "id": 4,
+    "reason": "semantic_retake",
+    "description": "Cümle takılarak yarıda bırakılmış, sonraki cümlede düzeltilerek söylenmiş."
+  }}
+]
+
+Transkript Segmentleri:
+{json.dumps(compact_segments, ensure_ascii=False, indent=2)}
+"""
+
+        try:
+            raw_text = self._execute_with_retry(prompt)
+            if raw_text:
+                parsed = self._safe_parse_json(raw_text)
+                if isinstance(parsed, list):
+                    logger.info(f"Gemini Kurgu Denetçisi {len(parsed)} elenecek segment tespit etti.")
+                    return parsed
+        except Exception as e:
+            logger.error(f"Gemini kurgu denetim hatası: {e}", exc_info=True)
+
+        return []
+
+
     @classmethod
     def _safe_parse_json(cls, text: str) -> Any:
         """Markdown ve format bozukluklarını temizleyerek güvenli JSON çözer."""

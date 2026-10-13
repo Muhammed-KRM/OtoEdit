@@ -4,7 +4,7 @@ from pipeline.silence_detector import SilenceDetector
 
 
 def test_silence_detector_detects_and_applies_padding():
-    detector = SilenceDetector(min_silence_len=500, silence_thresh=-35, padding_sec=0.1)
+    detector = SilenceDetector(min_silence_len=500, silence_thresh=-35, padding_sec=0.1, engine="legacy")
 
     # 1.0s - 3.0s ve 5.0s - 8.0s aralarında sessizlik simüle ediyoruz
     mock_ranges = [
@@ -30,7 +30,7 @@ def test_silence_detector_detects_and_applies_padding():
 
 
 def test_silence_detector_handles_exception_gracefully():
-    detector = SilenceDetector()
+    detector = SilenceDetector(engine="legacy")
 
     with patch("pydub.AudioSegment.from_file", side_effect=RuntimeError("Dosya bozuk")):
         cuts = detector.detect("corrupted.mp4")

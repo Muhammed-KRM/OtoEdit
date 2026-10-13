@@ -4,13 +4,16 @@ Transkript üzerinde anlamsal tekrar öbeklerini, stüdyo meta-komutlarını ("b
 ve yarım kalan cümleleri tespit eder. AcousticScorer ile ses kalitelerini (patlama, fısıltı, süreklilik)
 karşılaştırır ve en kaliteli olanı seçip hatalı tekrarları EDL CutItem olarak döndürür.
 """
-from typing import List, Dict, Any, Tuple, Set
+from typing import List, Dict, Any, Tuple, Set, Optional
 import re
 import difflib
 from models.edl_model import CutItem
 from models.transcript_model import TranscriptResult, TranscriptSegment
 from pipeline.acoustic_scorer import AcousticScorer
+from pipeline.audio_analysis import AudioAnalysis
+from pipeline.transcript_verifier import TranscriptVerifier
 from utils.logger import get_logger
+
 
 logger = get_logger(__name__)
 
@@ -27,6 +30,40 @@ class RetakeCandidate:
 class RetakeDetector:
     """Transkript ve ses sinyali üzerinden hatalı tekrarları budayan akıllı motor."""
 
+    def _create_retake_cut(
+        self,
+        cut_id: str,
+        segment: TranscriptSegment,
+        reason: str,
+        command: str,
+        analysis: Optional[AudioAnalysis] = None
+    ) -> CutItem:
+        """
+        Retake kesimini segmentin ilk kelimesinin başlangıcından
+        son kelimesinin bitişine oturtur ve kenarları lokal RMS minimumuna çeker (Adım 7).
+        """
+        c_start = segment.start
+        c_end = segment.end
+
+        # Kelime sınırlarına oturt
+        if getattr(segment, "words", None) and len(segment.words) > 0:
+            c_start = segment.words[0].start
+            c_end = segment.words[-1].end
+
+        # RMS zarfı varsa kenar ince ayarı
+        if analysis is not None:
+            c_start = analysis.find_energy_minimum(c_start, search_window_sec=0.05)
+            c_end = analysis.find_energy_minimum(c_end, search_window_sec=0.05)
+
+        return CutItem(
+            id=cut_id,
+            start=round(c_start, 2),
+            end=round(c_end, 2),
+            reason=reason,
+            source="auto",
+            command=command
+        )
+
     META_RESTART_PATTERNS = [
         r'\bbaşa\s*sar\b',
         r'\bbaşasar\b',
@@ -42,9 +79,10 @@ class RetakeDetector:
     ORDINAL_WORDS = {'birinci', 'ikinci', 'üçüncü', 'dördüncü', 'beşinci', 'içinci', 'ilk', 'son'}
     STOPWORDS = {'ve', 'bu', 'da', 'de', 'için', 'ile', 'en', 'ise', 'o', 'çok', 'gibi', 'kadar', 'daha', 'yani', 'olan', 'olarak', 'tam'}
 
-    def __init__(self, similarity_threshold: float = 0.45):
+    def __init__(self, similarity_threshold: float = 0.45, transcript_verifier: Optional[TranscriptVerifier] = None):
         self.similarity_threshold = similarity_threshold
         self.scorer = AcousticScorer()
+        self.transcript_verifier = transcript_verifier or TranscriptVerifier()
 
     @staticmethod
     def normalize_tr(text: str) -> str:
@@ -93,7 +131,14 @@ class RetakeDetector:
         char_sim = difflib.SequenceMatcher(None, text1.lower().strip(), text2.lower().strip()).ratio()
         return (jaccard * 0.7) + (char_sim * 0.3)
 
-    def detect_retakes(self, audio_path: str, transcript: TranscriptResult, silence_cuts: List[CutItem] = None) -> List[CutItem]:
+    def detect_retakes(
+        self,
+        audio_path: str,
+        transcript: TranscriptResult,
+        silence_cuts: List[CutItem] = None,
+        analysis: Optional[AudioAnalysis] = None,
+        enable_ai_verification: bool = True
+    ) -> List[CutItem]:
         """
         Transkript segmentlerini kronolojik olarak tarar, meta-konuşmaları doğrudan keser,
         tekrarlanan cümleleri gruplar, en kaliteli olanı seçip hatalı olanları CutItem listesi olarak döndürür.
@@ -151,13 +196,12 @@ class RetakeDetector:
                 # 1. KURAL: Meta-konuşma içeriyorsa ("başa sar", "olmadı", "Allah konuşamadık") doğrudan KES!
                 if self.is_meta_speech(text_i):
                     logger.info(f"🛑 Meta-konuşma / Outtake tespit edildi: #{i} '{text_i}'")
-                    cut_items.append(CutItem(
-                        id=f"cut_retake_{i}",
-                        start=round(seg_i.start, 2),
-                        end=round(seg_i.end, 2),
+                    cut_items.append(self._create_retake_cut(
+                        cut_id=f"cut_retake_{i}",
+                        segment=seg_i,
                         reason=f"smart_retake (Stüdyo Outtake: {text_i})",
-                        source="auto",
-                        command=f"Elenen Stüdyo Konuşması: {text_i}"
+                        command=f"Elenen Stüdyo Konuşması: {text_i}",
+                        analysis=analysis
                     ))
                     visited.add(i)
 
@@ -166,13 +210,12 @@ class RetakeDetector:
                         prev_seg = segments[i - 1]
                         if not prev_seg.text.strip().endswith(('.', '!', '?')):
                             logger.info(f"✂ Yarım kalan cümle outtake ile birlikte kesildi: #{i-1} '{prev_seg.text}'")
-                            cut_items.append(CutItem(
-                                id=f"cut_retake_{i-1}",
-                                start=round(prev_seg.start, 2),
-                                end=round(prev_seg.end, 2),
-                                reason=f"smart_retake (Yarım Kalan İptal Edilmiş Cümle)",
-                                source="auto",
-                                command=f"Elenen Yarım Cümle: {prev_seg.text}"
+                            cut_items.append(self._create_retake_cut(
+                                cut_id=f"cut_retake_{i-1}",
+                                segment=prev_seg,
+                                reason="smart_retake (Yarım Kalan İptal Edilmiş Cümle)",
+                                command=f"Elenen Yarım Cümle: {prev_seg.text}",
+                                analysis=analysis
                             ))
                             visited.add(i - 1)
 
@@ -251,13 +294,12 @@ class RetakeDetector:
 
                     # Kaybeden tüm adayları EDL kesim listesine ekle
                     for loser in losers:
-                        cut_items.append(CutItem(
-                            id=f"cut_retake_{loser.index}",
-                            start=round(loser.segment.start, 2),
-                            end=round(loser.segment.end, 2),
+                        cut_items.append(self._create_retake_cut(
+                            cut_id=f"cut_retake_{loser.index}",
+                            segment=loser.segment,
                             reason=f"smart_retake (Skor: {loser.score:.1f} vs Kazanan: {winner.score:.1f})",
-                            source="auto",
-                            command=f"Elenen Tekrar: {loser.segment.text}"
+                            command=f"Elenen Tekrar: {loser.segment.text}",
+                            analysis=analysis
                         ))
                 else:
                     # Tekrar yok, bu segmentin ses seviyesini referans olarak al
@@ -270,6 +312,20 @@ class RetakeDetector:
             # İşlem bittiğinde RAM'i temizle
             if hasattr(self.scorer, "clear_cache"):
                 self.scorer.clear_cache()
+
+        # 3. AŞAMA: LLM TABANLI SEMANTİK VE YETİM KELİME DENETİMİ (A5 & C2)
+        if enable_ai_verification and self.transcript_verifier:
+            try:
+                ai_cuts = self.transcript_verifier.audit_transcript(
+                    transcript=transcript,
+                    analysis=analysis,
+                    existing_cuts=(silence_cuts or []) + cut_items
+                )
+                if ai_cuts:
+                    logger.info(f"🧠 AI Transkript Denetçisinden {len(ai_cuts)} ek retake/yetim kesim eklendi.")
+                    cut_items.extend(ai_cuts)
+            except Exception as e:
+                logger.warning(f"AI Transkript Denetiminde hata (ihmal edildi): {e}")
 
         logger.info(f"Akıllı Retake analizi bitti: Toplam {len(cut_items)} hatalı tekrar budandı.")
         return cut_items

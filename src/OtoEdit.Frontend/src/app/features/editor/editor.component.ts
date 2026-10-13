@@ -1067,17 +1067,14 @@ export interface ContextMenuState {
                 <span>🎬</span> KANALLAR
               </span>
               <div class="flex items-center gap-0.5">
-                <button (click)="removeTrackLane()" class="px-1 py-0.5 rounded bg-dark-800 hover:bg-rose-900/50 text-rose-400 border border-slate-700 hover:text-white transition-colors text-[9px] font-bold cursor-pointer" title="En Üst Katman Kanalını Sil">
-                  - Sil
-                </button>
-                <button (click)="addTrackLane()" class="px-1 py-0.5 rounded bg-dark-800 hover:bg-slate-700 text-sky-400 border border-slate-700 hover:text-white transition-colors text-[9px] font-bold cursor-pointer" title="Yeni Katman Kanalı Ekle">
+                <button (click)="addTrackLane()" class="px-1.5 py-0.5 rounded bg-dark-800 hover:bg-slate-700 text-sky-400 border border-slate-700 hover:text-white transition-colors text-[9px] font-bold cursor-pointer" title="Yeni Katman Kanalı Ekle">
                   + Katman
                 </button>
               </div>
             </div>
 
             <!-- Altyazı Kanalı Başlığı -->
-            <div class="h-10 border-b border-slate-800/70 px-2.5 flex items-center justify-between text-xs bg-dark-900/40 hover:bg-dark-800/60 transition-colors shadow-md z-10">
+            <div class="h-10 border-b border-slate-800/70 px-2 flex items-center justify-between text-xs bg-dark-900/40 hover:bg-dark-800/60 transition-colors shadow-md z-10">
               <span class="text-[10px] font-bold text-amber-400">💬 Altyazı</span>
               <button 
                 type="button"
@@ -1089,19 +1086,50 @@ export interface ContextMenuState {
               </button>
             </div>
 
-            <!-- Overlay Katman Başlıkları (T3, T2, T1) -->
+            <!-- Overlay Katman Başlıkları (T3, T2, T1) - CapCut Stili Kontroller -->
             <div 
               *ngFor="let trackNum of overlayTrackNumbers()" 
-              class="h-10 border-b border-slate-800/70 px-2.5 flex items-center justify-between text-xs bg-dark-900/90 hover:bg-dark-800/60 transition-colors">
-              <div class="flex items-center gap-1.5 min-w-0">
-                <span class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-black shrink-0 bg-sky-500/20 text-sky-300 border border-sky-500/30">
+              class="h-10 border-b border-slate-800/70 px-2 flex items-center justify-between text-xs bg-dark-900/90 hover:bg-dark-800/60 transition-colors group">
+              <div class="flex items-center gap-1 min-w-0">
+                <span class="w-4 h-4 rounded flex items-center justify-center text-[9px] font-black shrink-0 bg-sky-500/20 text-sky-300 border border-sky-500/30">
                   T{{ trackNum }}
                 </span>
-                <span class="text-[11px] font-semibold text-slate-300 truncate">Katman #{{ trackNum }}</span>
+                <span class="text-[10px] font-semibold text-slate-300 truncate" [title]="'Katman #' + trackNum">
+                  Katman {{ trackNum }}
+                </span>
               </div>
-              <span *ngIf="getOverlaysForTrack(trackNum).length > 0" class="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
-                {{ getOverlaysForTrack(trackNum).length }}
-              </span>
+
+              <!-- CapCut Stili Kontroller: Göz (Gizle/Göster), Kilit, Hedefli Sil -->
+              <div class="flex items-center gap-0.5 shrink-0">
+                <!-- Göz / Görünürlük Butonu -->
+                <button 
+                  type="button"
+                  (click)="toggleTrackVisibility(trackNum)"
+                  [title]="isTrackHidden(trackNum) ? 'Katmanı Göster' : 'Katmanı Gizle'"
+                  class="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-colors cursor-pointer"
+                  [ngClass]="isTrackHidden(trackNum) ? 'text-rose-400 bg-rose-950/40 border border-rose-500/30' : 'text-slate-400 hover:text-white hover:bg-slate-700/50'">
+                  <span>{{ isTrackHidden(trackNum) ? '🚫' : '👁️' }}</span>
+                </button>
+
+                <!-- Kilit Butonu -->
+                <button 
+                  type="button"
+                  (click)="toggleTrackLock(trackNum)"
+                  [title]="isTrackLocked(trackNum) ? 'Kilidi Aç' : 'Katmanı Kilitle'"
+                  class="w-5 h-5 rounded flex items-center justify-center text-[10px] transition-colors cursor-pointer"
+                  [ngClass]="isTrackLocked(trackNum) ? 'text-amber-400 bg-amber-950/40 border border-amber-500/30' : 'text-slate-500 hover:text-slate-300 hover:bg-slate-700/50'">
+                  <span>{{ isTrackLocked(trackNum) ? '🔒' : '🔓' }}</span>
+                </button>
+
+                <!-- Hedefli Katman Silme Butonu (A6 Çözümü) -->
+                <button 
+                  type="button"
+                  (click)="deleteTrackLane(trackNum)"
+                  [title]="'Katman #' + trackNum + ' Kanalını Sil'"
+                  class="w-5 h-5 rounded flex items-center justify-center text-[10px] text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition-colors cursor-pointer opacity-70 group-hover:opacity-100">
+                  <span>✕</span>
+                </button>
+              </div>
             </div>
 
             <!-- Video Kanalı Başlığı (V1) -->
@@ -1196,6 +1224,7 @@ export interface ContextMenuState {
               <!-- Katman Şeritleri (T3, T2, T1) -->
               <div 
                 *ngFor="let trackNum of overlayTrackNumbers()" 
+                [ngClass]="{'opacity-35 grayscale pointer-events-none select-none': isTrackHidden(trackNum)}"
                 class="relative h-10 bg-dark-900/40 border-b border-slate-800/60 overflow-hidden flex items-center hover:bg-dark-900/70 transition-colors">
                 <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
 
@@ -1206,11 +1235,12 @@ export interface ContextMenuState {
                 <!-- Katman Öğeleri (Pill'ler) -->
                 <div 
                   *ngFor="let ov of getOverlaysForTrack(trackNum)"
-                  (mousedown)="onOverlayDragStart($event, ov.id)"
-                  (click)="$event.stopPropagation(); selectOverlay(ov.id)"
+                  (mousedown)="!isTrackLocked(trackNum) && onOverlayDragStart($event, ov.id)"
+                  (click)="$event.stopPropagation(); !isTrackLocked(trackNum) && selectOverlay(ov.id)"
                   (contextmenu)="openOverlayContextMenu($event, ov)"
-                  class="overlay-item absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold cursor-grab active:cursor-grabbing z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[4px] border"
+                  class="overlay-item absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[4px] border"
                   [ngClass]="[
+                     isTrackLocked(trackNum) ? 'cursor-not-allowed opacity-85' : 'cursor-grab active:cursor-grabbing',
                      ov.type === 'text' 
                        ? 'bg-gradient-to-r from-[#ba5748] to-[#994033] text-white border-[#e07567]/70 hover:brightness-110 shadow-rose-950/50' 
                        : 'bg-gradient-to-r from-purple-700 to-indigo-700 text-white border-purple-400/70 hover:brightness-110 shadow-purple-950/50',
@@ -1219,10 +1249,10 @@ export interface ContextMenuState {
                        : ''
                   ]"
                   [ngStyle]="getOverlayStyle(ov)"
-                  [title]="(ov.type === 'text' ? 'Metin: ' : 'Görsel: ') + (ov.content || ov.source || ov.id) + ' (Katman #' + trackNum + ')'">
+                  [title]="(ov.type === 'text' ? 'Metin: ' : 'Görsel: ') + (ov.content || ov.source || ov.id) + ' (Katman #' + trackNum + (isTrackLocked(trackNum) ? ' - Kilitli' : '') + ')'">
                   
                   <!-- Sol Boyutlandırma Kolu -->
-                  <div (mousedown)="onOverlayResizeStart($event, ov.id, 'left')" class="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-l flex items-center justify-center z-30 transition-opacity">
+                  <div *ngIf="!isTrackLocked(trackNum)" (mousedown)="onOverlayResizeStart($event, ov.id, 'left')" class="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-l flex items-center justify-center z-30 transition-opacity">
                     <div class="w-0.5 h-3.5 bg-white/90 rounded"></div>
                   </div>
 
@@ -1231,12 +1261,13 @@ export interface ContextMenuState {
                     <span class="w-4 h-4 rounded text-[9px] font-black flex items-center justify-center bg-black/30 border border-white/20">
                       {{ ov.type === 'text' ? 'T' : '🖼️' }}
                     </span>
+                    <span *ngIf="isTrackLocked(trackNum)" class="text-[9px]" title="Katman Kilitli">🔒</span>
                     <span class="truncate">{{ ov.content || (ov.type === 'text' ? 'Metin' : 'Görsel') }}</span>
                     <span class="text-[9px] font-mono opacity-80 font-normal ml-1">({{ ov.duration }}s)</span>
                   </div>
 
                   <!-- Sağ Boyutlandırma Kolu -->
-                  <div (mousedown)="onOverlayResizeStart($event, ov.id, 'right')" class="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-r flex items-center justify-center z-30 transition-opacity">
+                  <div *ngIf="!isTrackLocked(trackNum)" (mousedown)="onOverlayResizeStart($event, ov.id, 'right')" class="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-r flex items-center justify-center z-30 transition-opacity">
                     <div class="w-0.5 h-3.5 bg-white/90 rounded"></div>
                   </div>
                 </div>
@@ -1735,10 +1766,19 @@ export class EditorComponent implements OnInit, OnDestroy {
     return URL.createObjectURL(blob);
   });
 
+  // Katman Kontrolleri (B7: Hide, Lock, Delete)
+  readonly hiddenTracks = signal<Set<number>>(new Set());
+  readonly lockedTracks = signal<Set<number>>(new Set());
+
   readonly activeOverlays = computed(() => {
     const t = this.currentTime();
     const overlays = this.activeEdl()?.overlays || [];
-    return overlays.filter(ov => t >= ov.timestamp && t <= (ov.timestamp + ov.duration));
+    const hidden = this.hiddenTracks();
+    return overlays.filter(ov => {
+      const trackId = Number(ov.trackId) || 1;
+      if (hidden.has(trackId)) return false;
+      return t >= ov.timestamp && t <= (ov.timestamp + ov.duration);
+    });
   });
 
   // Sol Panel Aktif Sekmesi
@@ -3454,8 +3494,95 @@ export class EditorComponent implements OnInit, OnDestroy {
   removeTrackLane(): void {
     const currentMax = this.overlayTrackNumbers()[0] || 1;
     if (currentMax > 1) {
-      this.customTrackCount.set(currentMax - 1);
+      this.deleteTrackLane(currentMax);
     }
+  }
+
+  deleteTrackLane(trackNum: number): void {
+    const edl = this.activeEdl();
+    if (!edl) return;
+
+    const overlays = edl.overlays || [];
+    const removedOverlays = overlays.filter(o => (Number(o.trackId) || 1) === trackNum);
+    // 1. O katmandaki overlay'leri temizle ve üst katmanları 1 numara kaydır
+    const remainingOverlays = overlays
+      .filter(o => (Number(o.trackId) || 1) !== trackNum)
+      .map(o => {
+        const tId = Number(o.trackId) || 1;
+        if (tId > trackNum) {
+          return { ...o, trackId: tId - 1 };
+        }
+        return o;
+      });
+
+    // Eğer seçili overlay silinen katmandaysa seçimi kaldır
+    const selId = this.selectedOverlayId();
+    if (selId && !remainingOverlays.some(o => o.id === selId)) {
+      this.selectedOverlayId.set(null);
+    }
+
+    this.edl.update((curr: any) => curr ? { ...curr, overlays: remainingOverlays } : null);
+
+    // 2. Gizli ve kilitli katman indekslerini kaydır
+    const nextHidden = new Set<number>();
+    for (const h of this.hiddenTracks()) {
+      if (h < trackNum) nextHidden.add(h);
+      else if (h > trackNum) nextHidden.add(h - 1);
+    }
+    this.hiddenTracks.set(nextHidden);
+
+    const nextLocked = new Set<number>();
+    for (const l of this.lockedTracks()) {
+      if (l < trackNum) nextLocked.add(l);
+      else if (l > trackNum) nextLocked.add(l - 1);
+    }
+    this.lockedTracks.set(nextLocked);
+
+    // 3. customTrackCount'u güncelle
+    const curCount = this.customTrackCount();
+    if (curCount > 1) {
+      this.customTrackCount.set(curCount - 1);
+    }
+
+    // 4. Backend'e senkronize et
+    const patchPayload: any[] = [
+      ...removedOverlays.map(o => ({ id: o.id, action: 'remove' })),
+      ...remainingOverlays.map(o => ({ id: o.id, trackId: o.trackId, action: 'update' }))
+    ];
+    if (patchPayload.length > 0) {
+      this.edlService.patchEdl(this.projectId, { overlays: patchPayload }).subscribe({
+        error: (err: any) => console.warn('Patch error on delete track:', err)
+      });
+    }
+  }
+
+
+  isTrackHidden(trackNum: number): boolean {
+    return this.hiddenTracks().has(trackNum);
+  }
+
+  isTrackLocked(trackNum: number): boolean {
+    return this.lockedTracks().has(trackNum);
+  }
+
+  toggleTrackVisibility(trackNum: number): void {
+    const current = new Set(this.hiddenTracks());
+    if (current.has(trackNum)) {
+      current.delete(trackNum);
+    } else {
+      current.add(trackNum);
+    }
+    this.hiddenTracks.set(current);
+  }
+
+  toggleTrackLock(trackNum: number): void {
+    const current = new Set(this.lockedTracks());
+    if (current.has(trackNum)) {
+      current.delete(trackNum);
+    } else {
+      current.add(trackNum);
+    }
+    this.lockedTracks.set(current);
   }
 
   assignAssetToSelectedOverlay(asset: ProjectAssetDto): void {
@@ -3501,6 +3628,10 @@ export class EditorComponent implements OnInit, OnDestroy {
   onCanvasDragStart(event: MouseEvent, overlayId: string): void {
      event.preventDefault();
      event.stopPropagation();
+     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
+     if (ov && this.isTrackLocked(Number(ov.trackId) || 1)) {
+        return;
+     }
      if (this.selectedOverlayId() !== overlayId) {
         this.selectOverlay(overlayId);
      }
@@ -3509,7 +3640,6 @@ export class EditorComponent implements OnInit, OnDestroy {
      this.canvasDragStartX = event.clientX;
      this.canvasDragStartY = event.clientY;
      
-     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
      if (ov) {
         if (ov.positionX !== undefined && ov.positionX !== null) {
            this.canvasDragOriginalX = ov.positionX;
@@ -4065,12 +4195,15 @@ export class EditorComponent implements OnInit, OnDestroy {
   // --- TIMELINE & CANVAS DRAG & RESIZE ---
   onOverlayDragStart(event: MouseEvent, overlayId: string): void {
      event.stopPropagation();
+     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
+     if (ov && this.isTrackLocked(Number(ov.trackId) || 1)) {
+        return;
+     }
      this.selectOverlay(overlayId);
      this.isDraggingOverlay = true;
      this.dragStartX = event.clientX;
      this.dragStartY = event.clientY;
      
-     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
      if (ov) {
         this.dragOverlayOriginalStart = ov.timestamp;
         this.dragOverlayOriginalDuration = ov.duration;
@@ -4080,12 +4213,15 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   onOverlayResizeStart(event: MouseEvent, overlayId: string, edge: 'left' | 'right'): void {
      event.stopPropagation();
+     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
+     if (ov && this.isTrackLocked(Number(ov.trackId) || 1)) {
+        return;
+     }
      this.selectOverlay(overlayId);
      this.isResizingOverlay = true;
      this.resizeEdge = edge;
      this.dragStartX = event.clientX;
      
-     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
      if (ov) {
         this.dragOverlayOriginalStart = ov.timestamp;
         this.dragOverlayOriginalDuration = ov.duration;
@@ -4095,16 +4231,20 @@ export class EditorComponent implements OnInit, OnDestroy {
   onCanvasResizeStart(event: MouseEvent, overlayId: string): void {
      event.preventDefault();
      event.stopPropagation();
+     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
+     if (ov && this.isTrackLocked(Number(ov.trackId) || 1)) {
+        return;
+     }
      this.isCanvasResizing = true;
      this.canvasResizeOverlayId = overlayId;
      this.canvasResizeStartX = event.clientX;
      this.canvasResizeStartY = event.clientY;
-     
-     const ov = this.activeEdl()?.overlays?.find(o => o.id === overlayId);
      if (ov) {
         this.canvasResizeOriginalScale = ov.scale || 1.0;
         this.canvasResizeOriginalFontSize = ov.fontSize || 48;
      }
+
+
   }
 
   bringOverlayForward(overlayId: string): void {

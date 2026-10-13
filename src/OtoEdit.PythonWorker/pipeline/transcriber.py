@@ -1,227 +1,200 @@
+"""
+OtoEdit Transcriber Orkestratörü
+- Tek kaynak AudioAnalysis nesnesinden beslenir.
+- AudioChunker ile VAD sessizlik sınırlarından parçalama yapar.
+- STTEngineChain ile sırasıyla Gemini 3.5 Transcribe -> Groq -> Antigravity Proxy -> Yerel Whisper zincirini çalıştırır.
+- GapFiller ile atlanan konuşma bölgelerini tespit edip kurtarır ("hiçbir kelime atlanmamalı").
+- Çıktıyı altyazı segmentlerine bölerek EDL ve Karaoke motoruna uyumlu TranscriptResult olarak döner.
+"""
+
 import os
+import time
+from typing import List, Optional
 from config import Config
 from models.transcript_model import TranscriptResult, TranscriptSegment, WordTimestamp
+from pipeline.audio_analysis import AudioAnalysis, AudioAnalyzer
+from pipeline.stt.base import Word
+from pipeline.stt.chunker import AudioChunker
+from pipeline.stt.engine_chain import STTEngineChain
+from pipeline.stt.gap_filler import GapFiller
 from utils.logger import get_logger
 
-logger = get_logger(__name__)
+logger = get_logger("Transcriber")
 
 
 class Transcriber:
-    """OpenAI Whisper API veya yerel model üzerinden kelime düzeyinde transkript çıkaran motor."""
+    """Yüksek hızlı ve çok katmanlı akıllı transkripsiyon orkestratörü."""
 
-    def __init__(self):
-        self.api_key = Config.OPENAI_API_KEY
-        self.client = None
+    def __init__(self, engine_chain: Optional[STTEngineChain] = None):
+        self.chain = engine_chain or STTEngineChain()
+        self.chunker = AudioChunker(max_chunk_sec=Config.STT_CHUNK_MAX_SEC)
+        self.gap_filler = GapFiller(min_gap_sec=0.40)
 
-        # Ensure the API key is not just a placeholder
-        if self.api_key and len(self.api_key) > 10 and not self.api_key.startswith("sk-..."):
-            try:
-                import importlib
-                openai_mod = importlib.import_module("openai")
-                self.client = openai_mod.OpenAI(api_key=self.api_key)
-                logger.info("Whisper API istemcisi hazırlandı.")
-            except Exception as e:
-                logger.warning(f"OpenAI istemcisi başlatılamadı: {e}")
-        else:
-            logger.warning("OPENAI_API_KEY geçersiz veya tanımlı değil. Transkript fallback modunda çalışacak.")
-
-    def transcribe(self, audio_path: str, video_id: str = "") -> TranscriptResult:
-        """Ses dosyasını çözümler ve kelime bazlı zaman damgaları ile döner."""
-        logger.info(f"Transkripsiyon başlıyor: {audio_path}")
+    def transcribe(
+        self,
+        audio_path: str,
+        analysis: Optional[AudioAnalysis] = None,
+        video_id: str = ""
+    ) -> TranscriptResult:
+        """
+        Ses dosyasını çözümler:
+        1. VAD & RMS analizi (verilmemişse yapar)
+        2. Akıllı VAD parçalama
+        3. STT Motor Zinciri (Gemini Transcribe -> Groq -> Proxy -> Local)
+        4. GapFiller (atlanan kelimeleri geri kazanma)
+        5. Altyazı mikro-segmentasyonu
+        """
+        logger.info(f"🎙️ Transkripsiyon orkestrasyonu başlıyor: {os.path.basename(audio_path)} (VideoId={video_id})")
+        t0 = time.time()
 
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Transkripsiyon için ses dosyası bulunamadı: {audio_path}")
 
-        if self.client:
-            try:
-                with open(audio_path, "rb") as f:
-                    response = self.client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=f,
-                        response_format="verbose_json",
-                        timestamp_granularities=["word", "segment"],
-                        language="tr"
+        # 1. Ses Analizi
+        if analysis is None:
+            analyzer = AudioAnalyzer()
+            analysis = analyzer.analyze(audio_path)
+
+        if analysis.duration <= 0.1:
+            return self._generate_fallback_transcript(audio_path)
+
+        chunks = []
+        try:
+            # 2. Akıllı Parçalama (Sessizlik sınırlarından)
+            chunks = self.chunker.split(audio_path, analysis)
+            logger.info(f"📦 Toplam {len(chunks)} parça oluşturuldu (Süre={analysis.duration:.1f}s).")
+
+            # 3. Her parçayı STT zincirine gönder
+            all_words: List[Word] = []
+            engine_stats = {}
+
+            for chunk in chunks:
+                if not chunk.has_speech:
+                    logger.info(f"🔇 Parça {chunk.index} sessiz, STT motoruna gönderilmedi.")
+                    continue
+
+                try:
+                    words, engine_name = self.chain.transcribe_chunk(chunk)
+                    all_words.extend(words)
+                    engine_stats[engine_name] = engine_stats.get(engine_name, 0) + len(words)
+                except Exception as ex:
+                    logger.warning(
+                        f"⚠️ Parça {chunk.index} ({chunk.start_sec:.1f}s -> {chunk.end_sec:.1f}s) STT hatası: {ex}. "
+                        f"Bu parça atlandı ancak önceden toplanan {len(all_words)} kelime korunuyor."
                     )
 
-                full_text = getattr(response, "text", "")
-                segments = []
-                words = []
+            logger.info(f"📊 STT Motor İstatistikleri: {engine_stats} (Toplam {len(all_words)} kelime)")
 
-                # Segmentleri işle
-                for seg in getattr(response, "segments", []):
-                    seg_dict = seg if isinstance(seg, dict) else seg.model_dump()
-                    seg_words = []
-                    for w in seg_dict.get("words", []):
-                        word_obj = WordTimestamp(
-                            word=w.get("word", "").strip(),
-                            start=float(w.get("start", 0.0)),
-                            end=float(w.get("end", 0.0)),
-                            confidence=float(w.get("confidence", 1.0))
-                        )
-                        seg_words.append(word_obj)
-                        words.append(word_obj)
-
-                    segments.append(TranscriptSegment(
-                        start=float(seg_dict.get("start", 0.0)),
-                        end=float(seg_dict.get("end", 0.0)),
-                        text=seg_dict.get("text", "").strip(),
-                        words=seg_words
-                    ))
-
-                # Eğer segment içinde kelimeler gelmediyse genel words listesini kontrol et
-                if not words and hasattr(response, "words"):
-                    for w in getattr(response, "words", []):
-                        w_dict = w if isinstance(w, dict) else w.model_dump()
-                        words.append(WordTimestamp(
-                            word=w_dict.get("word", "").strip(),
-                            start=float(w_dict.get("start", 0.0)),
-                            end=float(w_dict.get("end", 0.0))
-                        ))
-
-                duration = getattr(response, "duration", 0.0)
-                if not duration and words:
-                    duration = max(w.end for w in words)
-
-                # Uzun segmentleri kısa altyazı parçalarına böl
-                segments = self._chunk_segments(segments, max_words=6, max_duration=3.0)
-
-                logger.info(f"Transkripsiyon tamamlandı: {len(words)} kelime, {len(segments)} parçalanmış segment, süre={duration:.1f}s")
-                return TranscriptResult(
-                    full_text=full_text,
-                    segments=segments,
-                    words=words,
-                    duration=float(duration)
-                )
-            except Exception as e:
-                logger.error(f"Whisper API transkripsiyon hatası: {e}", exc_info=True)
-
-        # 2. Yerel faster-whisper motorunu dene (API anahtarı yoksa veya hata verdiyse)
-        try:
-            import importlib
-
-            # 🔧 pip ile kurulan NVIDIA kütüphanelerinin yolunu LD_LIBRARY_PATH'e ekle
-            # (ctranslate2 import edilmeden ÖNCE yapılmalı)
-            _nvidia_lib_dirs = []
-            for _pkg in ["nvidia.cublas.lib", "nvidia.cudnn.lib", "nvidia.cuda_nvrtc.lib"]:
-                try:
-                    _mod = importlib.import_module(_pkg.rsplit(".", 1)[0])
-                    _lib_dir = os.path.join(os.path.dirname(_mod.__file__), "lib")
-                    if os.path.isdir(_lib_dir):
-                        _nvidia_lib_dirs.append(_lib_dir)
-                except Exception:
-                    pass
-            if _nvidia_lib_dirs:
-                _current_ld = os.environ.get("LD_LIBRARY_PATH", "")
-                _new_paths = [p for p in _nvidia_lib_dirs if p not in _current_ld]
-                if _new_paths:
-                    os.environ["LD_LIBRARY_PATH"] = ":".join(_new_paths) + (":" + _current_ld if _current_ld else "")
-                    logger.info(f"🔧 [Transcriber] NVIDIA pip kütüphane yolları LD_LIBRARY_PATH'e eklendi: {_new_paths}")
-                    import ctypes
-                    for _lib_dir in _new_paths:
-                        for _so_file in os.listdir(_lib_dir):
-                            if _so_file.endswith(".so") or ".so." in _so_file:
-                                try:
-                                    ctypes.CDLL(os.path.join(_lib_dir, _so_file), mode=ctypes.RTLD_GLOBAL)
-                                except Exception:
-                                    pass
-
-            # Şimdi faster_whisper ve ctranslate2'yi güvenle import edebiliriz
-            fw_mod = importlib.import_module("faster_whisper")
-            whisper_model_cls = getattr(fw_mod, "WhisperModel")
-
-            # 🚀 GPU (CUDA) Otomatik Algılama
-            device = "cpu"
-            compute_type = "int8"
-            try:
-                ct2 = importlib.import_module("ctranslate2")
-                if ct2.get_cuda_device_count() > 0:
-                    device = "cuda"
-                    compute_type = "float16"
-                    logger.info("🚀 [Transcriber] NVIDIA CUDA GPU algılandı! Donanım hızlandırma devrede (device='cuda', compute_type='float16').")
-                else:
-                    logger.info("ℹ️ [Transcriber] CUDA GPU bulunamadı, CPU modunda çalışılacak (device='cpu', compute_type='int8').")
-            except Exception:
-                pass
-
-            logger.info(f"Yerel faster-whisper modeli ile transkripsiyon başlatılıyor (model='base', device='{device}', compute_type='{compute_type}')...")
-            local_model = whisper_model_cls("base", device=device, compute_type=compute_type)
-            segments_iter, info = local_model.transcribe(
-                audio_path,
-                language="tr",
-                word_timestamps=True,
-                condition_on_previous_text=False,
-                vad_filter=True,
-                repetition_penalty=1.15
+            # 4. Kayıp Kelime Dedektörü (Gap Filler)
+            all_words = self.gap_filler.fill_gaps(
+                media_path=audio_path,
+                analysis=analysis,
+                words=all_words,
+                chain=self.chain
             )
 
-            segments = []
-            words = []
-            full_text_parts = []
+            if not all_words:
+                logger.warning("⚠️ Transkripsiyondan hiç kelime dönmedi, fallback üretiliyor.")
+                return self._generate_fallback_transcript(audio_path)
 
-            for seg in segments_iter:
-                seg_words = []
-                if seg.words:
-                    for w in seg.words:
-                        w_obj = WordTimestamp(
-                            word=w.word.strip(),
-                            start=float(round(w.start, 2)),
-                            end=float(round(w.end, 2)),
-                            confidence=float(round(w.probability, 2))
-                        )
-                        seg_words.append(w_obj)
-                        words.append(w_obj)
+            # 5. Kelimeleri sırala
+            all_words.sort(key=lambda w: w.start)
 
-                seg_text = seg.text.strip()
-                if seg_text:
-                    full_text_parts.append(seg_text)
-                    segments.append(TranscriptSegment(
-                        start=float(round(seg.start, 2)),
-                        end=float(round(seg.end, 2)),
-                        text=seg_text,
-                        words=seg_words
-                    ))
+            # 6. Altyazı segmentlerine böl (Karaoke & EDL uyumlu)
+            segments = self._words_to_segments(all_words, max_words=6, max_duration=3.0)
 
-            full_text = " ".join(full_text_parts)
-            duration = float(getattr(info, "duration", 0.0))
-            if not duration and words:
-                duration = max(w.end for w in words)
+            # WordTimestamp nesnelerine çevir
+            word_timestamps = [
+                WordTimestamp(
+                    word=w.word,
+                    start=round(w.start, 2),
+                    end=round(w.end, 2),
+                    confidence=round(w.confidence, 2)
+                )
+                for w in all_words
+            ]
 
-            # Uzun segmentleri kısa altyazı parçalarına böl
-            segments = self._chunk_segments(segments, max_words=6, max_duration=3.0)
+            full_text = " ".join(w.word for w in all_words)
+            total_duration = analysis.duration
+            elapsed = time.time() - t0
 
-            logger.info(f"Yerel Whisper transkripsiyonu tamamlandı: {len(words)} kelime, {len(segments)} parçalanmış segment, süre={duration:.1f}s")
-            
-            # VRAM Yönetimi (Garbage Collection)
-            del local_model
-            import gc
-            gc.collect()
-            logger.info("🧹 GPU VRAM temizlendi (Model nesnesi bellekten atıldı).")
-                
+            logger.info(
+                f"🎉 Transkripsiyon tamamlandı: {len(all_words)} kelime, {len(segments)} segment, "
+                f"Süre={total_duration:.1f}s, İşlem süresi={elapsed:.1f}s"
+            )
+
             return TranscriptResult(
                 full_text=full_text,
                 segments=segments,
-                words=words,
-                duration=duration
+                words=word_timestamps,
+                duration=float(total_duration)
             )
-        except Exception as local_ex:
-            logger.warning(f"Yerel faster-whisper transkripsiyonu başarısız oldu: {local_ex}")
-            # Hata durumunda da temizle
-            try:
-                if 'local_model' in locals():
-                    del local_model
-                import gc
-                gc.collect()
-            except:
-                pass
 
-        logger.info("Transkript fallback üretiliyor...")
-        return self._generate_fallback_transcript(audio_path)
+        except Exception as e:
+            logger.error(f"❌ Transkripsiyon orkestrasyonu sırasında hata: {e}", exc_info=True)
+            if 'all_words' in locals() and all_words:
+                logger.info(f"⚠️ Hata oluştu ancak önceden toplanan {len(all_words)} kelime ile kurtarma yapılıyor.")
+                all_words.sort(key=lambda w: w.start)
+                segments = self._words_to_segments(all_words, max_words=6, max_duration=3.0)
+                word_timestamps = [
+                    WordTimestamp(word=w.word, start=round(w.start, 2), end=round(w.end, 2), confidence=round(w.confidence, 2))
+                    for w in all_words
+                ]
+                return TranscriptResult(
+                    full_text=" ".join(w.word for w in all_words),
+                    segments=segments,
+                    words=word_timestamps,
+                    duration=float(analysis.duration if 'analysis' in locals() and analysis else 1.0)
+                )
+            return self._generate_fallback_transcript(audio_path)
+        finally:
+            # Geçici parçaları temizle
+            if chunks:
+                self.chunker.cleanup_chunks(chunks)
+
+    @staticmethod
+    def _words_to_segments(words: List[Word], max_words: int = 6, max_duration: float = 3.0) -> List[TranscriptSegment]:
+        """Kelimeleri altyazı için estetik mikro-segmentlere böler."""
+        segments: List[TranscriptSegment] = []
+        current_chunk_words: List[WordTimestamp] = []
+
+        for w in words:
+            wt = WordTimestamp(
+                word=w.word,
+                start=round(w.start, 2),
+                end=round(w.end, 2),
+                confidence=round(w.confidence, 2)
+            )
+            current_chunk_words.append(wt)
+
+            duration = current_chunk_words[-1].end - current_chunk_words[0].start
+            is_terminal = w.word.strip().endswith(('.', '!', '?', ':'))
+
+            if len(current_chunk_words) >= max_words or duration >= max_duration or (is_terminal and len(current_chunk_words) >= 3):
+                chunk_text = " ".join(cw.word for cw in current_chunk_words)
+                segments.append(TranscriptSegment(
+                    start=current_chunk_words[0].start,
+                    end=current_chunk_words[-1].end,
+                    text=chunk_text,
+                    words=list(current_chunk_words)
+                ))
+                current_chunk_words = []
+
+        if current_chunk_words:
+            chunk_text = " ".join(cw.word for cw in current_chunk_words)
+            segments.append(TranscriptSegment(
+                start=current_chunk_words[0].start,
+                end=current_chunk_words[-1].end,
+                text=chunk_text,
+                words=list(current_chunk_words)
+            ))
+
+        return segments
 
     @staticmethod
     def _generate_fallback_transcript(audio_path: str) -> TranscriptResult:
-        """API anahtarı ve yerel model olmadığında uyarı transkripti üretir."""
+        """API veya motorlar çalışmadığında güvenlik transkripti üretir."""
         logger.warning("TRANSKRIPT UYARISI: Model bulunamadı veya çalıştırılamadı.")
-        
         warning_text = "[TRANSKRİPT ÇIKARILAMADI]"
         words = [WordTimestamp(word=warning_text, start=0.0, end=1.0)]
         segment = TranscriptSegment(start=0.0, end=1.0, text=warning_text, words=words)
@@ -232,44 +205,3 @@ class Transcriber:
             words=words,
             duration=1.0
         )
-
-    @staticmethod
-    def _chunk_segments(segments: list, max_words: int = 6, max_duration: float = 3.0) -> list:
-        """
-        Uzun segmentleri (cümleleri) ekranda güzel durması için 
-        daha kısa mikro-parçalara (chunk) böler.
-        """
-        chunked = []
-        for seg in segments:
-            if not getattr(seg, 'words', None):
-                chunked.append(seg)
-                continue
-                
-            current_chunk_words = []
-            for w in seg.words:
-                current_chunk_words.append(w)
-                
-                duration = current_chunk_words[-1].end - current_chunk_words[0].start
-                is_terminal = w.word.strip().endswith(('.', '!', '?'))
-                
-                # Eğer sınır aşıldıysa veya noktalama varsa (ve en az 3 kelimeyse) böl
-                if len(current_chunk_words) >= max_words or duration >= max_duration or (is_terminal and len(current_chunk_words) >= 3):
-                    chunk_text = " ".join(cw.word for cw in current_chunk_words)
-                    chunked.append(TranscriptSegment(
-                        start=round(current_chunk_words[0].start, 2),
-                        end=round(current_chunk_words[-1].end, 2),
-                        text=chunk_text,
-                        words=list(current_chunk_words)
-                    ))
-                    current_chunk_words = []
-            
-            # Arta kalan kelimeleri son bir parça olarak ekle
-            if current_chunk_words:
-                chunk_text = " ".join(cw.word for cw in current_chunk_words)
-                chunked.append(TranscriptSegment(
-                    start=round(current_chunk_words[0].start, 2),
-                    end=round(current_chunk_words[-1].end, 2),
-                    text=chunk_text,
-                    words=list(current_chunk_words)
-                ))
-        return chunked

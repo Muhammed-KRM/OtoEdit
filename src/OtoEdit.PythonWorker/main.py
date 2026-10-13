@@ -35,9 +35,18 @@ def main():
     logger.info(f"📁 Temp Dizin: {Config.TEMP_DIR}")
     logger.info(f"🐰 RabbitMQ Host: {Config.RABBITMQ_HOST}:{Config.RABBITMQ_PORT}")
     logger.info(f"📦 MinIO Endpoint: {Config.MINIO_ENDPOINT}")
+    logger.info(f"🎙️ STT Motor Sırası: {Config.STT_ENGINE_ORDER}")
+    logger.info(f"✂️ Jump-Cut Motoru: {Config.JUMPCUT_ENGINE} (Min Silence: {Config.JUMPCUT_MIN_SILENCE_MS}ms, Pad: {Config.JUMPCUT_PAD_MS}ms)")
     logger.info("==================================================")
 
     Config.ensure_directories()
+
+    # Başlangıçta temp temizliği yap (yetim render klasörleri & eski dosyalar)
+    try:
+        from utils.janitor import run_janitor
+        run_janitor()
+    except Exception as je:
+        logger.warning(f"Janitor başlatılamadı: {je}")
 
     try:
         # İki tüketiciyi ayrı arka plan iş parçacıklarında başlat
