@@ -24,6 +24,7 @@ class STTEngineChain:
     def __init__(self, engine_order: List[str] = None):
         self.engine_order = engine_order or Config.STT_ENGINE_ORDER
         self.engines: Dict[str, BaseSTTEngine] = {}
+        self.exhausted_engines: set = set()
         self._init_engines()
 
     def _init_engines(self):
@@ -59,6 +60,9 @@ class STTEngineChain:
         errors = []
 
         for name in self.engine_order:
+            if name in self.exhausted_engines:
+                continue
+
             engine = self.engines.get(name)
             if not engine:
                 continue
@@ -71,6 +75,10 @@ class STTEngineChain:
                 words = engine.transcribe_chunk(chunk)
                 return words, engine.name
             except Exception as ex:
+                err_str = str(ex).lower()
+                if "quota exceeded" in err_str or "rate limit" in err_str or "429" in err_str or "kota" in err_str:
+                    logger.warning(f"🚫 Motor '{name}' kotası tükendi, bu iş için devre dışı bırakılıyor: {ex}")
+                    self.exhausted_engines.add(name)
                 logger.warning(f"⚠️ Motor '{name}' parça {chunk.index} için başarısız oldu: {ex}")
                 errors.append(f"{name}: {str(ex)[:100]}")
                 continue

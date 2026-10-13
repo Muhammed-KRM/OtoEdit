@@ -75,3 +75,30 @@ def test_edl_builder_full_assembly():
     assert edl["overlays"][0]["content"] == "Önemli Başlık"
     assert len(edl["suggestions"]) == 1
     assert edl["suggestions"][0]["content"] == "Sabırlı ol"
+
+
+def test_edl_builder_fallback_duration_protection():
+    """STT çöktüğünde (transcript.duration = 1.0) gerçek video_duration'ın korunduğunu doğrular."""
+    builder = EdlBuilder()
+    # Hata transkripti duration=1.0 üretir
+    fallback_transcript = TranscriptResult(
+        full_text="[TRANSKRİPT ÇIKARILAMADI]",
+        segments=[TranscriptSegment(start=0.0, end=1.0, text="[TRANSKRİPT ÇIKARILAMADI]")],
+        duration=1.0
+    )
+
+    edl = builder.build(
+        project_id="proj-999",
+        video_id="vid-999",
+        transcript=fallback_transcript,
+        silence_cuts=[],
+        commands=[],
+        face_data=[],
+        repurposing_data=RepurposingData(),
+        suggestions=[],
+        video_duration=3145.2  # 52.4 dakikalık gerçek video
+    )
+
+    # Süre 1.0 saniyeye düşmemeli, 3145.2 olmalı!
+    assert edl["duration"] == 3145.2
+

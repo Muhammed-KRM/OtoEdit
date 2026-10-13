@@ -184,6 +184,93 @@ public class ChatManager : IChatService
         return result;
     }
 
+    public async Task<EdlPatchResponseDto> SubmitFormAsync(Guid projectId, Guid messageId, Dictionary<string, string> parameters, CancellationToken cancellationToken = default)
+    {
+        var message = await _context.ChatMessages.FindAsync(new object[] { messageId }, cancellationToken);
+        if (message == null || message.ProjectId != projectId)
+            throw new NotFoundException("Chat mesajı bulunamadı", messageId);
+
+        // Form parametrelerinden overlay nesnesi derle
+        var textContent = parameters.GetValueOrDefault("content") 
+                          ?? parameters.GetValueOrDefault("text") 
+                          ?? parameters.GetValueOrDefault("title") 
+                          ?? "Yeni Başlık";
+        
+        var sourceUrl = parameters.GetValueOrDefault("source") 
+                        ?? parameters.GetValueOrDefault("imageUrl");
+        
+        var isImage = !string.IsNullOrEmpty(sourceUrl) || parameters.GetValueOrDefault("type") == "image";
+        
+        var overlayId = $"ov_{Guid.NewGuid().ToString("N")[..8]}";
+        var font = parameters.GetValueOrDefault("font") ?? "Montserrat-Bold";
+        var color = parameters.GetValueOrDefault("color") ?? "#FFFFFF";
+        var bgColor = parameters.GetValueOrDefault("backgroundColor") ?? "#00000080";
+        var animation = parameters.GetValueOrDefault("animation") ?? "pop-up";
+
+        double.TryParse(parameters.GetValueOrDefault("timestamp"), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var timestamp);
+        if (!double.TryParse(parameters.GetValueOrDefault("duration"), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var duration) || duration <= 0)
+            duration = 5.0;
+
+        int.TryParse(parameters.GetValueOrDefault("fontSize"), out var fontSize);
+        if (fontSize <= 0) fontSize = 48;
+
+        double.TryParse(parameters.GetValueOrDefault("positionX"), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var posX);
+        if (posX <= 0) posX = 50.0;
+
+        double.TryParse(parameters.GetValueOrDefault("positionY"), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var posY);
+        if (posY <= 0) posY = 85.0;
+
+        var overlayObj = new JsonObject
+        {
+            ["id"] = overlayId,
+            ["type"] = isImage ? "image" : "text",
+            ["content"] = textContent,
+            ["source"] = sourceUrl,
+            ["timestamp"] = timestamp,
+            ["duration"] = duration,
+            ["font"] = font,
+            ["fontSize"] = fontSize,
+            ["color"] = color,
+            ["backgroundColor"] = bgColor,
+            ["positionX"] = posX,
+            ["positionY"] = posY,
+            ["animation"] = animation,
+            ["action"] = "add"
+        };
+
+        var patchObj = new JsonObject
+        {
+            ["overlays"] = new JsonArray { overlayObj }
+        };
+
+        // Eğer görsel ise ve pexels gerekirse zenginleştir
+        using var patchDoc = JsonDocument.Parse(patchObj.ToJsonString());
+        var enrichedPatch = await EnrichImageOverlaysWithPexelsAsync(projectId, patchDoc.RootElement, cancellationToken);
+
+        // EDL'ye uygula
+        var result = await _edlService.PatchEdlAsync(projectId, enrichedPatch, cancellationToken);
+
+        // Mesaj durumunu güncelle
+        message.PatchDurumu = "applied";
+        message.EdlPatch = enrichedPatch.GetRawText();
+        
+        // Kullanıcı onay mesajını ekle
+        var userConfirmMsg = new ChatMessage
+        {
+            ProjectId = projectId,
+            Rol = "user",
+            Mesaj = $"Form onaylandı: {textContent} ({posX}%, {posY}%)",
+            PatchDurumu = "none"
+        };
+        _context.ChatMessages.Add(userConfirmMsg);
+        await _context.SaveChangesAsync(cancellationToken);
+
+        // Önbelleği temizle
+        await _cacheService.RemoveAsync($"{CachePrefix}{projectId}:history", cancellationToken);
+
+        return result;
+    }
+
     public async Task<IEnumerable<ChatMessageHistoryDto>> GetHistoryAsync(Guid projectId, CancellationToken cancellationToken = default)
     {
         var messages = await _context.ChatMessages

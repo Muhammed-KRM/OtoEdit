@@ -20,3 +20,4 @@ tenacity>=8.2.0
 nvidia-cublas-cu12
 nvidia-cudnn-cu12
 nvidia-cuda-nvrtc-cu12
+rembg[cpu]>=2.0.50

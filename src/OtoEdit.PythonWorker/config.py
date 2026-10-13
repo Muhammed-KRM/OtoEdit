@@ -68,8 +68,8 @@ class Config:
     ENABLE_ANALYSIS_CACHE = os.getenv("ENABLE_ANALYSIS_CACHE", "false").lower() in ("true", "1", "yes")
 
     # Backend API URL (Fail-Safe Pipeline Logging & SignalR)
-    API_BASE_URL = os.getenv("API_BASE_URL", "http://host.docker.internal:5000")
-    INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "otoedit-internal-secret-key-2026")
+    API_BASE_URL = os.getenv("API_BASE_URL", "http://host.docker.internal:5001")
+    INTERNAL_API_KEY = os.getenv("INTERNAL_API_KEY", "SUPER_SECRET_OTOEDIT_KEY_123!")
 
     # Performans ve Algılama Eşikleri (Legacy / Gesture)
     GESTURE_FRAME_SKIP = int(os.getenv("GESTURE_FRAME_SKIP", "8"))

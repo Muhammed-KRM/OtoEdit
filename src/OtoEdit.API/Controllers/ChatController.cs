@@ -56,4 +56,16 @@ public class ChatController : ControllerBase
         var result = await _chatService.ApplyPendingPatchAsync(messageId, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>
+    /// AI Yönetmen formunu (clarification) doldurup onaylar ve EDL'ye uygular.
+    /// </summary>
+    [HttpPost("{messageId:guid}/form")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> SubmitForm(Guid projectId, Guid messageId, [FromBody] Dictionary<string, string> parameters, CancellationToken cancellationToken)
+    {
+        var result = await _chatService.SubmitFormAsync(projectId, messageId, parameters, cancellationToken);
+        return Ok(result);
+    }
 }

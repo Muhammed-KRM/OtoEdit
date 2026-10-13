@@ -10,6 +10,8 @@ from render.image_overlay import ImageOverlay
 from render.template_applier import TemplateApplier
 from render.text_overlay import TextOverlay
 from render.timeline_mapper import TimelineMapper
+from render.pillow_graphics_engine import PillowGraphicsEngine
+from render.audio_mixer import AudioMixer
 from services.minio_client import MinioClient
 from utils.logger import get_logger
 
@@ -91,6 +93,42 @@ class VideoRenderer:
             mapped_text_overlays = text_overlays
             mapped_image_overlays = image_overlays
 
+        # Metin kaplamaları arasından kutucuklu/rozetli olanları (Pill/Badge) PillowGraphicsEngine ile
+        # kusursuz antialiased şeffaf PNG katmanlara dönüştürüp image overlay zincirine dahil et
+        filtered_text_overlays = []
+        for ov in (mapped_text_overlays or []):
+            box_style = ov.get("boxStyle") or ov.get("box_style")
+            if box_style in ("pill", "rounded", "badge") and ov.get("content"):
+                badge_png = os.path.join(temp_dir, f"badge_{ov.get('id', 'txt')}.png")
+                try:
+                    PillowGraphicsEngine.render_text_badge(
+                        text=str(ov.get("content", "")),
+                        output_path=badge_png,
+                        font_name=ov.get("font", "Montserrat"),
+                        font_size=int(ov.get("fontSize", 48)),
+                        text_color=ov.get("color", "#FFFFFF"),
+                        stroke_color=ov.get("strokeColor") or "#000000",
+                        stroke_width=int(ov.get("strokeWidth") or 2),
+                        box_style=box_style,
+                        box_bg_color=ov.get("boxBgColor") or ov.get("backgroundColor") or "rgba(0,0,0,0.75)",
+                        box_padding=int(ov.get("boxPadding", 16)),
+                        border_radius=int(ov.get("borderRadius", 24)),
+                        all_caps=bool(ov.get("allCaps", False)),
+                        letter_spacing=int(ov.get("letterSpacing", 0))
+                    )
+                    badge_img_ov = dict(ov)
+                    badge_img_ov["type"] = "image"
+                    badge_img_ov["source"] = badge_png
+                    badge_img_ov["scale"] = float(ov.get("scale", 1.0))
+                    mapped_image_overlays.append(badge_img_ov)
+                    logger.info(f"🎨 Metin rozeti PNG olarak görsel katmanına dönüştürüldü: {badge_png}")
+                except Exception as ex:
+                    logger.warning(f"Metin rozeti render edilemedi, standart ASS olarak devam ediliyor: {ex}")
+                    filtered_text_overlays.append(ov)
+            else:
+                filtered_text_overlays.append(ov)
+        mapped_text_overlays = filtered_text_overlays
+
         settings = edl_json.get("settings", {})
         target_format = settings.get("targetFormat", "16:9")
         face_data = edl_json.get("repurposing", {}).get("faceTrackingData", [])
@@ -105,14 +143,25 @@ class VideoRenderer:
         
         if mapped_text_overlays or final_transcript:
             candidate_ass = os.path.join(temp_dir, f"subtitles_{os.path.basename(output_path)}.ass")
+            
+            # Çözünürlüğü hedef formata göre ayarla
+            res_x, res_y = 1920, 1080
+            if target_format in ("9:16", "portrait"):
+                res_x, res_y = 1080, 1920
+            elif target_format in ("1:1", "square"):
+                res_x, res_y = 1080, 1080
+
             TextOverlay.generate_ass(
                 overlays=mapped_text_overlays,
                 transcript=final_transcript,
-                output_path=candidate_ass
+                output_path=candidate_ass,
+                play_res_x=res_x,
+                play_res_y=res_y,
+                subtitle_style=settings.get("subtitleStyle")
             )
             if os.path.isfile(candidate_ass):
                 ass_path = candidate_ass
-                logger.info(f"✅ Altyazı ASS dosyası üretildi: {ass_path}")
+                logger.info(f"✅ Altyazı ASS dosyası üretildi: {ass_path} ({res_x}x{res_y})")
 
         # 2. Birleştirme (Concat) İşlemi
         if has_cuts and segment_files and merge_concat:
@@ -138,9 +187,12 @@ class VideoRenderer:
 
         logger.info(f"Base render tamamlandı: {output_path}")
 
-        # 2. İkinci Geçiş (Görsel Overlay'leri Varsa)
-        if mapped_image_overlays:
-            logger.info(f"🎨 {len(mapped_image_overlays)} görsel overlay için ikinci pass yürütülüyor...")
+        # 2. İkinci Geçiş (Görsel Overlay'leri veya Arka Plan Müziği Varsa)
+        bgm_cfg = settings.get("backgroundMusic") or {}
+        has_bgm = bool(bgm_cfg and bgm_cfg.get("url"))
+
+        if mapped_image_overlays or has_bgm:
+            logger.info(f"🎨 İkinci pass yürütülüyor (Görseller: {len(mapped_image_overlays)}, BGM: {has_bgm})...")
             temp_no_images = os.path.join(temp_dir, f"no_img_{os.path.basename(output_path)}")
             if os.path.exists(output_path):
                 os.rename(output_path, temp_no_images)
@@ -156,24 +208,45 @@ class VideoRenderer:
                     v_stream = in_node.video
                     a_stream = in_node.audio
 
-                    v_stream = self.image_overlay.apply_image_overlays(
-                        v_stream, 
-                        mapped_image_overlays, 
-                        temp_dir=temp_dir,
-                        base_w=base_w,
-                        base_h=base_h
-                    )
+                    if mapped_image_overlays:
+                        v_stream = self.image_overlay.apply_image_overlays(
+                            v_stream, 
+                            mapped_image_overlays, 
+                            temp_dir=temp_dir,
+                            base_w=base_w,
+                            base_h=base_h
+                        )
+
+                    audio_reencode = False
+                    if has_bgm:
+                        bgm_url = bgm_cfg.get("url", "")
+                        bgm_local = self.image_overlay.resolve_image_path(bgm_url, temp_dir=temp_dir)
+                        if bgm_local and os.path.isfile(bgm_local):
+                            a_stream = AudioMixer.apply_bgm_with_ducking(
+                                speech_audio_stream=a_stream,
+                                bgm_file_path=bgm_local,
+                                total_duration=trimmed_duration,
+                                volume=float(bgm_cfg.get("volume", 0.25)),
+                                auto_ducking=bool(bgm_cfg.get("autoDucking", True)),
+                                ducking_amount=float(bgm_cfg.get("duckingAmount", 0.15)),
+                                fade_in_sec=float(bgm_cfg.get("fadeIn", 1.0)),
+                                fade_out_sec=float(bgm_cfg.get("fadeOut", 2.0))
+                            )
+                            audio_reencode = True
+
+                    acodec_val = "aac" if audio_reencode else "copy"
+                    audio_kwargs = {"audio_bitrate": "192k"} if audio_reencode else {}
 
                     out_cmd_nvenc = ffmpeg.output(
                         v_stream, a_stream, output_path,
                         vcodec="h264_nvenc", preset="p4", video_bitrate="6M", maxrate="8M", bufsize="12M",
-                        acodec="copy", shortest=None
+                        acodec=acodec_val, shortest=None, **audio_kwargs
                     ).overwrite_output().compile()
 
                     out_cmd_cpu = ffmpeg.output(
                         v_stream, a_stream, output_path,
                         vcodec="libx264", preset="veryfast", crf="22",
-                        acodec="copy", shortest=None
+                        acodec=acodec_val, shortest=None, **audio_kwargs
                     ).overwrite_output().compile()
 
                     logger.info("Donanım hızlandırmalı (NVENC) image overlay yürütülüyor...")

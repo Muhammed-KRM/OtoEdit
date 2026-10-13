@@ -43,6 +43,26 @@ class OverlayItem(BaseModel):
     positionY: Optional[float] = None
     scale: Optional[float] = 1.0
     track_id: Optional[int] = 1
+    # Tipografi & Rozet (Pillow / ASS)
+    strokeColor: Optional[str] = None
+    strokeWidth: Optional[float] = 0.0
+    shadowColor: Optional[str] = None
+    shadowBlur: Optional[float] = None
+    boxStyle: Optional[str] = "none"  # "none", "pill", "rounded", "badge"
+    boxBgColor: Optional[str] = None
+    boxPadding: Optional[int] = 16
+    borderRadius: Optional[int] = 24
+    allCaps: Optional[bool] = False
+    letterSpacing: Optional[float] = 0.0
+    # Görsel Düzenleme & AI Arka Plan
+    removeBg: Optional[bool] = False
+    stickerBorder: Optional[bool] = False
+    stickerBorderWidth: Optional[int] = 6
+    stickerBorderColor: Optional[str] = "#FFFFFF"
+    rotation: Optional[float] = 0.0
+    maskShape: Optional[str] = "rect"  # "rect", "circle", "rounded"
+    chromaKeyColor: Optional[str] = None
+    chromaKeySimilarity: Optional[float] = 0.35
 
 
 class SuggestionItem(BaseModel):
@@ -73,6 +93,36 @@ class RepurposingData(BaseModel):
     faceTrackingData: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class SubtitleStyleConfig(BaseModel):
+    preset: str = "tiktok_yellow"     # "tiktok_yellow", "cinematic_shadow", "opaque_banner", "neon_glow", "custom"
+    fontFamily: str = "Montserrat-Bold"
+    fontSize: int = 48
+    textColor: str = "#FFFFFF"
+    highlightColor: str = "#FFD700"
+    strokeColor: str = "#000000"
+    strokeWidth: float = 3.0
+    shadowColor: str = "#00000080"
+    shadowDistance: float = 3.0
+    shadowBlur: float = 2.0
+    backgroundColor: Optional[str] = None
+    backgroundPadding: int = 12
+    borderRadius: int = 8
+    verticalPosition: float = 85.0     # %5 - %95
+    allCaps: bool = False
+    letterSpacing: float = 0.0
+
+
+class BackgroundMusicConfig(BaseModel):
+    url: Optional[str] = None
+    title: Optional[str] = "Arka Plan Müziği"
+    volume: float = 0.25
+    autoDucking: bool = True
+    duckingAmount: float = 0.15
+    fadeIn: float = 1.0
+    fadeOut: float = 2.0
+    loop: bool = True
+
+
 class EdlSettings(BaseModel):
     targetFormat: str = "16:9"
     templateId: Optional[str] = None
@@ -80,6 +130,8 @@ class EdlSettings(BaseModel):
     audioEnhancement: bool = True
     gestureCommandsEnabled: bool = True
     subtitlesEnabled: bool = True
+    subtitleStyle: Optional[SubtitleStyleConfig] = None
+    backgroundMusic: Optional[BackgroundMusicConfig] = None
 
 
 class EdlDocument(BaseModel):

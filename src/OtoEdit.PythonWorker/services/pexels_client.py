@@ -20,10 +20,12 @@ class PexelsClient:
         self.api_key = Config.PEXELS_API_KEY
 
     def search_photo(self, query: str, orientation: str = "landscape") -> Optional[str]:
-        """Arama sorgusuna göre ilk yüksek kaliteli fotoğrafın URL'sini döner."""
+        """Arama sorgusuna göre ilk yüksek kaliteli fotoğrafın URL'sini döner (Fallback destekli)."""
+        from services.stock_media_fallback import StockMediaFallback
+
         if not self.api_key:
-            logger.warning("PEXELS_API_KEY tanımlı değil, görsel aranamıyor.")
-            return None
+            logger.info(f"PEXELS_API_KEY tanımlı değil, açık fallback zinciri kullanılıyor: query='{query}'")
+            return StockMediaFallback.resolve_stock_image(query, orientation=orientation)
 
         headers = {
             "Authorization": self.api_key
@@ -44,11 +46,12 @@ class PexelsClient:
                     logger.info(f"Pexels görsel bulundu: query='{query}', url='{photo_url}'")
                     return photo_url
             else:
-                logger.warning(f"Pexels API yanıt kodu {response.status_code}: {response.text}")
+                logger.warning(f"Pexels API yanıt kodu {response.status_code} ({response.text[:120]}), fallback devreye giriyor...")
         except Exception as e:
-            logger.error(f"Pexels API istek hatası ({query}): {e}")
+            logger.error(f"Pexels API istek hatası ({query}): {e}, fallback devreye giriyor...")
 
-        return None
+        # Kota bittiğinde veya yetki hatasında Unsplash / Wikimedia fallback
+        return StockMediaFallback.resolve_stock_image(query, orientation=orientation)
 
     def download_image(self, image_url: str, output_path: Optional[str] = None) -> Optional[str]:
         """Verilen görsel URL'sini yerel diske kaydeder."""

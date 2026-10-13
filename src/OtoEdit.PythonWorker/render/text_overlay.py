@@ -86,11 +86,59 @@ class TextOverlay:
         transcript: Optional[Dict[str, Any]] = None,
         output_path: str = "temp_overlays.ass",
         play_res_x: int = 1920,
-        play_res_y: int = 1080
+        play_res_y: int = 1080,
+        subtitle_style: Optional[Dict[str, Any]] = None
     ) -> str:
         """
         EDL içerisindeki text overlay ve transkript bilgilerini ASS dosyası olarak yazar.
         """
+        # Altyazı stili yapılandırması (SubtitleStyleConfig)
+        sub_style = subtitle_style or {}
+        preset = sub_style.get("preset", "tiktok_yellow")
+        raw_sub_font = sub_style.get("fontFamily") or "Montserrat-Bold"
+        sub_font = raw_sub_font.split(",")[0].strip().replace("'", "").replace('"', '')
+        sub_size_px = int(sub_style.get("fontSize", 44))
+        # 96 DPI CSS px -> 72 DPI ASS pt
+        sub_fs = max(18, int(round(sub_size_px * (play_res_y / 1080.0) * (96.0 / 72.0))))
+
+        primary_color = cls.hex_to_ass_color(sub_style.get("textColor", "#FFFFFF"), "&H00FFFFFF")
+        highlight_color = cls.hex_to_ass_color(sub_style.get("highlightColor", "#FFD700"), "&H0000D7FF")
+        stroke_color = cls.hex_to_ass_color(sub_style.get("strokeColor", "#000000"), "&H00000000")
+        stroke_w = float(sub_style.get("strokeWidth", 3.0))
+        shadow_color = cls.hex_to_ass_color(sub_style.get("shadowColor", "#00000080"), "&H80000000")
+        shadow_dist = float(sub_style.get("shadowDistance", 2.0))
+
+        vert_pos = float(sub_style.get("verticalPosition", 85.0))
+        margin_v = max(20, int(round(play_res_y * (1.0 - vert_pos / 100.0))))
+        letter_spacing = float(sub_style.get("letterSpacing", 0.0))
+
+        # BorderStyle: 1 (Outline+Shadow), 3 (Opaque Banner Box)
+        border_style = 3 if preset == "opaque_banner" else 1
+        if preset == "opaque_banner":
+            back_colour = cls.hex_to_ass_color(sub_style.get("backgroundColor", "#000000B0"), "&HB0000000")
+            outline_w = int(sub_style.get("backgroundPadding", 10))
+            shadow_dist = 0.0
+        elif preset == "cinematic_shadow":
+            border_style = 1
+            back_colour = "&H90000000"
+            outline_w = 1.0
+            shadow_dist = 3.5
+        elif preset == "neon_glow":
+            border_style = 1
+            stroke_color = "&H00FF00FF"  # Magenta parlama
+            back_colour = "&H00FFFF00"   # Cyan parlama
+            outline_w = 3.5
+            shadow_dist = 3.5
+        else:  # tiktok_yellow / custom
+            back_colour = shadow_color
+            outline_w = stroke_w
+
+        subtitle_style_line = (
+            f"Style: Subtitle,{sub_font},{sub_fs},{primary_color},{highlight_color},"
+            f"{stroke_color},{back_colour},1,0,0,0,100,100,{int(letter_spacing)},0,"
+            f"{border_style},{outline_w},{shadow_dist},2,40,40,{margin_v},1"
+        )
+
         header = [
             "[Script Info]",
             "Title: OtoEdit Dynamic Subtitles & Overlays",
@@ -108,8 +156,7 @@ class TextOverlay:
             # Varsayılan şablon stilleri
             # Default: Kenarlıksız, doğal drop-shadow gölgeli (CSS drop-shadow paritesi)
             "Style: Default,Inter,48,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,0,3,5,40,40,60,1",
-            # Subtitle: Göğüs hizasında (%80-85), yarı saydam şık siyah kapsül (BorderStyle: 3, BackColour: &HB0101010)
-            "Style: Subtitle,Montserrat,44,&H00FFFFFF,&H0000FFFF,&H00000000,&HB0101010,1,0,0,0,100,100,0,0,3,10,0,2,30,30,160,1",
+            subtitle_style_line,
             "Style: TitleTop,Inter,56,&H0000D7FF,&H000000FF,&H00000000,&H90000000,1,0,0,0,100,100,0,0,1,0,3,8,40,40,40,1",
             "",
             "[Events]",
@@ -249,32 +296,33 @@ class TextOverlay:
 
                         styled_parts = []
                         for j, w in enumerate(valid_words):
+                            w_disp = w["word"].upper() if sub_style.get("allCaps") else w["word"]
                             if j == i:
-                                styled_parts.append(f"{{\\c&H0000FFFF&}}{w['word']}{{\\c&H00FFFFFF&}}")
+                                styled_parts.append(f"{{\\c{highlight_color}\\t(0,90,\\fscx110\\fscy110)}}{w_disp}{{\\c{primary_color}\\fscx100\\fscy100}}")
                             else:
-                                styled_parts.append(w["word"])
+                                styled_parts.append(w_disp)
 
                         word_line = " ".join(styled_parts)
                         dialogue_lines.append(
                             f"Dialogue: 1,{cls.seconds_to_ass_time(w_start_time)},{cls.seconds_to_ass_time(display_end)},Subtitle,,0,0,0,,{word_line}"
                         )
 
-                        # Uzun duraklama varsa ara aralıkta tümü beyaz
+                        # Uzun duraklama varsa ara aralıkta tümü birincil renk
                         if next_start > display_end + 0.05:
-                            all_white = " ".join([w["word"] for w in valid_words])
+                            all_white = " ".join([(w["word"].upper() if sub_style.get("allCaps") else w["word"]) for w in valid_words])
                             dialogue_lines.append(
                                 f"Dialogue: 1,{cls.seconds_to_ass_time(display_end)},{cls.seconds_to_ass_time(next_start)},Subtitle,,0,0,0,,{all_white}"
                             )
 
-                    # 3. Son kelimeden sonra kalan süre varsa tümü beyaz
+                    # 3. Son kelimeden sonra kalan süre varsa tümü birincil renk
                     last_end = valid_words[-1]["end"]
                     if s_end > last_end + 0.05:
-                        all_white = " ".join([w["word"] for w in valid_words])
+                        all_white = " ".join([(w["word"].upper() if sub_style.get("allCaps") else w["word"]) for w in valid_words])
                         dialogue_lines.append(
                             f"Dialogue: 1,{cls.seconds_to_ass_time(last_end)},{cls.seconds_to_ass_time(s_end)},Subtitle,,0,0,0,,{all_white}"
                         )
                 else:
-                    clean_text = text.replace("\n", " ")
+                    clean_text = text.replace("\n", " ").upper() if sub_style.get("allCaps") else text.replace("\n", " ")
                     dialogue_lines.append(f"Dialogue: 1,{start_ass},{end_ass},Subtitle,,0,0,0,,{clean_text}")
 
         # Dosyayı kaydet

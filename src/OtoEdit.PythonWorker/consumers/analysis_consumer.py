@@ -315,7 +315,8 @@ class AnalysisConsumer:
                 video_format=video_format,
                 extra_cuts=retake_cuts,
                 extra_overlays=broll_overlays,
-                audio_peaks=audio_peaks
+                audio_peaks=audio_peaks,
+                video_duration=getattr(analysis, "duration", None)
             )
 
             # 💾 REDIS ÖNBELLEĞE KAYDET

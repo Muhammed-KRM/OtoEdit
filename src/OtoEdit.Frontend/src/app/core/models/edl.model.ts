@@ -25,6 +25,26 @@ export interface OverlayItem {
   positionY?: number; // 0-100 percentage
   scale?: number;
   trackId?: number;
+  // Tipografi & Rozet (Pill, Stroke, Shadow)
+  strokeColor?: string;
+  strokeWidth?: number;
+  shadowColor?: string;
+  shadowBlur?: number;
+  boxStyle?: 'none' | 'pill' | 'rounded' | 'badge';
+  boxBgColor?: string;
+  boxPadding?: number;
+  borderRadius?: number;
+  allCaps?: boolean;
+  letterSpacing?: number;
+  // Görsel Düzenleme & AI Arka Plan
+  removeBg?: boolean;
+  stickerBorder?: boolean;
+  stickerBorderWidth?: number;
+  stickerBorderColor?: string;
+  rotation?: number; // -180 to 180 degrees
+  maskShape?: 'rect' | 'circle' | 'rounded';
+  chromaKeyColor?: string;
+  chromaKeySimilarity?: number;
 }
 
 export interface TranscriptWord {
@@ -69,6 +89,36 @@ export interface SuggestionItem {
   status: 'pending' | 'accepted' | 'rejected';
 }
 
+export interface SubtitleStyleConfig {
+  preset: 'tiktok_yellow' | 'cinematic_shadow' | 'opaque_banner' | 'neon_glow' | 'custom';
+  fontFamily: string;
+  fontSize: number;
+  textColor: string;
+  highlightColor: string;
+  strokeColor: string;
+  strokeWidth: number;
+  shadowColor: string;
+  shadowDistance: number;
+  shadowBlur: number;
+  backgroundColor?: string;
+  backgroundPadding?: number;
+  borderRadius?: number;
+  verticalPosition: number; // 5 - 95 (%)
+  allCaps?: boolean;
+  letterSpacing?: number;
+}
+
+export interface BackgroundMusicConfig {
+  url?: string;
+  title?: string;
+  volume: number; // 0.0 - 1.0
+  autoDucking: boolean;
+  duckingAmount: number; // 0.05 - 0.5
+  fadeIn: number;
+  fadeOut: number;
+  loop: boolean;
+}
+
 export interface EdlSettings {
   targetFormat?: string;
   templateId?: string;
@@ -76,6 +126,8 @@ export interface EdlSettings {
   audioEnhancement?: boolean;
   gestureCommandsEnabled?: boolean;
   subtitlesEnabled?: boolean;
+  subtitleStyle?: SubtitleStyleConfig;
+  backgroundMusic?: BackgroundMusicConfig;
 }
 
 export interface EdlTemplate {

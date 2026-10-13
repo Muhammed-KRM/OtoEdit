@@ -28,7 +28,7 @@ class ProxyGeminiEngine(BaseSTTEngine):
         self.model = model or Config.ANTIGRAVITY_PROXY_MODEL
 
     def is_available(self) -> bool:
-        return bool(self.proxy_url)
+        return bool(self.proxy_url and self.api_key)
 
     def transcribe_chunk(self, chunk: AudioChunk) -> List[Word]:
         if not chunk.audio_path:

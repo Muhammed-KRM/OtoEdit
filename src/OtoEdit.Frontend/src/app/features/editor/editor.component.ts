@@ -13,7 +13,7 @@ import { SignalrService } from '../../core/services/signalr.service';
 import { ProjectDetailDto } from '../../core/models/project.model';
 import { DiagnosticsService } from '../../core/services/diagnostics.service';
 import { VideoDetailDto } from '../../core/models/video.model';
-import { CutItem, EdlContent, EdlDto, OverlayItem, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
+import { CutItem, EdlContent, EdlDto, OverlayItem, SubtitleStyleConfig, BackgroundMusicConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
 import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
 import { ProjectAssetDto } from '../../core/models/asset.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
@@ -422,19 +422,38 @@ export interface ContextMenuState {
                 
                 <div [ngClass]="getOverlayAnimationClass(ov)">
                 
-                <!-- Metin Kaplaması -->
-                <span *ngIf="ov.type === 'text'" class="px-3 py-1 rounded font-bold whitespace-nowrap block drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)]" [style.fontSize]="((ov.fontSize || 48) / 19.2) + 'cqi'">
+                <!-- Metin Kaplaması (CapCut Pill / Badge / Dual Stroke) -->
+                <span 
+                  *ngIf="ov.type === 'text'" 
+                  class="font-bold whitespace-nowrap block transition-all"
+                  [style.fontSize]="((ov.fontSize || 48) / 19.2) + 'cqi'"
+                  [style.textTransform]="ov.allCaps ? 'uppercase' : 'none'"
+                  [style.letterSpacing.px]="ov.letterSpacing || 0"
+                  [style.backgroundColor]="ov.boxStyle && ov.boxStyle !== 'none' ? (ov.boxBgColor || 'rgba(0,0,0,0.75)') : 'transparent'"
+                  [style.padding]="ov.boxStyle && ov.boxStyle !== 'none' ? ((ov.boxPadding || 14) * 0.4) + 'px ' + (ov.boxPadding || 14) + 'px' : '2px 8px'"
+                  [style.borderRadius.px]="ov.boxStyle === 'pill' ? 9999 : (ov.borderRadius || (ov.boxStyle ? 12 : 4))"
+                  [style.webkitTextStroke]="(ov.strokeWidth ? (ov.strokeWidth * 0.4) + 'px ' + (ov.strokeColor || '#000000') : 'none')"
+                  [style.textShadow]="ov.shadowBlur ? '0 2px ' + (ov.shadowBlur * 2) + 'px ' + (ov.shadowColor || 'rgba(0,0,0,0.9)') : '0 2px 4px rgba(0,0,0,0.85)'"
+                  [style.boxShadow]="ov.boxStyle && ov.boxStyle !== 'none' ? '0 4px 15px rgba(0,0,0,0.5)' : 'none'">
                   {{ ov.content }}
                 </span>
 
-                <!-- Görsel / B-Roll Kaplaması -->
-                <div *ngIf="ov.type === 'image'" class="relative group">
+                <!-- Görsel / B-Roll Kaplaması (Sticker, Rotation, Shape Mask) -->
+                <div 
+                  *ngIf="ov.type === 'image'" 
+                  class="relative group transition-transform duration-75"
+                  [style.transform]="ov.rotation ? 'rotate(' + ov.rotation + 'deg)' : 'none'">
                   <img 
                     *ngIf="ov.source" 
                     [src]="ov.source" 
                     [alt]="ov.content || 'Görsel'" 
-                    class="rounded-lg shadow-xl border border-brand-cyan/50 pointer-events-none object-contain"
+                    class="shadow-xl pointer-events-none object-contain transition-all"
+                    [ngClass]="[
+                      ov.maskShape === 'circle' ? 'rounded-full aspect-square object-cover' : (ov.maskShape === 'rounded' ? 'rounded-2xl' : 'rounded-lg'),
+                      ov.stickerBorder ? 'ring-4 ring-white shadow-[0_0_20px_rgba(255,255,255,0.4)]' : 'border border-brand-cyan/50'
+                    ]"
                     [style.width]="(160 * (ov.scale || 1.0) / 8.6) + 'cqi'"
+                    [style.filter]="ov.removeBg ? 'drop-shadow(0 10px 15px rgba(0,0,0,0.5))' : 'none'"
                     style="height: auto; max-width: none;" />
                   
                   <div *ngIf="!ov.source" class="px-3 py-2 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-1.5">
@@ -464,25 +483,44 @@ export interface ContextMenuState {
                 <span class="absolute -top-3 -right-3 text-[8px] bg-brand-cyan text-slate-900 font-extrabold px-1 rounded">📍 Taslak</span>
               </div>
 
-              <!-- TikTok / Reels Karaoke Altyazı -->
+              <!-- TikTok / Reels / CapCut Karaoke Altyazı -->
               <div 
                 *ngIf="showSubtitles() && currentSubtitleSegment() as seg" 
                 (click)="$event.stopPropagation(); selectSubtitle(seg)"
-                class="absolute left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center cursor-pointer select-none px-4 py-1.5 rounded-xl bg-black/75 backdrop-blur-md border border-white/10 shadow-2xl hover:border-brand-cyan/80 transition-all group"
+                class="absolute left-1/2 -translate-x-1/2 z-25 max-w-[85%] text-center cursor-pointer select-none transition-all group"
                 [style.bottom.%]="100 - subtitlePositionY()"
+                [style.backgroundColor]="subtitlePreset() === 'opaque_banner' ? subtitleBgColor() : (subtitlePreset() === 'neon_glow' ? 'rgba(0,0,0,0.4)' : 'rgba(0,0,0,0.65)')"
+                [style.padding.px]="subtitlePreset() === 'opaque_banner' ? subtitleBgPadding() : 8"
+                [style.borderRadius.px]="subtitleBorderRadius()"
+                [style.letterSpacing.px]="subtitleLetterSpacing()"
+                [style.textTransform]="subtitleAllCaps() ? 'uppercase' : 'none'"
+                [style.backdropFilter]="subtitlePreset() === 'opaque_banner' ? 'none' : 'blur(8px)'"
+                [style.border]="subtitlePreset() === 'opaque_banner' ? '1px solid rgba(255,255,255,0.1)' : '1px solid rgba(255,255,255,0.08)'"
+                [style.boxShadow]="subtitlePreset() === 'neon_glow' ? '0 0 25px ' + subtitleHighlightColor() + '40' : '0 10px 25px rgba(0,0,0,0.5)'"
                 title="Altyazıyı Düzenlemek İçin Tıklayın">
-                <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" [style.fontFamily]="subtitleFont()" [style.color]="subtitleColor()">
+                <div 
+                  class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5" 
+                  [style.fontFamily]="subtitleFont()" 
+                  [style.fontSize.px]="subtitleFontSize()"
+                  [style.color]="subtitleColor()">
                   <ng-container *ngIf="seg.words && seg.words.length > 0; else plainText">
                     <span 
                       *ngFor="let w of seg.words"
-                      class="transition-all duration-100 inline-block px-0.5 rounded text-sm md:text-base"
+                      class="transition-all duration-100 inline-block px-1 rounded"
                       [style.color]="isWordActive(w) ? subtitleHighlightColor() : subtitleColor()"
-                      [ngClass]="isWordActive(w) ? 'font-black scale-110 bg-white/10 shadow-glow-sm' : 'font-semibold opacity-90'">
-                      {{ w.word }}
+                      [style.textShadow]="subtitlePreset() === 'neon_glow' && isWordActive(w) ? '0 0 10px ' + subtitleHighlightColor() + ', 0 0 20px ' + subtitleStrokeColor() : (subtitlePreset() === 'cinematic_shadow' ? '0 2px 8px rgba(0,0,0,0.9)' : '0 2px 4px rgba(0,0,0,0.8)')"
+                      [style.webkitTextStroke]="(subtitleStrokeWidth() > 0 ? (subtitleStrokeWidth() * 0.4) + 'px ' + subtitleStrokeColor() : 'none')"
+                      [ngClass]="isWordActive(w) ? 'font-black scale-110 shadow-glow-sm' : 'font-semibold opacity-90'">
+                      {{ subtitleAllCaps() ? w.word.toUpperCase() : w.word }}
                     </span>
                   </ng-container>
                   <ng-template #plainText>
-                    <span class="font-bold text-sm md:text-base drop-shadow" [style.color]="subtitleColor()">{{ seg.text }}</span>
+                    <span 
+                      class="font-bold drop-shadow" 
+                      [style.color]="subtitleColor()"
+                      [style.webkitTextStroke]="(subtitleStrokeWidth() > 0 ? (subtitleStrokeWidth() * 0.4) + 'px ' + subtitleStrokeColor() : 'none')">
+                      {{ subtitleAllCaps() ? seg.text.toUpperCase() : seg.text }}
+                    </span>
                   </ng-template>
                 </div>
               </div>
@@ -586,6 +624,65 @@ export interface ContextMenuState {
               <input type="range" min="0.2" max="2.5" step="0.05" [(ngModel)]="inspectorData.scale" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan cursor-pointer" />
             </div>
 
+            <!-- Görsel Efektleri & AI Düzenleme (Image ise) -->
+            <div *ngIf="inspectorData.type === 'image'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-1">
+                <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wider">✨ Görsel Efektleri & AI</span>
+              </div>
+
+              <!-- AI Arka Plan Kaldırma -->
+              <div class="flex items-center justify-between">
+                <div class="flex flex-col">
+                  <span class="text-xs text-slate-200 font-semibold">Arka Planı Kaldır (AI)</span>
+                  <span class="text-[9px] text-slate-400">Şeffaf nesne / portre</span>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                  <input type="checkbox" [(ngModel)]="inspectorData.removeBg" (ngModelChange)="onInspectorChange()" class="sr-only peer" />
+                  <div class="w-8 h-4 bg-dark-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-cyan"></div>
+                </label>
+              </div>
+
+              <!-- Beyaz Sticker Çıkartma Kenarlığı -->
+              <div class="space-y-1.5 pt-1 border-t border-slate-800/60">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs text-slate-200 font-semibold">Sticker Kenarlığı</span>
+                  <input type="checkbox" [(ngModel)]="inspectorData.stickerBorder" (ngModelChange)="onInspectorChange()" class="rounded accent-brand-cyan" />
+                </div>
+                <div *ngIf="inspectorData.stickerBorder" class="grid grid-cols-2 gap-2 pt-1">
+                  <div class="space-y-0.5">
+                    <span class="text-[9px] text-slate-400">Kalınlık ({{ inspectorData.stickerBorderWidth || 6 }}px)</span>
+                    <input type="range" min="2" max="16" step="1" [(ngModel)]="inspectorData.stickerBorderWidth" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                  <div class="space-y-0.5">
+                    <span class="text-[9px] text-slate-400">Kenarlık Rengi</span>
+                    <input type="color" [(ngModel)]="inspectorData.stickerBorderColor" (ngModelChange)="onInspectorChange()" class="w-full h-6 rounded bg-transparent border border-slate-700 p-0 cursor-pointer" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Döndürme (Rotation) -->
+              <div class="space-y-1 pt-1 border-t border-slate-800/60">
+                <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
+                  <span>Döndürme Açısı</span>
+                  <span class="text-brand-cyan font-mono font-bold">{{ inspectorData.rotation || 0 }}°</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <input type="range" min="-180" max="180" step="5" [(ngModel)]="inspectorData.rotation" (ngModelChange)="onInspectorChange()" class="flex-1 accent-brand-cyan" />
+                  <button type="button" (click)="inspectorData.rotation = 0; onInspectorChange()" class="px-1.5 py-0.5 text-[9px] bg-dark-900 border border-slate-700 rounded text-slate-400 hover:text-white">Sıfırla</button>
+                </div>
+              </div>
+
+              <!-- Maske Şekli -->
+              <div class="space-y-1 pt-1 border-t border-slate-800/60">
+                <span class="text-[10px] text-slate-400 uppercase font-semibold">Kırpma / Şekil Maskesi</span>
+                <div class="grid grid-cols-3 gap-1">
+                  <button type="button" (click)="inspectorData.maskShape = 'rect'; onInspectorChange()" [ngClass]="(!inspectorData.maskShape || inspectorData.maskShape === 'rect') ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700 transition-colors">Normal</button>
+                  <button type="button" (click)="inspectorData.maskShape = 'circle'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'circle' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700 transition-colors">Dairesel</button>
+                  <button type="button" (click)="inspectorData.maskShape = 'rounded'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'rounded' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700 transition-colors">Yuvarlak</button>
+                </div>
+              </div>
+            </div>
+
             <!-- Zamanlar -->
             <div class="grid grid-cols-2 gap-2.5">
               <div class="space-y-1">
@@ -625,6 +722,47 @@ export interface ContextMenuState {
                 <option value="Arial">Arial (Sade & Klasik)</option>
                 <option value="Cinzel">Cinzel (Sinematik Serif)</option>
               </select>
+            </div>
+
+            <!-- Kutu / Rozet Stili (Pill / Badge) -->
+            <div *ngIf="inspectorData.type === 'text'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+              <div class="flex items-center justify-between border-b border-slate-800 pb-1">
+                <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wider">🏷️ Kutu / Banner Rozet Stili</span>
+              </div>
+              <div class="grid grid-cols-4 gap-1">
+                <button type="button" (click)="inspectorData.boxStyle = 'none'; onInspectorChange()" [ngClass]="(!inspectorData.boxStyle || inspectorData.boxStyle === 'none') ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Düz</button>
+                <button type="button" (click)="inspectorData.boxStyle = 'pill'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'pill' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Pill (Hap)</button>
+                <button type="button" (click)="inspectorData.boxStyle = 'rounded'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'rounded' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Yuvarlak</button>
+                <button type="button" (click)="inspectorData.boxStyle = 'badge'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'badge' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Rozet</button>
+              </div>
+
+              <!-- Kutu Rengi ve Dolgusu -->
+              <div *ngIf="inspectorData.boxStyle && inspectorData.boxStyle !== 'none'" class="space-y-2 pt-1 border-t border-slate-800/60">
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="space-y-0.5">
+                    <label class="text-[9px] text-slate-400">Kutu Rengi</label>
+                    <input type="color" [(ngModel)]="inspectorData.boxBgColor" (ngModelChange)="onInspectorChange()" class="w-full h-6 rounded bg-transparent border border-slate-700 p-0 cursor-pointer" />
+                  </div>
+                  <div class="space-y-0.5">
+                    <label class="text-[9px] text-slate-400">İç Dolgu ({{ inspectorData.boxPadding || 14 }}px)</label>
+                    <input type="range" min="6" max="32" step="2" [(ngModel)]="inspectorData.boxPadding" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- Kontur & Harf Formatı -->
+              <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/60 items-center">
+                <div class="space-y-0.5">
+                  <label class="text-[9px] text-slate-400">Dış Kontur ({{ inspectorData.strokeWidth || 0 }}px)</label>
+                  <input type="range" min="0" max="8" step="1" [(ngModel)]="inspectorData.strokeWidth" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                </div>
+                <div class="flex items-center gap-2 pt-2">
+                  <label class="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300">
+                    <input type="checkbox" [(ngModel)]="inspectorData.allCaps" (ngModelChange)="onInspectorChange()" class="rounded accent-brand-cyan" />
+                    <span>BÜYÜK Harf</span>
+                  </label>
+                </div>
+              </div>
             </div>
 
             <!-- Pozisyon X & Y -->
@@ -720,7 +858,7 @@ export interface ContextMenuState {
             <div class="space-y-1">
               <div class="flex items-center justify-between">
                 <label class="text-[10px] text-slate-400 uppercase font-semibold">Altyazı Metni</label>
-                <span class="text-[10px] text-slate-500 font-mono">{{ subtitleInspectorData.text?.length || 0 }} kr</span>
+                <span class="text-[10px] text-slate-500 font-mono">{{ subtitleInspectorData.text.length || 0 }} kr</span>
               </div>
               <textarea 
                 [(ngModel)]="subtitleInspectorData.text" 
@@ -778,8 +916,47 @@ export interface ContextMenuState {
             <!-- Görünüm & Konum (Tüm Altyazılar İçin Canlı) -->
             <div class="space-y-3 p-3 bg-dark-950/70 rounded-xl border border-slate-800/80">
               <div class="flex items-center justify-between border-b border-slate-800 pb-1.5">
-                <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wider">🎨 Altyazı Stili & Konumu</span>
-                <span class="text-[9px] text-slate-500 font-mono">Canlı Önizleme</span>
+                <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wider">🎨 Altyazı Stili & Şablonlar (CapCut)</span>
+                <span class="text-[9px] text-brand-cyan font-mono font-bold">{{ subtitlePreset() }}</span>
+              </div>
+
+              <!-- Hazır Stil Preset Kartları -->
+              <div class="space-y-1.5">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">Hazır Şablonlar</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <button 
+                    type="button" 
+                    (click)="applySubtitlePreset('tiktok_yellow')"
+                    [ngClass]="subtitlePreset() === 'tiktok_yellow' ? 'border-amber-400 bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/50' : 'border-slate-800 bg-dark-900/60 text-slate-400 hover:border-slate-700'"
+                    class="p-2 rounded-lg border text-left flex flex-col gap-1 transition-all">
+                    <span class="text-[11px] font-bold">⚡ TikTok Sarı</span>
+                    <span class="text-[9px] text-slate-400 font-sans">Sarı Vurgulu & Konturlu</span>
+                  </button>
+                  <button 
+                    type="button" 
+                    (click)="applySubtitlePreset('cinematic_shadow')"
+                    [ngClass]="subtitlePreset() === 'cinematic_shadow' ? 'border-sky-400 bg-sky-500/20 text-sky-300 ring-1 ring-sky-400/50' : 'border-slate-800 bg-dark-900/60 text-slate-400 hover:border-slate-700'"
+                    class="p-2 rounded-lg border text-left flex flex-col gap-1 transition-all">
+                    <span class="text-[11px] font-bold">🎬 Sinematik</span>
+                    <span class="text-[9px] text-slate-400 font-sans">Gölge & Zarif Serif</span>
+                  </button>
+                  <button 
+                    type="button" 
+                    (click)="applySubtitlePreset('opaque_banner')"
+                    [ngClass]="subtitlePreset() === 'opaque_banner' ? 'border-emerald-400 bg-emerald-500/20 text-emerald-300 ring-1 ring-emerald-400/50' : 'border-slate-800 bg-dark-900/60 text-slate-400 hover:border-slate-700'"
+                    class="p-2 rounded-lg border text-left flex flex-col gap-1 transition-all">
+                    <span class="text-[11px] font-bold">🏷️ Opaque Kutu</span>
+                    <span class="text-[9px] text-slate-400 font-sans">Koyu Banner Rozet</span>
+                  </button>
+                  <button 
+                    type="button" 
+                    (click)="applySubtitlePreset('neon_glow')"
+                    [ngClass]="subtitlePreset() === 'neon_glow' ? 'border-fuchsia-400 bg-fuchsia-500/20 text-fuchsia-300 ring-1 ring-fuchsia-400/50' : 'border-slate-800 bg-dark-900/60 text-slate-400 hover:border-slate-700'"
+                    class="p-2 rounded-lg border text-left flex flex-col gap-1 transition-all">
+                    <span class="text-[11px] font-bold">🔮 Neon Glow</span>
+                    <span class="text-[9px] text-slate-400 font-sans">Siyan Parıltı & Büyük</span>
+                  </button>
+                </div>
               </div>
 
               <!-- Dikey Konum -->
@@ -791,21 +968,21 @@ export interface ContextMenuState {
                 <div class="grid grid-cols-3 gap-1">
                   <button 
                     type="button"
-                    (click)="subtitlePositionY.set(85)" 
+                    (click)="subtitlePositionY.set(85); persistSubtitleStyle()" 
                     [ngClass]="subtitlePositionY() >= 75 ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400 hover:text-white'"
                     class="py-1 rounded text-[10px] border border-slate-700 transition-colors">
-                    Alt (Varsayılan)
+                    Alt
                   </button>
                   <button 
                     type="button"
-                    (click)="subtitlePositionY.set(50)" 
+                    (click)="subtitlePositionY.set(50); persistSubtitleStyle()" 
                     [ngClass]="subtitlePositionY() > 30 && subtitlePositionY() < 75 ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400 hover:text-white'"
                     class="py-1 rounded text-[10px] border border-slate-700 transition-colors">
                     Orta
                   </button>
                   <button 
                     type="button"
-                    (click)="subtitlePositionY.set(15)" 
+                    (click)="subtitlePositionY.set(15); persistSubtitleStyle()" 
                     [ngClass]="subtitlePositionY() <= 30 ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400 hover:text-white'"
                     class="py-1 rounded text-[10px] border border-slate-700 transition-colors">
                     Üst
@@ -817,11 +994,41 @@ export interface ContextMenuState {
                   max="90" 
                   step="1" 
                   [ngModel]="subtitlePositionY()" 
-                  (ngModelChange)="subtitlePositionY.set($event)"
+                  (ngModelChange)="subtitlePositionY.set($event); persistSubtitleStyle()"
                   class="w-full accent-brand-cyan cursor-pointer mt-1" />
               </div>
 
-              <!-- Tipografi & Renkler -->
+              <!-- Tipografi & Boyut -->
+              <div class="space-y-1.5">
+                <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
+                  <span>Yazı Tipi & Boyutu</span>
+                  <span class="text-brand-cyan font-mono font-bold">{{ subtitleFontSize() }}px</span>
+                </div>
+                <div class="grid grid-cols-2 gap-2">
+                  <select 
+                    [ngModel]="subtitleFont()" 
+                    (ngModelChange)="subtitleFont.set($event); persistSubtitleStyle()" 
+                    class="bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
+                    <option value="Montserrat, sans-serif">Montserrat</option>
+                    <option value="Poppins, sans-serif">Poppins</option>
+                    <option value="Bebas Neue, sans-serif">Bebas Neue</option>
+                    <option value="Anton, sans-serif">Anton</option>
+                    <option value="Cinzel, serif">Cinzel (Sinematik)</option>
+                    <option value="Outfit, sans-serif">Outfit</option>
+                    <option value="Inter, sans-serif">Inter</option>
+                  </select>
+                  <input 
+                    type="range" 
+                    min="24" 
+                    max="72" 
+                    step="2" 
+                    [ngModel]="subtitleFontSize()" 
+                    (ngModelChange)="subtitleFontSize.set($event); persistSubtitleStyle()"
+                    class="accent-brand-cyan cursor-pointer w-full self-center" />
+                </div>
+              </div>
+
+              <!-- Renkler -->
               <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-1">
                   <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Rengi</label>
@@ -829,12 +1036,12 @@ export interface ContextMenuState {
                     <input 
                       type="color" 
                       [ngModel]="subtitleColor()" 
-                      (ngModelChange)="subtitleColor.set($event)" 
+                      (ngModelChange)="subtitleColor.set($event); persistSubtitleStyle()" 
                       class="w-7 h-7 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
                     <input 
                       type="text" 
                       [ngModel]="subtitleColor()" 
-                      (ngModelChange)="subtitleColor.set($event)" 
+                      (ngModelChange)="subtitleColor.set($event); persistSubtitleStyle()" 
                       class="flex-1 min-w-0 bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-[11px] text-white font-mono" />
                   </div>
                 </div>
@@ -845,32 +1052,52 @@ export interface ContextMenuState {
                     <input 
                       type="color" 
                       [ngModel]="subtitleHighlightColor()" 
-                      (ngModelChange)="subtitleHighlightColor.set($event)" 
+                      (ngModelChange)="subtitleHighlightColor.set($event); persistSubtitleStyle()" 
                       class="w-7 h-7 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
                     <input 
                       type="text" 
                       [ngModel]="subtitleHighlightColor()" 
-                      (ngModelChange)="subtitleHighlightColor.set($event)" 
+                      (ngModelChange)="subtitleHighlightColor.set($event); persistSubtitleStyle()" 
                       class="flex-1 min-w-0 bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-[11px] text-white font-mono" />
                   </div>
                 </div>
               </div>
 
-              <!-- Yazı Tipi (Font) -->
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font)</label>
-                <select 
-                  [ngModel]="subtitleFont()" 
-                  (ngModelChange)="subtitleFont.set($event)" 
-                  class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
-                  <option value="Montserrat, sans-serif">Montserrat (Modern Kalın)</option>
-                  <option value="Poppins, sans-serif">Poppins (Temiz & Yuvarlak)</option>
-                  <option value="Bebas Neue, sans-serif">Bebas Neue (Büyük & Vurucu)</option>
-                  <option value="Anton, sans-serif">Anton (Dikkat Çekici)</option>
-                  <option value="Outfit, sans-serif">Outfit (Fütüristik Sans)</option>
-                  <option value="Inter, sans-serif">Inter (Ultra Okunabilir UI)</option>
-                </select>
+              <!-- Kontur (Stroke) & Harf Seçenekleri -->
+              <div class="grid grid-cols-2 gap-2 items-center pt-1 border-t border-slate-800/60">
+                <div class="space-y-1">
+                  <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
+                    <span>Kontur Kalınlığı</span>
+                    <span class="text-brand-cyan font-mono font-bold">{{ subtitleStrokeWidth() }}px</span>
+                  </div>
+                  <input 
+                    type="range" 
+                    min="0" 
+                    max="6" 
+                    step="1" 
+                    [ngModel]="subtitleStrokeWidth()" 
+                    (ngModelChange)="subtitleStrokeWidth.set($event); persistSubtitleStyle()"
+                    class="w-full accent-brand-cyan cursor-pointer" />
+                </div>
+                <div class="flex items-center gap-2 pt-2">
+                  <label class="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300">
+                    <input 
+                      type="checkbox" 
+                      [checked]="subtitleAllCaps()" 
+                      (change)="subtitleAllCaps.set($any($event.target).checked); persistSubtitleStyle()" 
+                      class="rounded accent-brand-cyan" />
+                    <span>Tümü BÜYÜK</span>
+                  </label>
+                </div>
               </div>
+
+              <!-- Kaydet Butonu -->
+              <button 
+                type="button"
+                (click)="persistSubtitleStyle()" 
+                class="w-full py-1.5 bg-brand-cyan/20 hover:bg-brand-cyan/30 text-brand-cyan border border-brand-cyan/40 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+                <span>📌</span> Bu Stili Tüm Altyazılara Kaydet
+              </button>
             </div>
 
             <!-- Eylemler -->
@@ -1145,6 +1372,28 @@ export interface ContextMenuState {
               </div>
               <span class="text-xs text-emerald-500/70" title="Ses Dalga Formu Aktif">🔊</span>
             </div>
+
+            <!-- Arka Plan Müziği Kanalı Başlığı (A1) (B5) -->
+            <div class="h-12 px-2.5 flex items-center justify-between text-xs bg-dark-900/95 border-t border-slate-800 group">
+              <div class="flex items-center gap-1.5">
+                <span class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-black bg-violet-500/20 text-violet-300 border border-violet-500/30">
+                  A1
+                </span>
+                <div class="flex flex-col overflow-hidden max-w-[90px]">
+                  <span class="text-[11px] font-bold text-violet-400 truncate">BGM Müzik</span>
+                  <span class="text-[9px] text-slate-400 font-mono truncate" [title]="bgmTitle()">
+                    {{ bgmUrl() ? bgmTitle() : 'Parça Yok' }}
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                (click)="isBgmSelectorOpen.set(true)"
+                class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-violet-600/30 hover:bg-violet-600/50 text-violet-200 border border-violet-500/40 transition-colors cursor-pointer"
+                title="Müzik Seç / Ayarla">
+                🎵
+              </button>
+            </div>
           </div>
 
           <!-- 2. SAĞ KAYDIRILABİLİR ZAMAN ÇİZELGESİ (Scrollable Timeline Canvas) -->
@@ -1341,6 +1590,83 @@ export interface ContextMenuState {
                  <div class="w-12 h-0.5 bg-slate-500 rounded-full group-hover:bg-slate-300"></div>
               </div>
 
+              <!-- Arka Plan Müziği Kanalı (A1 BGM Track) (B5) -->
+              <div class="relative h-12 bg-dark-900/60 border-b border-slate-800/80 overflow-hidden flex items-center select-none">
+                <div class="absolute inset-0 bg-[linear-gradient(to_right,#312e81_1px,transparent_1px)] bg-[size:60px_100%] opacity-15 pointer-events-none"></div>
+
+                <!-- Müzik Yüklü İse -->
+                <ng-container *ngIf="bgmUrl(); else noBgmTemplate">
+                  <div class="absolute inset-x-1 top-1 bottom-1 rounded-md bg-gradient-to-r from-violet-950/80 via-purple-900/60 to-indigo-950/80 border border-violet-500/50 shadow-sm flex items-center justify-between px-3 text-white">
+                    <!-- Sol: Parça Bilgisi & Ses Dalgası Efekti -->
+                    <div class="flex items-center gap-2 overflow-hidden">
+                      <span class="text-sm">🎵</span>
+                      <div class="flex flex-col truncate">
+                        <span class="text-xs font-bold text-violet-200 truncate">{{ bgmTitle() }}</span>
+                        <div class="flex items-center gap-2 text-[9px] text-violet-300/80">
+                          <span>Döngü (Loop) Aktif</span>
+                          <span>•</span>
+                          <span class="text-emerald-400 font-semibold" *ngIf="bgmAutoDucking()">🦆 Auto-Ducking Aktif</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <!-- Sağ: Hızlı Kontroller (Ses Seviyesi & Ducking & Değiştir/Sil) -->
+                    <div class="flex items-center gap-3 shrink-0" (click)="$event.stopPropagation()">
+                      <!-- Ses Slider -->
+                      <div class="flex items-center gap-1.5" title="Müzik Seviyesi">
+                        <span class="text-[10px] text-slate-400">🔊</span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1"
+                          step="0.05"
+                          [value]="bgmVolume()"
+                          (input)="bgmVolume.set($any($event.target).value); persistBgmSettings()"
+                          class="w-16 h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-violet-500" />
+                        <span class="text-[9px] font-mono text-slate-300 w-6">{{ (bgmVolume() * 100).toFixed(0) }}%</span>
+                      </div>
+
+                      <!-- Auto-Ducking Aç/Kapat Butonu -->
+                      <button
+                        type="button"
+                        (click)="toggleAutoDucking()"
+                        [ngClass]="bgmAutoDucking() ? 'bg-emerald-600/30 text-emerald-300 border-emerald-500/50' : 'bg-slate-800 text-slate-400 border-slate-700'"
+                        class="px-2 py-0.5 rounded text-[10px] font-bold border transition-colors flex items-center gap-1 cursor-pointer"
+                        title="Konuşmacı varken müzik sesini otomatik kısar">
+                        <span>🦆 Ducking</span>
+                        <span class="text-[9px]">{{ bgmAutoDucking() ? 'AÇIK' : 'KAPALI' }}</span>
+                      </button>
+
+                      <!-- Değiştir / Sil Butonları -->
+                      <button
+                        type="button"
+                        (click)="isBgmSelectorOpen.set(true)"
+                        class="p-1 rounded text-slate-400 hover:text-white hover:bg-slate-700/50 text-xs transition-colors cursor-pointer"
+                        title="Müzik Ayarları">
+                        ⚙️
+                      </button>
+                      <button
+                        type="button"
+                        (click)="removeBgm()"
+                        class="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 text-xs transition-colors cursor-pointer"
+                        title="Müziği Kaldır">
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </ng-container>
+
+                <!-- Müzik Yüklü Değil İse Boş Slot -->
+                <ng-template #noBgmTemplate>
+                  <div
+                    (click)="isBgmSelectorOpen.set(true)"
+                    class="absolute inset-x-2 top-1 bottom-1 rounded-md border border-dashed border-violet-500/30 hover:border-violet-400/70 bg-violet-950/10 hover:bg-violet-950/30 flex items-center justify-center gap-2 text-violet-400/80 hover:text-violet-200 transition-all cursor-pointer">
+                    <span class="text-xs">🎵</span>
+                    <span class="text-[11px] font-medium">+ Arka Plan Müziği Ekle (Lo-Fi, Vlog, Sinematik...)</span>
+                  </div>
+                </ng-template>
+              </div>
+
               <!-- Ortak Zaman İmleci (Playhead) -->
               <div 
                 #playhead
@@ -1530,6 +1856,190 @@ export interface ContextMenuState {
             <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+Y</kbd>
           </button>
         </ng-container>
+      </div>
+
+      <!-- ARKA PLAN MÜZİĞİ (BGM) VE AUTO-DUCKING SEÇİM MODALI (B5) -->
+      <div 
+        *ngIf="isBgmSelectorOpen()" 
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+        (click)="isBgmSelectorOpen.set(false)">
+        <div 
+          class="bg-dark-900 border border-slate-700/80 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col"
+          (click)="$event.stopPropagation()">
+          
+          <!-- Modal Başlığı -->
+          <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-dark-950/60">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-violet-600/20 text-violet-400 flex items-center justify-center text-lg border border-violet-500/30">
+                🎵
+              </span>
+              <div>
+                <h3 class="text-base font-bold text-white tracking-wide">Arka Plan Müziği & Auto-Ducking</h3>
+                <p class="text-xs text-slate-400">Telif ücretsiz müzik kütüphanesinden seçin veya kendi parçanızı ekleyin</p>
+              </div>
+            </div>
+            <button 
+              type="button"
+              (click)="isBgmSelectorOpen.set(false)"
+              class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-sm cursor-pointer">
+              ✕
+            </button>
+          </div>
+
+          <!-- Modal İçeriği: Hazır Telif Ücretsiz Parçalar & Özel URL -->
+          <div class="p-6 space-y-5 max-h-[70vh] overflow-y-auto scrollbar-thin">
+            <!-- Hazır Preset Kartları -->
+            <div>
+              <span class="text-xs font-semibold text-slate-300 block mb-2.5 uppercase tracking-wider">Öne Çıkan Parçalar (Royalty-Free)</span>
+              <div class="grid grid-cols-2 gap-3">
+                <!-- Lo-Fi Chill -->
+                <button
+                  type="button"
+                  (click)="setBgmPreset('https://cdn.pixabay.com/download/audio/2022/05/27/audio_1808fbf07a.mp3?filename=lofi-study-112191.mp3', '☕ Lo-Fi Chill Beat')"
+                  [ngClass]="bgmTitle() === '☕ Lo-Fi Chill Beat' ? 'border-violet-500 bg-violet-950/30 ring-1 ring-violet-500' : 'border-slate-800 bg-dark-800/60 hover:border-slate-700 hover:bg-dark-800'"
+                  class="p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer group">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-bold text-violet-300 group-hover:text-violet-200">☕ Lo-Fi Chill</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 font-semibold">Sakin & Vlog</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 line-clamp-1">Odaklanma, sakin anlatımlar ve vloglar için yumuşak ritim</p>
+                </button>
+
+                <!-- Upbeat Vlog -->
+                <button
+                  type="button"
+                  (click)="setBgmPreset('https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3?filename=electronic-future-beats-117997.mp3', '⚡ Upbeat Tech Vlog')"
+                  [ngClass]="bgmTitle() === '⚡ Upbeat Tech Vlog' ? 'border-violet-500 bg-violet-950/30 ring-1 ring-violet-500' : 'border-slate-800 bg-dark-800/60 hover:border-slate-700 hover:bg-dark-800'"
+                  class="p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer group">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-bold text-violet-300 group-hover:text-violet-200">⚡ Upbeat Tech</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-semibold">Dinamik</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 line-clamp-1">YouTube inceleme ve Reels için enerjik elektronik ritim</p>
+                </button>
+
+                <!-- Cinematic Ambient -->
+                <button
+                  type="button"
+                  (click)="setBgmPreset('https://cdn.pixabay.com/download/audio/2022/03/15/audio_c8c8a73467.mp3?filename=cinematic-atmosphere-score-11004.mp3', '🎬 Cinematic Ambient')"
+                  [ngClass]="bgmTitle() === '🎬 Cinematic Ambient' ? 'border-violet-500 bg-violet-950/30 ring-1 ring-violet-500' : 'border-slate-800 bg-dark-800/60 hover:border-slate-700 hover:bg-dark-800'"
+                  class="p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer group">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-bold text-violet-300 group-hover:text-violet-200">🎬 Cinematic Drama</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-semibold">Duygusal</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 line-clamp-1">Derin yaylılar ve piyano ile etkileyici hikaye anlatımı</p>
+                </button>
+
+                <!-- Modern Synthwave -->
+                <button
+                  type="button"
+                  (click)="setBgmPreset('https://cdn.pixabay.com/download/audio/2022/10/14/audio_9939f77cd0.mp3?filename=synthwave-80s-110045.mp3', '🚀 Modern Synthwave')"
+                  [ngClass]="bgmTitle() === '🚀 Modern Synthwave' ? 'border-violet-500 bg-violet-950/30 ring-1 ring-violet-500' : 'border-slate-800 bg-dark-800/60 hover:border-slate-700 hover:bg-dark-800'"
+                  class="p-3 rounded-xl border text-left flex flex-col gap-1 transition-all cursor-pointer group">
+                  <div class="flex items-center justify-between">
+                    <span class="text-sm font-bold text-violet-300 group-hover:text-violet-200">🚀 Modern Synth</span>
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-semibold">Retro Hızlı</span>
+                  </div>
+                  <p class="text-[11px] text-slate-400 line-clamp-1">80'ler retro-fütüristik dinamik video akışı</p>
+                </button>
+              </div>
+            </div>
+
+            <!-- Özel Ses Dosyası / URL -->
+            <div class="pt-2 border-t border-slate-800">
+              <label class="text-xs font-semibold text-slate-300 block mb-1.5">Özel Ses URL'si (MP3/WAV)</label>
+              <div class="flex gap-2">
+                <input 
+                  type="text" 
+                  #customBgmInput
+                  [value]="bgmUrl()"
+                  placeholder="https://example.com/audio/track.mp3"
+                  class="flex-1 bg-dark-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-violet-500 font-mono" />
+                <button
+                  type="button"
+                  (click)="setBgmPreset(customBgmInput.value, 'Özel Ses Parçası')"
+                  class="px-4 py-2 bg-violet-600 hover:bg-violet-500 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer shrink-0">
+                  Uygula
+                </button>
+              </div>
+            </div>
+
+            <!-- Auto-Ducking ve Ses Seviyesi Detay Ayarları -->
+            <div class="pt-3 border-t border-slate-800 space-y-3">
+              <span class="text-xs font-semibold text-slate-300 block">Akıllı Ses Mikseri & Auto-Ducking</span>
+              
+              <!-- Ducking Toggle -->
+              <div class="flex items-center justify-between p-3 rounded-xl bg-dark-950/60 border border-slate-800">
+                <div class="flex items-center gap-2.5">
+                  <span class="text-lg">🦆</span>
+                  <div>
+                    <span class="text-xs font-bold text-white block">Sidechain Auto-Ducking</span>
+                    <p class="text-[11px] text-slate-400">Konuşmacı başladığında müziği yumuşakça kısar, susunca eski seviyesine yükseltir.</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  (click)="toggleAutoDucking()"
+                  [ngClass]="bgmAutoDucking() ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400'"
+                  class="px-3 py-1.5 rounded-lg text-xs font-bold transition-colors cursor-pointer">
+                  {{ bgmAutoDucking() ? 'Aktif' : 'Pasif' }}
+                </button>
+              </div>
+
+              <!-- Ses Seviyeleri -->
+              <div class="grid grid-cols-2 gap-4">
+                <div>
+                  <div class="flex justify-between text-xs text-slate-300 mb-1">
+                    <span>Müzik Ses Gücü</span>
+                    <span class="font-mono text-violet-400 font-bold">{{ (bgmVolume() * 100).toFixed(0) }}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.05"
+                    [value]="bgmVolume()"
+                    (input)="bgmVolume.set($any($event.target).value); persistBgmSettings()"
+                    class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-violet-500" />
+                </div>
+                <div>
+                  <div class="flex justify-between text-xs text-slate-300 mb-1">
+                    <span>Ducking Seviyesi (Konuşma Anında)</span>
+                    <span class="font-mono text-emerald-400 font-bold">{{ (bgmDuckingAmount() * 100).toFixed(0) }}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.05"
+                    max="0.40"
+                    step="0.02"
+                    [value]="bgmDuckingAmount()"
+                    (input)="bgmDuckingAmount.set($any($event.target).value); persistBgmSettings()"
+                    class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Modal Altı -->
+          <div class="px-6 py-3 border-t border-slate-800 bg-dark-950/80 flex items-center justify-between">
+            <button
+              *ngIf="bgmUrl()"
+              type="button"
+              (click)="removeBgm()"
+              class="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-400 hover:text-rose-300 hover:bg-rose-950/30 transition-colors cursor-pointer">
+              Müziği Kaldır
+            </button>
+            <div *ngIf="!bgmUrl()"></div>
+            <button
+              type="button"
+              (click)="isBgmSelectorOpen.set(false)"
+              class="px-5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-bold transition-colors cursor-pointer">
+              Tamamla
+            </button>
+          </div>
+
+        </div>
       </div>
     </main>
   `
@@ -1735,12 +2245,31 @@ export class EditorComponent implements OnInit, OnDestroy {
   // Oynatma Durumu
   readonly isPlaying = signal<boolean>(false);
 
-  // Altyazı & Karaoke State
+  // Altyazı & Karaoke Stüdyosu (CapCut Stili B4)
   readonly showSubtitles = signal<boolean>(true);
+  readonly subtitlePreset = signal<'tiktok_yellow' | 'cinematic_shadow' | 'opaque_banner' | 'neon_glow' | 'custom'>('tiktok_yellow');
   readonly subtitleFont = signal<string>('Montserrat, Inter, sans-serif');
+  readonly subtitleFontSize = signal<number>(44);
   readonly subtitleColor = signal<string>('#FFFFFF');
-  readonly subtitleHighlightColor = signal<string>('#FCD34D');
+  readonly subtitleHighlightColor = signal<string>('#FFD700');
+  readonly subtitleStrokeColor = signal<string>('#000000');
+  readonly subtitleStrokeWidth = signal<number>(3);
+  readonly subtitleShadowColor = signal<string>('rgba(0, 0, 0, 0.8)');
+  readonly subtitleShadowBlur = signal<number>(2);
+  readonly subtitleBgColor = signal<string>('rgba(0, 0, 0, 0.7)');
+  readonly subtitleBgPadding = signal<number>(10);
+  readonly subtitleBorderRadius = signal<number>(8);
+  readonly subtitleAllCaps = signal<boolean>(false);
+  readonly subtitleLetterSpacing = signal<number>(0);
   readonly subtitlePositionY = signal<number>(85);
+
+  // Arka Plan Müziği (BGM) & Auto-Ducking State (B5)
+  readonly bgmUrl = signal<string>('');
+  readonly bgmTitle = signal<string>('Arka Plan Müziği Yok');
+  readonly bgmVolume = signal<number>(0.25);
+  readonly bgmAutoDucking = signal<boolean>(true);
+  readonly bgmDuckingAmount = signal<number>(0.15);
+  readonly isBgmSelectorOpen = signal<boolean>(false);
 
   readonly currentSubtitleSegment = computed<TranscriptSegment | null>(() => {
     const edl = this.activeEdl();
@@ -2182,6 +2711,182 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
   }
 
+  applySubtitlePreset(preset: 'tiktok_yellow' | 'cinematic_shadow' | 'opaque_banner' | 'neon_glow'): void {
+    this.subtitlePreset.set(preset);
+    if (preset === 'tiktok_yellow') {
+      this.subtitleFont.set('Montserrat, Inter, sans-serif');
+      this.subtitleFontSize.set(48);
+      this.subtitleColor.set('#FFFFFF');
+      this.subtitleHighlightColor.set('#FFD700');
+      this.subtitleStrokeColor.set('#000000');
+      this.subtitleStrokeWidth.set(3);
+      this.subtitleShadowColor.set('rgba(0,0,0,0.8)');
+      this.subtitleShadowBlur.set(2);
+      this.subtitleBgColor.set('rgba(0,0,0,0.65)');
+      this.subtitleBgPadding.set(8);
+      this.subtitleBorderRadius.set(8);
+      this.subtitleAllCaps.set(false);
+      this.subtitleLetterSpacing.set(0);
+      this.subtitlePositionY.set(85);
+    } else if (preset === 'cinematic_shadow') {
+      this.subtitleFont.set('Cinzel, serif');
+      this.subtitleFontSize.set(38);
+      this.subtitleColor.set('#F0F0F0');
+      this.subtitleHighlightColor.set('#FFCC00');
+      this.subtitleStrokeColor.set('#000000');
+      this.subtitleStrokeWidth.set(1);
+      this.subtitleShadowColor.set('rgba(0,0,0,0.95)');
+      this.subtitleShadowBlur.set(5);
+      this.subtitleBgColor.set('transparent');
+      this.subtitleBgPadding.set(4);
+      this.subtitleBorderRadius.set(4);
+      this.subtitleAllCaps.set(false);
+      this.subtitleLetterSpacing.set(2);
+      this.subtitlePositionY.set(88);
+    } else if (preset === 'opaque_banner') {
+      this.subtitleFont.set('Inter, sans-serif');
+      this.subtitleFontSize.set(40);
+      this.subtitleColor.set('#FFFFFF');
+      this.subtitleHighlightColor.set('#38BDF8');
+      this.subtitleStrokeColor.set('#000000');
+      this.subtitleStrokeWidth.set(0);
+      this.subtitleShadowColor.set('rgba(0,0,0,0.5)');
+      this.subtitleShadowBlur.set(1);
+      this.subtitleBgColor.set('rgba(0,0,0,0.85)');
+      this.subtitleBgPadding.set(12);
+      this.subtitleBorderRadius.set(12);
+      this.subtitleAllCaps.set(false);
+      this.subtitleLetterSpacing.set(0);
+      this.subtitlePositionY.set(82);
+    } else if (preset === 'neon_glow') {
+      this.subtitleFont.set('Bebas Neue, sans-serif');
+      this.subtitleFontSize.set(52);
+      this.subtitleColor.set('#FFFFFF');
+      this.subtitleHighlightColor.set('#00FFFF');
+      this.subtitleStrokeColor.set('#FF00FF');
+      this.subtitleStrokeWidth.set(2);
+      this.subtitleShadowColor.set('rgba(255,0,255,0.7)');
+      this.subtitleShadowBlur.set(8);
+      this.subtitleBgColor.set('rgba(10,10,25,0.6)');
+      this.subtitleBgPadding.set(8);
+      this.subtitleBorderRadius.set(6);
+      this.subtitleAllCaps.set(true);
+      this.subtitleLetterSpacing.set(1);
+      this.subtitlePositionY.set(85);
+    }
+    this.persistSubtitleStyle();
+  }
+
+  persistSubtitleStyle(): void {
+    const styleCfg: SubtitleStyleConfig = {
+      preset: this.subtitlePreset(),
+      fontFamily: this.subtitleFont(),
+      fontSize: this.subtitleFontSize(),
+      textColor: this.subtitleColor(),
+      highlightColor: this.subtitleHighlightColor(),
+      strokeColor: this.subtitleStrokeColor(),
+      strokeWidth: this.subtitleStrokeWidth(),
+      shadowColor: this.subtitleShadowColor(),
+      shadowDistance: 3.0,
+      shadowBlur: this.subtitleShadowBlur(),
+      backgroundColor: this.subtitleBgColor(),
+      backgroundPadding: this.subtitleBgPadding(),
+      borderRadius: this.subtitleBorderRadius(),
+      allCaps: this.subtitleAllCaps(),
+      letterSpacing: this.subtitleLetterSpacing(),
+      verticalPosition: this.subtitlePositionY()
+    };
+
+    const edl = this.edl();
+    if (edl) {
+      if (!edl.settings) edl.settings = {};
+      edl.settings.subtitleStyle = styleCfg;
+      this.edl.set({ ...edl });
+    }
+
+    this.edlService.patchEdl(this.projectId, {
+      settings: {
+        subtitleStyle: styleCfg,
+        subtitlesEnabled: this.showSubtitles()
+      }
+    }).subscribe({
+      next: () => console.log('[SUBTITLE:STYLE] Altyazı stili kaydedildi:', styleCfg),
+      error: (err) => console.error('[SUBTITLE:STYLE] Altyazı stili kaydedilemedi:', err)
+    });
+  }
+
+  initSubtitleStyleFromSettings(cfg?: SubtitleStyleConfig): void {
+    if (!cfg) return;
+    if (cfg.preset) this.subtitlePreset.set(cfg.preset);
+    if (cfg.fontFamily) this.subtitleFont.set(cfg.fontFamily);
+    if (cfg.fontSize) this.subtitleFontSize.set(cfg.fontSize);
+    if (cfg.textColor) this.subtitleColor.set(cfg.textColor);
+    if (cfg.highlightColor) this.subtitleHighlightColor.set(cfg.highlightColor);
+    if (cfg.strokeColor) this.subtitleStrokeColor.set(cfg.strokeColor);
+    if (cfg.strokeWidth !== undefined) this.subtitleStrokeWidth.set(cfg.strokeWidth);
+    if (cfg.shadowColor) this.subtitleShadowColor.set(cfg.shadowColor);
+    if (cfg.shadowBlur !== undefined) this.subtitleShadowBlur.set(cfg.shadowBlur);
+    if (cfg.backgroundColor) this.subtitleBgColor.set(cfg.backgroundColor);
+    if (cfg.backgroundPadding !== undefined) this.subtitleBgPadding.set(cfg.backgroundPadding);
+    if (cfg.borderRadius !== undefined) this.subtitleBorderRadius.set(cfg.borderRadius);
+    if (cfg.allCaps !== undefined) this.subtitleAllCaps.set(cfg.allCaps);
+    if (cfg.letterSpacing !== undefined) this.subtitleLetterSpacing.set(cfg.letterSpacing);
+    if (cfg.verticalPosition !== undefined) this.subtitlePositionY.set(cfg.verticalPosition);
+  }
+
+  // --- ARKA PLAN MÜZİĞİ & AUTO-DUCKING (B5) ---
+  setBgmPreset(url: string, title: string): void {
+    this.bgmUrl.set(url);
+    this.bgmTitle.set(title);
+    this.isBgmSelectorOpen.set(false);
+    this.persistBgmSettings();
+  }
+
+  removeBgm(): void {
+    this.bgmUrl.set('');
+    this.bgmTitle.set('Arka Plan Müziği Yok');
+    this.persistBgmSettings();
+  }
+
+  toggleAutoDucking(): void {
+    this.bgmAutoDucking.update(v => !v);
+    this.persistBgmSettings();
+  }
+
+  persistBgmSettings(): void {
+    const bgmCfg: BackgroundMusicConfig = {
+      url: this.bgmUrl(),
+      title: this.bgmTitle(),
+      volume: this.bgmVolume(),
+      autoDucking: this.bgmAutoDucking(),
+      duckingAmount: this.bgmDuckingAmount(),
+      fadeIn: 1.0,
+      fadeOut: 2.0,
+      loop: true
+    };
+    const edl = this.edl();
+    if (edl) {
+      if (!edl.settings) edl.settings = {};
+      edl.settings.backgroundMusic = bgmCfg;
+      this.edl.set({ ...edl });
+    }
+    this.edlService.patchEdl(this.projectId, {
+      settings: { backgroundMusic: bgmCfg }
+    }).subscribe({
+      next: () => console.log('[BGM:PERSIST] BGM ayarları kaydedildi:', bgmCfg),
+      error: (err) => console.error('[BGM:PERSIST] BGM kaydedilemedi:', err)
+    });
+  }
+
+  initBgmFromSettings(cfg?: BackgroundMusicConfig): void {
+    if (!cfg) return;
+    if (cfg.url) this.bgmUrl.set(cfg.url);
+    if (cfg.title) this.bgmTitle.set(cfg.title);
+    if (cfg.volume !== undefined) this.bgmVolume.set(cfg.volume);
+    if (cfg.autoDucking !== undefined) this.bgmAutoDucking.set(cfg.autoDucking);
+    if (cfg.duckingAmount !== undefined) this.bgmDuckingAmount.set(cfg.duckingAmount);
+  }
+
   saveSubtitleInspector(): void {
     const idx = this.subtitleInspectorData.index;
     const edl = this.activeEdl();
@@ -2454,6 +3159,12 @@ export class EditorComponent implements OnInit, OnDestroy {
         if (res.edl.settings?.subtitlesEnabled !== undefined) {
           this.showSubtitles.set(res.edl.settings.subtitlesEnabled);
         }
+        if (res.edl.settings?.subtitleStyle) {
+          this.initSubtitleStyleFromSettings(res.edl.settings.subtitleStyle);
+        }
+        if (res.edl.settings?.backgroundMusic) {
+          this.initBgmFromSettings(res.edl.settings.backgroundMusic);
+        }
         if (res.edl.duration && res.edl.duration > 5) {
           this.totalDuration.set(res.edl.duration);
         }
@@ -2464,15 +3175,13 @@ export class EditorComponent implements OnInit, OnDestroy {
             this.inspectorData = { ...this.inspectorData, ...ov };
           }
         }
-        // Eğer waveform henüz yüklenmediyse ve transcript varsa fallback üret
-        if (!this.audioPeaks()) {
-          if (res.edl.audioPeaks && res.edl.audioPeaks.length > 0) {
-            console.log('[WAVEFORM:EDL_PEAKS] EDL içerisinden gelen gerçek peaks kullanılıyor.');
-            this.audioPeaks.set(res.edl.audioPeaks);
-          } else {
-            console.log('[WAVEFORM:FALLBACK] EDL peaks eksik, transkripte dayalı fallback dalgası üretiliyor.');
-            this.generateFallbackWaveform();
-          }
+        // EDL içerisinden gelen gerçek peaks varsa öncelikli olarak kullan
+        if (res.edl.audioPeaks && res.edl.audioPeaks.length > 0) {
+          console.log('[WAVEFORM:EDL_PEAKS] EDL içerisinden gelen gerçek peaks kullanılıyor:', res.edl.audioPeaks.length);
+          this.audioPeaks.set(res.edl.audioPeaks);
+        } else if (!this.audioPeaks() || this.audioPeaks()!.length === 0) {
+          console.log('[WAVEFORM:FALLBACK] EDL peaks eksik, transkripte dayalı fallback dalgası üretiliyor.');
+          this.generateFallbackWaveform();
         }
       },
       error: (err) => console.error('EDL yüklenemedi:', err)
@@ -2482,6 +3191,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   // --- GERÇEK SES DALGASI (WEB AUDIO API) ---
   loadAudioWaveform(url: string): void {
     if (!url) return;
+    // Eğer EDL'den gelen gerçek ses peaks zaten yüklendiyse tarayıcıda GB'larca video indirip çözmeye gerek yok
+    if (this.audioPeaks() && this.audioPeaks()!.length > 0) {
+      console.log('[WAVEFORM] EDL peaks zaten mevcut, Web Audio API indirmesi atlanıyor.');
+      return;
+    }
     this.isWaveformLoading.set(true);
 
     fetch(url)
@@ -2525,7 +3239,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       })
       .catch(err => {
         console.warn('[Waveform] Real decode fallback:', err);
-        this.generateFallbackWaveform();
+        // Eğer EDL'den peaks zaten yüklendiyse ASLA üzerine yazma
+        if (!this.audioPeaks() || this.audioPeaks()!.length === 0) {
+          this.generateFallbackWaveform();
+        }
         this.isWaveformLoading.set(false);
       });
   }
@@ -3829,7 +4546,26 @@ export class EditorComponent implements OnInit, OnDestroy {
           animation: ov.animation || 'none',
           exitAnimation: ov.exitAnimation || 'fade',
           scale: ov.scale ?? 1.0,
-          trackId: ov.trackId ?? 1
+          trackId: ov.trackId ?? 1,
+          // Tipografi & Rozet
+          strokeColor: ov.strokeColor || '#000000',
+          strokeWidth: ov.strokeWidth ?? 0,
+          shadowColor: ov.shadowColor || 'rgba(0,0,0,0.8)',
+          shadowBlur: ov.shadowBlur ?? 2,
+          boxStyle: ov.boxStyle || 'none',
+          boxBgColor: ov.boxBgColor || '#1E293B',
+          boxPadding: ov.boxPadding ?? 14,
+          borderRadius: ov.borderRadius ?? 20,
+          allCaps: ov.allCaps ?? false,
+          letterSpacing: ov.letterSpacing ?? 0,
+          // Görsel & AI
+          removeBg: ov.removeBg ?? false,
+          stickerBorder: ov.stickerBorder ?? false,
+          stickerBorderWidth: ov.stickerBorderWidth ?? 6,
+          stickerBorderColor: ov.stickerBorderColor || '#FFFFFF',
+          rotation: ov.rotation ?? 0,
+          maskShape: ov.maskShape || 'rect',
+          chromaKeyColor: ov.chromaKeyColor || ''
         };
         
         const t = this.currentTime();
@@ -3860,6 +4596,27 @@ export class EditorComponent implements OnInit, OnDestroy {
       ov.timestamp = Number(this.inspectorData.timestamp);
       ov.duration = Number(this.inspectorData.duration);
       ov.trackId = Number(this.inspectorData.trackId) || 1;
+
+      // Tipografi & Rozet
+      ov.strokeColor = this.inspectorData.strokeColor;
+      ov.strokeWidth = Number(this.inspectorData.strokeWidth) || 0;
+      ov.shadowColor = this.inspectorData.shadowColor;
+      ov.shadowBlur = Number(this.inspectorData.shadowBlur) || 0;
+      ov.boxStyle = this.inspectorData.boxStyle || 'none';
+      ov.boxBgColor = this.inspectorData.boxBgColor;
+      ov.boxPadding = Number(this.inspectorData.boxPadding) || 14;
+      ov.borderRadius = Number(this.inspectorData.borderRadius) || 20;
+      ov.allCaps = Boolean(this.inspectorData.allCaps);
+      ov.letterSpacing = Number(this.inspectorData.letterSpacing) || 0;
+
+      // Görsel & AI
+      ov.removeBg = Boolean(this.inspectorData.removeBg);
+      ov.stickerBorder = Boolean(this.inspectorData.stickerBorder);
+      ov.stickerBorderWidth = Number(this.inspectorData.stickerBorderWidth) || 6;
+      ov.stickerBorderColor = this.inspectorData.stickerBorderColor || '#FFFFFF';
+      ov.rotation = Number(this.inspectorData.rotation) || 0;
+      ov.maskShape = this.inspectorData.maskShape || 'rect';
+      ov.chromaKeyColor = this.inspectorData.chromaKeyColor || '';
       
       this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
       this.diagnostics.logTrace('INSPECTOR', 'Overlay Değiştirildi', {
@@ -3894,6 +4651,23 @@ export class EditorComponent implements OnInit, OnDestroy {
           animation: this.inspectorData.animation,
           exitAnimation: this.inspectorData.exitAnimation || 'fade',
           trackId: Number(this.inspectorData.trackId) || 1,
+          strokeColor: this.inspectorData.strokeColor,
+          strokeWidth: Number(this.inspectorData.strokeWidth) || 0,
+          shadowColor: this.inspectorData.shadowColor,
+          shadowBlur: Number(this.inspectorData.shadowBlur) || 0,
+          boxStyle: this.inspectorData.boxStyle || 'none',
+          boxBgColor: this.inspectorData.boxBgColor,
+          boxPadding: Number(this.inspectorData.boxPadding) || 14,
+          borderRadius: Number(this.inspectorData.borderRadius) || 20,
+          allCaps: Boolean(this.inspectorData.allCaps),
+          letterSpacing: Number(this.inspectorData.letterSpacing) || 0,
+          removeBg: Boolean(this.inspectorData.removeBg),
+          stickerBorder: Boolean(this.inspectorData.stickerBorder),
+          stickerBorderWidth: Number(this.inspectorData.stickerBorderWidth) || 6,
+          stickerBorderColor: this.inspectorData.stickerBorderColor || '#FFFFFF',
+          rotation: Number(this.inspectorData.rotation) || 0,
+          maskShape: this.inspectorData.maskShape || 'rect',
+          chromaKeyColor: this.inspectorData.chromaKeyColor || '',
           action: 'update'
         } as any]
      }).subscribe({

@@ -63,11 +63,17 @@ class GapFiller:
             logger.info("✨ Şüpheli transkript boşluğu bulunamadı, tüm konuşmalar kapsandı.")
             return words
 
-        logger.info(f"🔍 {len(gaps)} adet kelimesiz konuşma bölgesi tespit edildi. Kurtarma deneniyor...")
+        if len(gaps) > 25:
+            logger.info(f"🔍 {len(gaps)} adet kelimesiz konuşma bölgesi tespit edildi. En belirgin ilk 25 boşluk inceleniyor...")
+            gaps = gaps[:25]
+        else:
+            logger.info(f"🔍 {len(gaps)} adet kelimesiz konuşma bölgesi tespit edildi. Kurtarma deneniyor...")
+
         work_dir = temp_dir or Config.TEMP_DIR
         os.makedirs(work_dir, exist_ok=True)
 
         recovered_words: List[Word] = []
+        consecutive_errors = 0
 
         for idx, (g_start, g_end) in enumerate(gaps, start=1):
             clip_start = max(0.0, g_start - 0.5)
@@ -99,6 +105,7 @@ class GapFiller:
                 )
 
                 chunk_words, engine_used = chain.transcribe_chunk(chunk)
+                consecutive_errors = 0
 
                 # Boşluk aralığına denk gelen kelimeleri süz
                 valid_words = [
@@ -118,7 +125,11 @@ class GapFiller:
                     )
 
             except Exception as ex:
+                consecutive_errors += 1
                 logger.warning(f"⚠️ Boşluk kurtarma denemesi başarısız [{g_start:.2f}s - {g_end:.2f}s]: {ex}")
+                if consecutive_errors >= 3:
+                    logger.warning("⚠️ Üst üste 3 boşluk kurtarma hatası alındı, GapFiller sonlandırılıyor.")
+                    break
             finally:
                 if os.path.exists(clip_path):
                     try:

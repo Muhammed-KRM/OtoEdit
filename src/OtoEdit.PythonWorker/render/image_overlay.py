@@ -4,6 +4,7 @@ import urllib.request
 from typing import Dict, Any, List, Optional
 from render.animation_effects import AnimationEffects
 from services.minio_client import MinioClient
+from services.bg_remover import BackgroundRemoverService
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -105,6 +106,44 @@ class ImageOverlay:
                 logger.warning(f"Görsel bulunamadığı için atlandı: {source}")
                 continue
 
+            # 1. AI Arka Plan Kaldırma (Background Removal)
+            if ov.get("removeBg") or ov.get("remove_bg"):
+                try:
+                    local_path = BackgroundRemoverService.remove_background(local_path)
+                except Exception as ex:
+                    logger.warning(f"Arka plan kaldırma başarısız: {ex}")
+
+            # 2. Renk Anahtarlama (Chroma Key - Yeşil Ekran Temizleme)
+            if ov.get("chromaKeyColor"):
+                try:
+                    sim = float(ov.get("chromaKeySimilarity") or 0.35)
+                    local_path = BackgroundRemoverService.apply_chroma_key(
+                        local_path, key_color_hex=ov.get("chromaKeyColor"), similarity=sim
+                    )
+                except Exception as ex:
+                    logger.warning(f"Chroma key uygulanamadı: {ex}")
+
+            # 3. Şekil Maskesi (Dairesel Avatar / Yuvarlatılmış Kart)
+            if ov.get("maskShape") in ["circle", "rounded"]:
+                try:
+                    radius = int(ov.get("borderRadius") or 32)
+                    local_path = BackgroundRemoverService.apply_shape_mask(
+                        local_path, shape=ov.get("maskShape"), corner_radius=radius
+                    )
+                except Exception as ex:
+                    logger.warning(f"Şekil maskesi uygulanamadı: {ex}")
+
+            # 4. Beyaz Sticker Çıkartma Konturu (Sticker Outline)
+            if ov.get("stickerBorder") or ov.get("sticker_border"):
+                try:
+                    outline_w = int(ov.get("stickerBorderWidth") or 6)
+                    outline_col = ov.get("stickerBorderColor") or "#FFFFFF"
+                    local_path = BackgroundRemoverService.add_sticker_outline(
+                        local_path, outline_width=outline_w, outline_color_hex=outline_col
+                    )
+                except Exception as ex:
+                    logger.warning(f"Sticker konturu eklenemedi: {ex}")
+
             start_t = float(ov.get("timestamp", 0.0))
             duration = float(ov.get("duration", 4.0))
             end_t = start_t + duration
@@ -121,6 +160,12 @@ class ImageOverlay:
             # FFmpeg x264/nvenc scale gereksinimi: çift sayı olmalı
             scale_w = scale_w if scale_w % 2 == 0 else scale_w + 1
             img_input = img_input.filter("scale", scale_w, -1)
+
+            # Döndürme (Rotation)
+            rotation_deg = float(ov.get("rotation") or 0.0)
+            if abs(rotation_deg) > 0.1:
+                rad = rotation_deg * 3.14159265 / 180.0
+                img_input = img_input.filter("rotate", f"{rad:.4f}", ow="rotw(iw)", oh="roth(ih)", c="none")
 
             # Konum ve animasyon
             pos_x = ov.get("positionX")
@@ -143,7 +188,7 @@ class ImageOverlay:
 
             enable_expr = f"between(t,{start_t:.2f},{end_t:.2f})"
 
-            logger.info(f"Image overlay ekleniyor: {os.path.basename(local_path)} [{start_t}s - {end_t}s]")
+            logger.info(f"Image overlay ekleniyor: {os.path.basename(local_path)} [{start_t}s - {end_t}s] rot={rotation_deg}°")
             v = ffmpeg.overlay(v, img_input, x=x_expr, y=y_expr, enable=enable_expr)
 
         return v

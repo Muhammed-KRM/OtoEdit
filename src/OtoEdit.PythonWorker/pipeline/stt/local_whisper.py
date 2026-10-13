@@ -28,19 +28,29 @@ class LocalWhisperEngine(BaseSTTEngine):
 
     def _get_model(self):
         if self._model is None:
-            import torch
+            import ctranslate2
             from faster_whisper import WhisperModel
 
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            cuda_available = ctranslate2.get_cuda_device_count() > 0
+            device = "cuda" if cuda_available else "cpu"
             compute_type = "int8_float16" if device == "cuda" else "int8"
 
             logger.info(f"💻 Yerel Whisper modeli yükleniyor: {self.model_name} (cihaz={device}, compute={compute_type})")
-            self._model = WhisperModel(
-                self.model_name,
-                device=device,
-                compute_type=compute_type,
-                cpu_threads=4
-            )
+            try:
+                self._model = WhisperModel(
+                    self.model_name,
+                    device=device,
+                    compute_type=compute_type,
+                    cpu_threads=4
+                )
+            except Exception as e:
+                logger.warning(f"WhisperModel '{self.model_name}' yüklenemedi: {e}, 'base' modeline düşülüyor...")
+                self._model = WhisperModel(
+                    "base",
+                    device=device,
+                    compute_type=compute_type,
+                    cpu_threads=4
+                )
         return self._model
 
     def transcribe_chunk(self, chunk: AudioChunk) -> List[Word]:

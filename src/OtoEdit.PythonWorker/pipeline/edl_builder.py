@@ -27,7 +27,8 @@ class EdlBuilder:
         video_format: int = 0,
         extra_cuts: Optional[List[CutItem]] = None,
         extra_overlays: Optional[List[OverlayItem]] = None,
-        audio_peaks: Optional[List[float]] = None
+        audio_peaks: Optional[List[float]] = None,
+        video_duration: Optional[float] = None
     ) -> Dict[str, Any]:
         """Tüm analiz çıktılarını tek bir EDL JSON sözlüğüne derler."""
         logger.info(f"EDL dokümanı inşa ediliyor: ProjectId={project_id}, VideoId={video_id}")
@@ -109,11 +110,16 @@ class EdlBuilder:
         # 3. Repurposing verisine yüz takibini ekle
         repurposing_data.faceTrackingData = face_data
 
+        # Gerçek video süresini güvenceye al (Transkript hatasında 1.0s çöküşünü önle)
+        effective_duration = float(video_duration) if (video_duration is not None and float(video_duration) > 0.1) else (
+            float(transcript.duration) if (transcript and float(getattr(transcript, "duration", 0.0)) > 1.0) else 0.0
+        )
+
         # 4. EDL dokümanını oluştur
         edl = EdlDocument(
             projectId=project_id,
             videoId=video_id,
-            duration=transcript.duration,
+            duration=effective_duration,
             settings=EdlSettings(
                 targetFormat=target_format_str,
                 faceTrackingEnabled=(target_format_str in ("9:16", "1:1")),
@@ -127,8 +133,9 @@ class EdlBuilder:
             audioPeaks=audio_peaks
         )
 
-        logger.info(f"EDL dokümanı başarıyla inşa edildi: {len(sorted_cuts)} kesim, {len(overlays)} overlay, {len(suggestions)} öneri.")
-        return edl.model_dump()
+        logger.info(f"EDL dokümanı başarıyla inşa edildi: {len(sorted_cuts)} kesim, {len(overlays)} overlay, {len(suggestions)} öneri. Süre={effective_duration:.2f}s")
+        dump_fn = getattr(edl, "model_dump", getattr(edl, "dict", None))
+        return dump_fn() if dump_fn else edl.__dict__
 
     @staticmethod
     def _merge_overlapping_cuts(cuts: List[CutItem]) -> List[CutItem]:
