@@ -219,39 +219,53 @@ class AnalysisConsumer:
             )
 
             # -------------------------------------------------------------
-            # 🚀 FAZ 3.2: PARALEL GRUP 2 (Jump-Cut v2, Retake, Gestures, Repurposing, Suggestions, BRoll)
+            # 🚀 FAZ 3.2: RETAKE, JUMP-CUT v3 VE PARALEL ANALİZLER
             # -------------------------------------------------------------
+            # 1. Aşama: Akıllı Retake Taraması (Take-Aware v3)
+            retake_cuts = []
+            if auto_retake:
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 65,
+                    message="Akıllı Yönetmen: Çekim tekrarları (Take-Aware Retake) taranıyor..."
+                )
+                logger.info("🎬 Akıllı Retake analizi başladı")
+                retake_cuts = self.retake_detector.detect_retakes(
+                    clean_audio_path,
+                    transcript,
+                    analysis=analysis
+                )
+                logger.info(f"🎬 Akıllı Retake analizi bitti ({len(retake_cuts)} kesim)")
+
+            # 2. Aşama: Jump-Cut v3 (Korunan Kelimeler Arası Boşluk Sıkıştırma)
             silence_cuts = []
             if auto_jumpcut:
-                logger.info("✂️ Jump-Cut v2 hesaplanıyor (kelime korumalı)...")
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 75,
+                    message="Jump-Cut v3: Korunan kelimeler arası duraklamalar sıkıştırılıyor..."
+                )
+                logger.info("✂️ Jump-Cut v3 hesaplanıyor (korunan kelimeler arası)...")
                 silence_cuts = self.silence_detector.detect_v2(
                     analysis=analysis,
-                    transcript_words=transcript.words
+                    transcript_words=transcript.words,
+                    existing_cuts=retake_cuts
+                )
+                logger.info(f"✂️ Jump-Cut v3 bitti ({len(silence_cuts)} kesim)")
+
+            # 3. Aşama: Altyazı Segmentlerini Kesim Sınırlarına Göre Yeniden Üret
+            all_detected_cuts = retake_cuts + silence_cuts
+            if all_detected_cuts and transcript.words:
+                logger.info("📝 Altyazı mikro-segmentleri kesim sınırlarına göre güncelleniyor...")
+                transcript.segments = self.transcriber.regenerate_segments_with_cuts(
+                    words=transcript.words,
+                    cuts=all_detected_cuts
                 )
 
-            retake_cuts = []
+            # 4. Aşama: Geri Kalan Paralel İşler (Gestures, Repurposing, Suggestions, BRoll)
             commands = []
             repurposing_data = []
             suggestions = []
             broll_overlays = []
             fmt_str = VideoFormat.TO_STRING.get(video_format, "16:9")
-
-            def _run_retakes():
-                if not auto_retake:
-                    return []
-                self.pipeline_logger.log_progress(
-                    project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 70,
-                    message="Akıllı Yönetmen: Çekim tekrarları (Retake) taranıyor..."
-                )
-                logger.info("🧵 Thread: Akıllı retake analizi başladı")
-                res = self.retake_detector.detect_retakes(
-                    clean_audio_path,
-                    transcript,
-                    silence_cuts=silence_cuts,
-                    analysis=analysis
-                )
-                logger.info(f"🧵 Thread: Akıllı retake analizi bitti ({len(res)} kesik)")
-                return res
 
             def _run_commands():
                 if not gesture_enabled:
@@ -263,7 +277,7 @@ class AnalysisConsumer:
 
             def _run_repurposing():
                 self.pipeline_logger.log_progress(
-                    project_id, video_id, PipelineStage.REPURPOSING, 80,
+                    project_id, video_id, PipelineStage.REPURPOSING, 85,
                     message="Viral klip (Reels / Shorts) anları seçiliyor..."
                 )
                 logger.info("🧵 Thread: Repurposing (viral klip) analizi başladı")
@@ -303,14 +317,12 @@ class AnalysisConsumer:
                     logger.warning(f"B-Roll katmanı hatası (ihmal edildi): {ex}")
                     return []
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=5, thread_name_prefix="AnalysisGroup2") as executor:
-                f_retake = executor.submit(_run_retakes)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="AnalysisGroup2") as executor:
                 f_cmd = executor.submit(_run_commands)
                 f_repurpose = executor.submit(_run_repurposing)
                 f_sugg = executor.submit(_run_suggestions)
                 f_broll = executor.submit(_run_broll)
 
-                retake_cuts = f_retake.result()
                 commands = f_cmd.result()
                 repurposing_data = f_repurpose.result()
                 suggestions = f_sugg.result()

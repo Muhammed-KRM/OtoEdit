@@ -37,8 +37,8 @@
 Hoca metni kısa öbekler halinde okuyor. Takıldığında duruyor (3–15 sn), sonra **birkaç kelime geriden alıp tekrar okuyor**. Sen her seferinde **son okunanı tutup** öncekini ve aradaki duraklamayı silmişsin:
 
 ```
-[vefat sonrası ölenin hatırına saygıya kadar] (5 sn) [hatta vefat sonrası ölenin hatırasına saygıya kadar] insan hayatını…
-        ↑ SİLİNDİ                                           ↑ TUTULDU (son take)
+[hatta vefat sonrası ölenin hatırına saygıya kadar] (5 sn) [hatta vefat sonrası ölenin hatırasına saygıya kadar] insan hayatını…
+        ↑ SİLİNDİ                                                 ↑ TUTULDU (son take)
 
 [Fakat asıl fırtına] [Asıl zihin ameliyat] [Asıl zihni ameliyat] Tahkikat safhasında kopar
         TUTULDU          ↑ SİLİNDİ             ↑ TUTULDU
@@ -56,13 +56,13 @@ Kısacası kural şu: **kesim, ilk okumanın tekrar edilen kısmının başında
 ### Retake ([retake_detector.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/pipeline/retake_detector.py))
 
 1. **Yanlış birimle çalışıyor.** Karşılaştırmayı 6 kelime / 3 sn'lik altyazı parçaları arasında yapıyor. Restart ise parçanın ortasından başlıyor ("…ölenin **|** hatırına…"), yani parça sınırlarına denk gelmiyor. Bu yüzden Jaccard benzerliği eşiği geçmiyor ve tekrarların çoğu hiç yakalanmıyor (retake modülü 1256 sn'nin sadece 121 sn'sini buldu).
-2. **Kazananı puanla seçiyor ve sık sık yanlış take'i siliyor.** Formül `0.40 akustik + 0.35 tamlık + 0.25 güven + ≤5 yenilik bonusu`. Groq kelimelerinde noktalama olmadığı için "tamlık" puanı rastgele davranıyor. Yanlış seçimden birkaç örnek:
+2. **Kazananı puanla seçiyor ve sık sık yanlış take'i siliyor.** Formül `0.40 akustik + 0.35 tamlık + 0.25 güven + ≤5 yenilik bonusu`. Groq noktalamayı tutarsız koyuyor (bu videoda 1853 kelimenin sadece 174'ünde `.?!` var). Üstelik karşılaştırma 6 kelimelik parçalar üzerinden yapıldığı için parçaların çoğu noktayla bitmiyor. Bu yüzden "tamlık" puanı (+30 puana kadar fark) ≤5'lik yenilik bonusunu eziyor ve sonuç rastgeleye dönüyor. Yanlış seçimden birkaç örnek:
    - 1131 sn / 1140 sn "Akıllıca ve gerçeği ortaya çıkaracak sualler yöneltir": sen ilkini sildin, otomatik **ikincisini** sildi.
    - 2698 sn / 2707 sn "Hüküm vermek sıradan bir söz söylemek değildir": aynı hata.
    - 175 sn "tefekkür ne ahlaki bir muhasebe ne de": iyi take silinmiş.
    - Toplamda 9 retake kesimi **tamamen senin tuttuğun** metni kesiyor (isabet 0).
 3. **Pencere çok dar** (`i+5` parça). 30–47 sn'lik takılma bloklarında (2063 sn: 47 sn, 1770 sn: 40 sn) tekrarlar pencerenin dışına düşüyor.
-4. "Yarım cümle" kuralı noktalamaya dayanıyor. Groq'ta noktalama olmadığı için bu kural ya sürekli tetikleniyor ya da işe yaramıyor.
+4. "Yarım cümle" kuralı noktalamaya dayanıyor. Noktalama hem tutarsız hem de 6 kelimelik parçalara bölünmüş olduğu için bu kural güvenilir değil.
 
 ### Jump-cut ([silence_detector.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/pipeline/silence_detector.py))
 
@@ -91,20 +91,40 @@ flowchart TD
 ```
 
 ### Adım 1: Kelime temizliği
-- Süresi 1.2 sn'yi geçen tek bir kelime varsa, gerçek bitişini RMS düşüşüne bakarak bul ve kelimeyi orada kes ("ancak = 7 sn" hatası böyle çözülür).
+- **Çift yönlü kırpma:** Süresi > 1.0 sn olan ya da içinde > 250 ms sessizlik barındıran her kelimenin `[start, end]` aralığı ses enerjisiyle (RMS, −40 dB eşik) kesiştirilir. `start` ilk gerçek ses başlangıcına **ileri**, `end` son ses bitişine **geri** çekilir. Whisper uzun duraklamanın sessizliğini bazen kelimenin başına, bazen sonuna ekler. Sadece sonu kırpılırsa gerçek kelime silinip sessizlik tutulabilir ("ancak = 7 sn" hatası).
+- Kırpılan aralıkta hiç ses yoksa kelime "şüpheli" işaretlenir. Kelime tek başına silinmez, Adım 5'e (LLM) bilgi olarak gider.
 - Halüsinasyon filtresi: sessiz bölgede (RMS < −45 dB) çıkan kelimeler ve bilinen kalıplar ("Altyazı M.K.", "abone olmayı unutmayın" gibi) atılır.
 
 ### Adım 2: Duraklamaya göre öbekleme
 Altyazı parçaları yerine **duraklamalarla ayrılmış öbekler** kullanılır: ardışık iki kelime arasındaki boşluk ≥ 0.5 sn ise yeni öbek başlar. Hocanın okuma tarzında her öbek tek bir okuma denemesine karşılık geliyor.
 
 ### Adım 3: Restart hizalama (çekirdek kısım)
-Her duraklama sınırı P için (önceki kelimeler `L`, sonraki kelimeler `R`):
-1. Kelimeler normalize edilir: küçük harf, noktalama yok, Türkçe karakterler sadeleştirilir.
-2. `L`'nin son ≤25 kelimesi (≤20 sn) içinde, `R`'nin başıyla eşleşen **en uzun öbek** aranır. Eşleşme bulanık yapılır: kelime benzerliği ≥ 0.75 olmalı, böylece "hürhandır/bürhandır" ve "yöneltir/yöneldir" de eşleşir. k kelimede 1 kelimelik atlamaya izin verilir.
-3. Kabul koşulu: k ≥ 2 kelime, ya da k = 1 ve duraklama ≥ 1.0 sn ve kelime ≥ 4 harf (yanlışlıkla "ve, bir" gibi kelimelerle eşleşmesin diye).
-4. **Kesim = [L'deki eşleşmenin ilk kelimesinin başı, R'nin ilk kelimesinin başı).** Yani son take tutulur, puanlama yapılmaz.
-5. Tekrar yoksa ama L'nin son öbeği yarım kaldıysa (aşağıdaki Adım 4), o öbek de silinir.
-6. Sabit noktaya kadar tekrarlanır. Böylece "Kıştan… Kıştan sonra… Kıştan sonra…" zinciri tek kesime iner ve sadece en son okuma kalır.
+Her duraklama sınırı P için (gap ≥ 0.5 sn; önceki kelimeler `L`, sonraki kelimeler `R`):
+
+**3a. Kelime eşleşmesi (Türkçe'ye özel)**
+- Normalize: küçük harf (`İ→i`, `I→ı` Türkçe kurallı), noktalama silinir, şapkalar kaldırılır (`â→a`).
+- İki kelime eşleşmesi için iki koşul birlikte aranır:
+  - `difflib` benzerliği ≥ 0.75
+  - **ve** ilk 3 harf aynı **ya da** toplam düzenleme mesafesi ≤ 1 ("bürhandır/hürhandır" eşleşir).
+- Bunun sebebi Türkçe'nin eklemeli olması: "hükümlerinin" ile "bölümlerinin" gibi kökü farklı, eki aynı kelimeler yalnızca benzerlik oranıyla yanlışlıkla eşleşir.
+
+**3b. Eşleşme arama**
+- `R`'nin başındaki en fazla 2 bağlaç/dolgu kelimesi (`hatta, yani, fakat, ama, şimdi, tabii, peki, işte, ve`) eşleşme için atlanabilir. Kesim yine de `R[0].start`'ta biter, yani bağlaç korunur.
+- `L` penceresi: P'den geriye en fazla 30 kelime / 25 sn.
+- `R` önekiyle eşleşen **L içindeki konum** aranır, k kelime ardışık eşleşmeli. k kelimede 1 atlamaya/değişikliğe izin verilir.
+
+**3c. Kabul koşulu**
+1. k ≥ 2, ya da k = 1 ve gap ≥ 1.0 sn ve kelime ≥ 4 harf.
+2. **Yeniden okuma kapsaması:** `L`'de eşleşmeden sonra P'ye kadar kalan kuyruk (`tail`), `R`'de de eşleşen kısımdan sonra tekrar okunmuş olmalı. Ölçüt: `SequenceMatcher(L[m:P], R[j:j+len(L[m:P])+3]).ratio() ≥ 0.6`.
+   - **Neden sabit "en fazla 6 kelime kuyruk" kuralı değil:** Gerçek retake'lerde kuyruk uzun olabiliyor. Örneğin 1538 sn'de hoca 12 kelime okuyup durmuş, sonra cümlenin başından ("baskı altında…") tekrar okumuş. 6 kelime sınırı bunu kaçırır.
+   - Kapsama ölçütü ise rastlantısal tekrarı eler: önceki cümle "Bu konuda…" diye bitip yeni cümle yine "Bu konuda…" ile başlıyor ama farklı içerikle devam ediyorsa ratio düşük çıkar ve kesim yapılmaz.
+3. Kesimin içinde kalan metin 40 kelimeyi / 35 sn'yi geçemez (güvenlik sınırı).
+
+**3d. Kesim ve zincir**
+- **Kesim = [L'deki eşleşmenin ilk kelimesinin başı, R[0].start).** Son take tutulur, puanlama yapılmaz.
+- **Zincir, sağdan sola ve adım adım takip edilir.** Son take'ten (R) başlanır, bir önceki take'e ancak 3c koşullarını sağlıyorsa geçilir. Zincir koptuğu anda durulur, sonra en soldaki geçerli take'ten R'ye kadar tek kesim atılır. "Kıştan | Kıştan sonra… | Kıştan sonra… | Kıştan sonra…" böylece tek kesime iner.
+- **"45 sn geriye bak, en erken eşleşmeyi al" yöntemi kullanılmaz.** Hoca terimleri bilerek tekrarlıyor: "Bürhan-ı inni ve bürhan-ı ilmi. Birincisi bürhan-ı inni'dir." En erken eşleşmeye atlamak buradaki sağlam cümleyi siler. Adım adım zincir bu hatayı yapmaz.
+- Tekrar yoksa ama L'nin son öbeği yarım kaldıysa o öbek Adım 4'te değerlendirilir.
 
 ### Adım 4: Yarım başlangıç
 1–3 kelimelik bir öbeğin ardından ≥ 2 sn duraklama geliyorsa ve sonraki öbek aynı kelimeyle ya da benzer bir kelimeyle başlıyorsa, kısa öbek ve duraklama silinir ("Asıl zihin ameliyat | Asıl zihni ameliyat", "Senet, senet,").
@@ -121,19 +141,38 @@ VAD adaları yerine **tutulan kelimeler arasındaki boşluk** esas alınır:
 | 0.35 – 1.0 sn | 0.30 sn |
 | > 1.0 sn | cümle içi 0.25 sn, cümle sonu 0.40 sn (önceki kelimeden sonra 0.12–0.20 sn + sonraki kelimeden önce 0.10–0.12 sn) |
 
-Boşluğun içindeki kelimesiz ses adaları (nefes, mırıltı) **tamamen silinir**. Bu değerler parametre olarak dışarıda tutulur ve senin editinden ölçülen dağılıma göre ayarlanabilir.
+**Cümle sonu tanımı:** Noktalama güvenilir olmadığı için önceki kelime `.?!` ile bitiyorsa **veya** orijinal boşluk ≥ 1.5 sn ise cümle sonu sayılır. Diğer durumlar cümle içi kabul edilir.
+
+- Boşluğun içindeki kelimesiz ses adaları (nefes, mırıltı) **tamamen silinir**.
+- Bu değerler `config.py`'de parametre olarak tutulur ve eval aracıyla senin editine göre ayarlanır.
+- **Jump-cut, retake kesimlerinden SONRA ve sadece tutulan kelimeler üzerinde çalışır** (bkz. Bölüm 4.1).
 
 ### Adım 7: Sınır rafinesi
-- Her kesim noktası ±60 ms içindeki enerji minimumuna oturtulur, 10 ms crossfade uygulanır.
+- Her kesim noktası ±60 ms içindeki enerji minimumuna oturtulur. Bu adım bir kelimenin içine düşmemeli; düşerse kelime sınırına geri çekilir.
+- **Crossfade yok, süreyi değiştirmeyen mikro fade var.** Render, her klibi ayrı encode edip `-f concat` ile birleştiriyor ([video_renderer.py `_cut_single_segment`](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/render/video_renderer.py#L288-L310)). Burada `acrossfade` kullanılamaz, 200 klibe zincirlemek de senkronu bozar. Bunun yerine her klibin ses akışına `afade=t=in:d=0.008, afade=t=out:st=<dur-0.008>:d=0.008` eklenir. Süre değişmez ve kesim yerlerindeki tık sesi gider.
 - 0.4 sn'den kısa kalan klipler komşu kesimle birleştirilir, 0.12 sn'den kısa kesimler atlanır.
 
 ### Değerlendirme düzeneği (yeni)
-Bu analizde kullandığım [text_compare.py](file:///C:/Users/Kursu/.gemini/antigravity-ide/brain/ab422bda-d0af-40ac-9c4f-3fd784c438e4/scratch/text_compare.py) script'ini `tools/eval_edit.py` olarak repoya alalım. Senin editin "doğru cevap" olur ve her algoritma değişikliğinden sonra şu ölçülür:
+Analiz script'i repoya alındı: [tools/eval_edit.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/tools/eval_edit.py). Kullanımı: `python tools/eval_edit.py orig_words.json edited_words.json auto_edl.json orig16k.wav out_dir`. Girdiler: iki videonun Groq kelime çıktısı, otomatik EDL ve 16 kHz mono wav. Senin editin "doğru cevap" olur ve her algoritma değişikliğinden sonra şu ölçülür:
 - silinen kelimelerde isabet (precision) ve kapsama (recall),
 - senin sildiğin saniyelerin ne kadarının silindiği,
 - senin tuttuğun kelimelerden kaçının yanlışlıkla silindiği.
 
 Önerdiğim hedef: kapsama ≥ %85 ve yanlış silme ≤ %2. Bunlar hedef, henüz ölçülmüş sonuç değil.
+
+### 4.1 Entegrasyon kuralları (kodda doğrulandı)
+
+1. **Pipeline sırası değişir.** Şu an [analysis_consumer.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/consumers/analysis_consumer.py#L227-L250) önce `silence_detector.detect_v2`'yi, sonra `retake_detector.detect_retakes(silence_cuts=…)`'i çağırıyor. Yeni sıra:
+   1. Adım 1 (kelime temizliği)
+   2. Adım 2–5 (TakeAligner + LLM) → silinecek kelime aralıkları
+   3. Adım 6 (jump-cut v3), sadece tutulan kelimeler üzerinde
+   4. Adım 7
+2. **Retake ve sessizlik kesimleri birleştirilmez.** [edl_builder.py `_merge_overlapping_cuts`](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/pipeline/edl_builder.py#L141-L158) şu an `reason`'a bakmadan çakışan **ve bitişik** (`start <= prev.end`) kesimleri birleştirip `silence+smart_retake` yapıyor.
+   - Sonuç: editörde bir retake geri alındığında yanındaki sessizlik de geri geliyor. 38 retake'in editörde 35 görünmesinin sebebi de büyük ihtimalle bu.
+   - Yeni kural: sadece aynı türdeki (`retake`/`silence`) kesimler birleşir. Farklı türdekiler çakışıyorsa sınır kelime/duraklama noktasından bölünür.
+3. **Altyazılar kesilmiş kelimeleri göstermemeli.** Editör önizlemesi aktif segmenti bütün halinde gösteriyor ([editor.component.ts `currentSubtitleSegment`](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.Frontend/src/app/features/editor/editor.component.ts#L2274-L2280)). Bir segmentin 2 kelimesi kesildiyse o 2 kelime ekranda yine görünür. İki katmanlı çözüm:
+   - **Worker:** altyazı segmentleri (`_words_to_segments`) kesimlerden sonra, kesim sınırlarını aşmayacak şekilde yeniden üretilir.
+   - **Editör:** altyazı metni gösterilirken, o an aktif kesimlerin içine düşen kelimeler filtrelenir. Bu katman şart, çünkü kullanıcı editörde bir retake'i geri alınca segmentler yeniden üretilmez.
 
 ---
 
@@ -141,11 +180,39 @@ Bu analizde kullandığım [text_compare.py](file:///C:/Users/Kursu/.gemini/anti
 
 | Dosya | Değişiklik |
 |---|---|
-| `pipeline/take_aligner.py` (yeni) | Adım 2–4: öbekleme, restart hizalama, yarım başlangıç |
+| `pipeline/take_aligner.py` (yeni) | Adım 2–4: öbekleme, Türkçe kelime eşleşmesi, restart hizalama (kapsama ölçütü + sağdan sola zincir), yarım başlangıç |
 | [retake_detector.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/pipeline/retake_detector.py) | Puanla kazanan seçme kaldırılır, `take_aligner` çağrılır, meta-konuşma ve LLM öbek ID'leriyle çalışır |
-| [silence_detector.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/pipeline/silence_detector.py) | Jump-cut v3: kelime boşluğu tabanlı sıkıştırma, kelimesiz adaları silme |
-| `transcriber.py` | Uzun kelime kırpma, halüsinasyon filtresi (altyazı segmentleri sadece altyazı için kalır) |
-| `tools/eval_edit.py` (yeni) | İnsan editiyle otomatik kıyas metrikleri |
+| [silence_detector.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/pipeline/silence_detector.py) | Jump-cut v3: tutulan kelimeler arası boşluk sıkıştırma, kelimesiz adaları silme, cümle sonu kuralı |
+| `transcriber.py` | Çift yönlü kelime kırpma, halüsinasyon filtresi, kesim sonrası altyazı yeniden segmentleme |
+| [analysis_consumer.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/consumers/analysis_consumer.py) | Sıra: kelime temizliği → retake → jump-cut |
+| [edl_builder.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/pipeline/edl_builder.py) | Kesim birleştirme sadece aynı tür içinde |
+| [video_renderer.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/render/video_renderer.py) | Klip başı/sonu 8 ms `afade` |
+| `editor.component.ts` | Altyazıda kesilmiş kelimeleri filtrele |
+| [tools/eval_edit.py](file:///d:/OtoEdit/OtoEdit/src/OtoEdit.PythonWorker/tools/eval_edit.py) (eklendi) | İnsan editiyle otomatik kıyas metrikleri |
+
+### Uygulama sırası önerisi
+1. `take_aligner.py` yazılır ve worker'a bağlanmadan önce eval aracıyla bu videoda ölçülür. Eşikler (0.75, 0.6, 30 kelime vb.) burada ayarlanır.
+2. Pipeline sırası, jump-cut v3, EDL birleştirme.
+3. Render fade ve altyazı filtreleme.
+
+---
+
+## 6. Dış inceleme notları (neler alındı, neler değiştirildi)
+
+| Öneri | Karar | Gerekçe |
+|---|---|---|
+| R başındaki bağlaçları atla | ✅ Alındı (3b) | Genel olarak doğru. Not: dokümandaki ilk örnek hatalıydı, gerçek veride iki take de "hatta" ile başlıyor. Örnek düzeltildi. |
+| L kuyruğu ≤ 6 kelime | 🔁 Değiştirildi (3c-2) | Gerçek retake'leri kaçırıyor (1538 sn: 12 kelimelik kuyruk). Yerine "yeniden okuma kapsaması" ölçütü kondu. |
+| Çift yönlü kelime kırpma | ✅ Alındı (Adım 1) | Doğru tespit. |
+| Noktalamasız cümle sonu kuralı | ✅ Alındı (Adım 6) | Ayrıca dokümandaki "Groq noktalama koymuyor" ifadesi düzeltildi: koyuyor ama tutarsız (%9). |
+| Pipeline sırası | ✅ Alındı (4.1) | Kodda doğrulandı. |
+| Crossfade yerine `afade` | ✅ Alındı (Adım 7) | Render'ın ayrı encode + concat yaptığı kodda doğrulandı. |
+| Retake/sessizlik kesimlerini birleştirme | ✅ Alındı (4.1) | Kodda doğrulandı. Bitişik kesimleri de birleştiriyor. |
+| eval aracını repoya al | ✅ Yapıldı | `tools/eval_edit.py` |
+| Sağdan sola tarama, "en erken eşleşme" | 🔁 Değiştirildi (3d) | Sağdan sola fikri doğru, ama 45 sn geriye en erken eşleşmeye atlamak tekrarlanan terimlerde sağlam cümleyi siler. Adım adım zincir kullanılacak. |
+| Türkçe ilk 3 harf kuralı | ✅ Alındı (3a) | Eklemeli dil için yerinde. "Düzenleme mesafesi ≤1" istisnası eklendi. |
+| Altyazıyı kesimden sonra yeniden üret | ✅ Alındı + genişletildi (4.1-3) | Sadece worker'da yapmak yetmez, kullanıcı retake'i geri alabiliyor. Editörde de kelime filtresi gerekir. |
+| "%95+ başarı" iddiası | ⚠️ Kabul edilmedi | Ölçülmeden verilmiş bir rakam. Hedefi eval aracı belirleyecek. |
 
 > [!NOTE]
 > Bir video üzerinde yapılmış bir analiz bu. Kalıp (son take'i tut, aradaki boşluğu sil) bu tarz okuma videolarında genel geçer, ama eşikleri başka 1–2 elle editlenmiş videoyla da doğrulamak gerekir.

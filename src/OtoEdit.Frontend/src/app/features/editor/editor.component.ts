@@ -2276,6 +2276,13 @@ export class EditorComponent implements OnInit, OnDestroy {
     const segments = edl?.transcript?.segments;
     if (!segments || segments.length === 0) return null;
     const t = this.currentTime();
+
+    // Adım 4.1: Oynatma kafası aktif bir kesim bölgesindeyse (retake/sessizlik) altyazı gösterme
+    const cuts = edl?.cuts;
+    if (cuts && cuts.some(c => t >= c.start && t <= c.end)) {
+      return null;
+    }
+
     return segments.find(s => t >= s.start && t <= s.end) || null;
   });
 
@@ -2284,11 +2291,18 @@ export class EditorComponent implements OnInit, OnDestroy {
     const segments = edl?.transcript?.segments;
     if (!segments || segments.length === 0) return null;
 
+    const cuts = edl?.cuts || [];
+
     let vttContent = 'WEBVTT\n\n';
-    segments.forEach((seg, index) => {
-      const start = this.formatVttTimestamp(seg.start);
-      const end = this.formatVttTimestamp(seg.end);
-      vttContent += `${index + 1}\n${start} --> ${end}\n${seg.text.trim()}\n\n`;
+    let trackIdx = 1;
+    segments.forEach((seg) => {
+      // Eğer segment tamamen bir kesimin içindeyse VTT parçasına ekleme
+      const isCutOut = cuts.some(c => c.start <= seg.start && seg.end <= c.end);
+      if (!isCutOut) {
+        const start = this.formatVttTimestamp(seg.start);
+        const end = this.formatVttTimestamp(seg.end);
+        vttContent += `${trackIdx++}\n${start} --> ${end}\n${seg.text.trim()}\n\n`;
+      }
     });
 
     const blob = new Blob([vttContent], { type: 'text/vtt' });

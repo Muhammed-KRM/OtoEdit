@@ -139,20 +139,40 @@ class EdlBuilder:
 
     @staticmethod
     def _merge_overlapping_cuts(cuts: List[CutItem]) -> List[CutItem]:
-        """Zaman aralıkları çakışan kesimleri birleştirir."""
+        """
+        Zaman aralıkları çakışan kesimleri birleştirir.
+        ÖNEMLİ KURAL: Yalnızca aynı türe sahip kesimler (silence ile silence, smart_retake ile smart_retake)
+        birleştirilir. Farklı türler (retake ve sessizlik) bitişik olsa bile birleştirilmez.
+        Böylece editörde bir retake geri alındığında yanındaki sessizlik kesimi geri gelmez.
+        """
         if not cuts:
             return []
 
-        sorted_cuts = sorted(cuts, key=lambda c: c.start)
+        sorted_cuts = sorted(cuts, key=lambda c: (c.start, 0 if c.reason == "smart_retake" else 1))
         merged: List[CutItem] = [sorted_cuts[0]]
 
         for current in sorted_cuts[1:]:
             prev = merged[-1]
-            if current.start <= prev.end:
-                # Çakışma var: Birleştir
-                prev.end = max(prev.end, current.end)
-                prev.reason = f"{prev.reason}+{current.reason}"
+
+            if current.reason == prev.reason:
+                # Aynı sebep: Hem çakışan hem bitişik kesimleri birleştir
+                if current.start <= prev.end:
+                    prev.end = max(prev.end, current.end)
+                    if current.command and current.command not in (prev.command or ""):
+                        prev.command = f"{prev.command} | {current.command}" if prev.command else current.command
+                else:
+                    merged.append(current)
             else:
-                merged.append(current)
+                # Farklı sebep (örn. silence ve smart_retake):
+                # Yalnızca gerçekten çakışıyorlarsa (strict overlap, start < prev.end) birleştir.
+                # Yalnızca bitişiklerse (start == prev.end), ayrı CutItem olarak tut ki
+                # editörde kullanıcı retake'i geri aldığında yanındaki sessizlik de geri gelmesin!
+                if current.start < prev.end:
+                    prev.end = max(prev.end, current.end)
+                    prev.reason = f"{prev.reason}+{current.reason}"
+                    if current.command and current.command not in (prev.command or ""):
+                        prev.command = f"{prev.command} | {current.command}" if prev.command else current.command
+                else:
+                    merged.append(current)
 
         return merged

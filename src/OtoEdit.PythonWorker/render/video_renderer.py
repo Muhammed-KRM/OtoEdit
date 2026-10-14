@@ -292,12 +292,17 @@ class VideoRenderer:
             
             base_args = ["ffmpeg", "-y", "-ss", str(start), "-i", video_path, "-t", str(duration)]
             
-            nvenc_cmd = base_args + ["-c:v", "h264_nvenc", "-preset", "p1", "-b:v", "8M", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
+            # Adım 7: Zero-drift 8ms mikro-fade (kesim kenarlarındaki tık/patlama sesini önler, süreyi değiştirmez)
+            fade_dur = 0.008
+            fade_out_st = max(0.0, duration - fade_dur)
+            afade_arg = ["-af", f"afade=t=in:ss=0:d={fade_dur:.3f},afade=t=out:st={fade_out_st:.3f}:d={fade_dur:.3f}"]
+            
+            nvenc_cmd = base_args + ["-c:v", "h264_nvenc", "-preset", "p1", "-b:v", "8M", "-pix_fmt", "yuv420p"] + afade_arg + ["-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
             res = subprocess.run(nvenc_cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0 and os.path.isfile(seg_out) and os.path.getsize(seg_out) > 1000:
                 return (idx, seg_out)
                 
-            cpu_cmd = base_args + ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
+            cpu_cmd = base_args + ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"] + afade_arg + ["-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
             res_cpu = subprocess.run(cpu_cmd, capture_output=True, text=True, timeout=300)
             if res_cpu.returncode == 0 and os.path.isfile(seg_out) and os.path.getsize(seg_out) > 1000:
                 return (idx, seg_out)

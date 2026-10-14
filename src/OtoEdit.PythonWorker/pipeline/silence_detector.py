@@ -81,19 +81,170 @@ class SilenceDetector:
         self,
         audio_path: str,
         analysis: Optional[AudioAnalysis] = None,
-        transcript_words: Optional[List[Any]] = None
+        transcript_words: Optional[List[Any]] = None,
+        existing_cuts: Optional[List[CutItem]] = None
     ) -> List[CutItem]:
-        """Sessiz kesim bölgelerini döner (v2 veya legacy motoru ile)."""
+        """Sessiz kesim bölgelerini döner (v3, v2 veya legacy motoru ile)."""
         if self.engine == "legacy":
             return self._detect_legacy(audio_path)
 
+        if transcript_words and len(transcript_words) >= 2:
+            return self.detect_v3(
+                audio_path,
+                analysis=analysis,
+                transcript_words=transcript_words,
+                existing_cuts=existing_cuts
+            )
+
         return self.detect_v2(audio_path, analysis=analysis, transcript_words=transcript_words)
+
+    def detect_v3(
+        self,
+        audio_path: Optional[str] = None,
+        analysis: Optional[AudioAnalysis] = None,
+        transcript_words: Optional[List[Any]] = None,
+        existing_cuts: Optional[List[CutItem]] = None
+    ) -> List[CutItem]:
+        """
+        Jump-Cut v3: Kelime Tabanlı Duraklama Sıkıştırma Motoru
+        1. Yalnızca korunan (retake içinde kalmayan) kelimeleri dikkate alır.
+        2. Tutulan kelimeler arasındaki boşluğu hedef tempo profiline göre sıkıştırır:
+           - gap < 0.35s: dokunulmaz
+           - 0.35s <= gap < 1.0s: 0.30s'ye indirilir (trail 0.15s, lead 0.15s)
+           - gap >= 1.0s (cümle içi): 0.25s'ye indirilir (trail 0.13s, lead 0.12s)
+           - gap >= 1.0s (cümle sonu: .?! veya gap>=1.5s): 0.40s'ye indirilir (trail 0.22s, lead 0.18s)
+        3. Boşluk içindeki kelimesiz ses adaları (nefes, hışırtı, öksürük) tamamen temizlenir.
+        4. Kesim sınırları lokal RMS enerji minimumuna (çıtırtı/tık önleyici) tek yönlü yaslanır.
+        """
+        if analysis is None:
+            if not audio_path:
+                raise ValueError("detect_v3 için ya audio_path ya da analysis nesnesi verilmelidir.")
+            analyzer = AudioAnalyzer()
+            analysis = analyzer.analyze(audio_path)
+
+        if not transcript_words or len(transcript_words) < 2:
+            logger.info("Transkript kelimeleri yetersiz, v2 VAD fallback çalışıyor...")
+            return self.detect_v2(audio_path, analysis=analysis, transcript_words=transcript_words)
+
+        # 1. Kelimeleri parse et ve Retake kesimleri dışındakileri (korunan kelimeler) filtrele
+        all_parsed = []
+        for w in transcript_words:
+            if isinstance(w, dict):
+                ws = float(w.get("start", 0.0))
+                we = float(w.get("end", 0.0))
+                wt = str(w.get("word", "")).strip()
+            else:
+                ws = float(getattr(w, "start", 0.0))
+                we = float(getattr(w, "end", 0.0))
+                wt = str(getattr(w, "word", "")).strip()
+            if wt and we >= ws:
+                all_parsed.append((ws, we, wt))
+
+        all_parsed.sort(key=lambda x: x[0])
+        rt_cuts = existing_cuts or []
+
+        preserved_words = []
+        for ws, we, wt in all_parsed:
+            in_rt = any(c.start - 0.05 <= ws and we <= c.end + 0.05 for c in rt_cuts)
+            if not in_rt:
+                preserved_words.append((ws, we, wt))
+
+        if len(preserved_words) < 2:
+            return self.detect_v2(audio_path, analysis=analysis, transcript_words=transcript_words)
+
+        logger.info(
+            f"✂️ Jump-Cut v3 başlıyor: Toplam {len(all_parsed)} kelime, "
+            f"Korunan {len(preserved_words)} kelime, {len(rt_cuts)} retake kesimi | Süre={analysis.duration:.1f}s"
+        )
+
+        candidate_silences: List[Tuple[float, float]] = []
+
+        # Video başı boşluğu
+        first_ws = preserved_words[0][0]
+        if first_ws >= 0.35:
+            candidate_silences.append((0.0, max(0.0, first_ws - 0.15)))
+
+        # Kelimeler arası duraklamalar
+        for i in range(len(preserved_words) - 1):
+            w1_s, w1_e, w1_txt = preserved_words[i]
+            w2_s, w2_e, w2_txt = preserved_words[i + 1]
+
+            # İki korunan kelime arasında retake kesimi var mı?
+            rts_between = [
+                c for c in rt_cuts
+                if w1_e - 0.10 <= c.start and c.end <= w2_s + 0.10
+            ]
+
+            if rts_between:
+                # İlk retake öncesi boşluk
+                first_rt = rts_between[0]
+                if (first_rt.start - w1_e) >= 0.35:
+                    candidate_silences.append((w1_e + 0.20, first_rt.start))
+
+                # Son retake sonrası boşluk
+                last_rt = rts_between[-1]
+                if (w2_s - last_rt.end) >= 0.35:
+                    candidate_silences.append((last_rt.end, max(last_rt.end, w2_s - 0.15)))
+            else:
+                orig_gap = w2_s - w1_e
+                if orig_gap < 0.35:
+                    continue
+                elif orig_gap < 1.0:
+                    pad_trail = 0.15
+                    pad_lead = 0.15
+                else:
+                    is_sent_end = (
+                        w1_txt.endswith(('.', '!', '?', ':')) or
+                        orig_gap >= 1.5 or
+                        (w2_txt and w2_txt[0].isupper())
+                    )
+                    if is_sent_end:
+                        pad_trail = 0.22
+                        pad_lead = 0.18
+                    else:
+                        pad_trail = 0.13
+                        pad_lead = 0.12
+
+                cs = w1_e + pad_trail
+                ce = w2_s - pad_lead
+                if (ce - cs) >= 0.10:
+                    candidate_silences.append((round(cs, 3), round(ce, 3)))
+
+        # Video sonu boşluğu
+        last_we = preserved_words[-1][1]
+        if (analysis.duration - last_we) >= 0.35:
+            candidate_silences.append((last_we + 0.25, analysis.duration))
+
+        # Kenar İnce Ayarı (RMS Lokal Enerji Minimumuna Tek Yönlü Yaslama)
+        refined_intervals: List[Tuple[float, float]] = []
+        for s, e in candidate_silences:
+            s_ref = 0.0 if s <= 0.08 else analysis.find_energy_minimum(s, search_window_sec=0.04, direction="forward_only")
+            e_ref = analysis.duration if e >= (analysis.duration - 0.08) else analysis.find_energy_minimum(e, search_window_sec=0.04, direction="backward_only")
+            if (e_ref - s_ref) >= 0.10:
+                refined_intervals.append((round(s_ref, 3), round(e_ref, 3)))
+
+        cuts: List[CutItem] = []
+        for idx, (c_start, c_end) in enumerate(refined_intervals, start=1):
+            cuts.append(CutItem(
+                id=f"cut_silence_{idx}",
+                start=round(c_start, 2),
+                end=round(c_end, 2),
+                reason="silence",
+                source="auto"
+            ))
+
+        logger.info(
+            f"✅ Jump-Cut v3 tamamlandı: {len(cuts)} sessiz kesim bölgesi üretildi. "
+            f"Toplam kesilen sessizlik: {sum(c.end - c.start for c in cuts):.1f}s"
+        )
+        return cuts
 
     def detect_v2(
         self,
         audio_path: Optional[str] = None,
         analysis: Optional[AudioAnalysis] = None,
-        transcript_words: Optional[List[Any]] = None
+        transcript_words: Optional[List[Any]] = None,
+        existing_cuts: Optional[List[CutItem]] = None
     ) -> List[CutItem]:
         """
         Jump-Cut v2 Algoritması:
@@ -104,6 +255,15 @@ class SilenceDetector:
         5. Kelime koruması: [word.start - guard, word.end + guard] aralıklarıyla çakışan kısımları çıkar
         6. Kenar ince ayarı: RMS zarfının lokal minimumuna tek yönlü (sessizliğin içine doğru) oturt
         """
+        # Eğer kelimeler verilmişse doğrudan daha hassas v3 motoruna delege et
+        if transcript_words and len(transcript_words) >= 2:
+            return self.detect_v3(
+                audio_path=audio_path,
+                analysis=analysis,
+                transcript_words=transcript_words,
+                existing_cuts=existing_cuts
+            )
+
         if analysis is None:
             if not audio_path:
                 raise ValueError("detect_v2 için ya audio_path ya da analysis nesnesi verilmelidir.")

@@ -9,7 +9,7 @@ OtoEdit Transcriber Orkestratörü
 
 import os
 import time
-from typing import List, Optional, Callable
+from typing import List, Optional, Callable, Any
 from config import Config
 from models.transcript_model import TranscriptResult, TranscriptSegment, WordTimestamp
 from pipeline.audio_analysis import AudioAnalysis, AudioAnalyzer
@@ -108,8 +108,8 @@ class Transcriber:
                 logger.warning("⚠️ Transkripsiyondan hiç kelime dönmedi, fallback üretiliyor.")
                 return self._generate_fallback_transcript(audio_path)
 
-            # 5. Kelimeleri sırala
-            all_words.sort(key=lambda w: w.start)
+            # 5. Adım 1: Kelime Temizliği ve Çift Yönlü VAD Kırpması
+            all_words = self.clean_and_trim_words(all_words, analysis)
 
             # 6. Altyazı segmentlerine böl (Karaoke & EDL uyumlu)
             segments = self._words_to_segments(all_words, max_words=6, max_duration=3.0)
@@ -145,7 +145,7 @@ class Transcriber:
             logger.error(f"❌ Transkripsiyon orkestrasyonu sırasında hata: {e}", exc_info=True)
             if 'all_words' in locals() and all_words:
                 logger.info(f"⚠️ Hata oluştu ancak önceden toplanan {len(all_words)} kelime ile kurtarma yapılıyor.")
-                all_words.sort(key=lambda w: w.start)
+                all_words = self.clean_and_trim_words(all_words, analysis if 'analysis' in locals() else None)
                 segments = self._words_to_segments(all_words, max_words=6, max_duration=3.0)
                 word_timestamps = [
                     WordTimestamp(word=w.word, start=round(w.start, 2), end=round(w.end, 2), confidence=round(w.confidence, 2))
@@ -162,6 +162,115 @@ class Transcriber:
             # Geçici parçaları temizle
             if chunks:
                 self.chunker.cleanup_chunks(chunks)
+
+    @staticmethod
+    def clean_and_trim_words(words: List[Word], analysis: Optional[AudioAnalysis] = None) -> List[Word]:
+        """
+        Adım 1: Kelime Temizliği ve Çift Yönlü VAD Kırpması
+        Whisper'ın uzun duraklamalarda kelimeleri aşırı uzatmasını (örn. 'ancak' 7sn)
+        ve sessizlik halüsinasyonlarını engeller.
+        """
+        if not words:
+            return []
+
+        cleaned: List[Word] = []
+        for w in words:
+            w_text = w.word.strip()
+            # Bilinen halüsinasyon filtreleri
+            w_norm = w_text.lower().replace(".", "").replace(",", "")
+            if w_norm in ("altyazı", "mısır", "diber"):
+                continue
+
+            s = float(w.start)
+            e = float(w.end)
+            dur = e - s
+
+            if analysis is not None and dur > 1.0 and getattr(analysis, "speech_regions", None):
+                # Bu kelime aralığı ile çakışan VAD konuşma bölgelerini bul
+                ov_regions = [r for r in analysis.speech_regions if r.end > s and r.start < e]
+                if ov_regions:
+                    new_s = max(s, ov_regions[0].start)
+                    new_e = min(e, ov_regions[-1].end)
+                    if new_e > new_s and (new_e - new_s) >= 0.05:
+                        s, e = new_s, new_e
+
+            cleaned.append(Word(
+                word=w_text,
+                start=round(s, 3),
+                end=round(e, 3),
+                confidence=w.confidence
+            ))
+
+        cleaned.sort(key=lambda w: w.start)
+        return cleaned
+
+    @staticmethod
+    def regenerate_segments_with_cuts(
+        words: List[Any],
+        cuts: Optional[List[Any]] = None,
+        max_words: int = 6,
+        max_duration: float = 3.0
+    ) -> List[TranscriptSegment]:
+        """
+        Adım 4.1: Altyazıların Kesim Sınırlarını Aşmayacak Şekilde Yeniden Üretilmesi
+        Retake veya sessizlik ile kesilen kelimeleri segmentlerden çıkarır,
+        ve kesim sınırlarında altyazı segmentlerini bölerek ekranda kesilmiş kelimenin
+        görünmesini engeller.
+        """
+        if not words:
+            return []
+
+        all_cuts = cuts or []
+        # Kesim içine düşmeyen kelimeleri koru
+        preserved = []
+        for w in words:
+            ws = float(getattr(w, "start", 0.0) if hasattr(w, "start") else w.get("start", 0.0))
+            we = float(getattr(w, "end", 0.0) if hasattr(w, "end") else w.get("end", 0.0))
+            wt = str(getattr(w, "word", "") if hasattr(w, "word") else w.get("word", "")).strip()
+            wc = float(getattr(w, "confidence", 1.0) if hasattr(w, "confidence") else w.get("confidence", 1.0))
+
+            in_cut = any(c.start - 0.05 <= ws and we <= c.end + 0.05 for c in all_cuts)
+            if not in_cut and wt:
+                preserved.append(WordTimestamp(word=wt, start=round(ws, 2), end=round(we, 2), confidence=round(wc, 2)))
+
+        segments: List[TranscriptSegment] = []
+        cur_words: List[WordTimestamp] = []
+
+        for idx, w in enumerate(preserved):
+            if not cur_words:
+                cur_words.append(w)
+                continue
+
+            prev_w = cur_words[-1]
+            dur = w.end - cur_words[0].start
+            is_term = prev_w.word.strip().endswith(('.', '!', '?', ':'))
+            gap = w.start - prev_w.end
+
+            # Eğer kelimeler arasında bir kesim varsa veya uzun duraklama varsa segmenti sonlandır
+            has_cut_between = any(c.start >= prev_w.end - 0.05 and c.end <= w.start + 0.05 for c in all_cuts)
+
+            if len(cur_words) >= max_words or dur >= max_duration or (is_term and len(cur_words) >= 3) or has_cut_between or gap >= 0.8:
+                seg_text = " ".join(cw.word for cw in cur_words)
+                segments.append(TranscriptSegment(
+                    start=cur_words[0].start,
+                    end=cur_words[-1].end,
+                    text=seg_text,
+                    words=list(cur_words)
+                ))
+                cur_words = [w]
+            else:
+                cur_words.append(w)
+
+        if cur_words:
+            seg_text = " ".join(cw.word for cw in cur_words)
+            segments.append(TranscriptSegment(
+                start=cur_words[0].start,
+                end=cur_words[-1].end,
+                text=seg_text,
+                words=list(cur_words)
+            ))
+
+        return segments
 
     @staticmethod
     def _words_to_segments(words: List[Word], max_words: int = 6, max_duration: float = 3.0) -> List[TranscriptSegment]:
