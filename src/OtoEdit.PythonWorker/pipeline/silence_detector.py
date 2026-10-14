@@ -141,6 +141,103 @@ class SilenceDetector:
                 all_parsed.append((ws, we, wt))
 
         all_parsed.sort(key=lambda x: x[0])
+
+        # Eğer analizde RMS zarfı varsa, aşırı uzamış kelimelerin (>0.65s) fonasyon sınırlarını sıkılaştır
+        rms = getattr(analysis, "rms_envelope", None)
+        if rms is not None and len(rms) > 0:
+            hop_sec = getattr(analysis, "rms_hop_ms", 10.0) / 1000.0
+            speech_rms_vals = []
+            if getattr(analysis, "speech_regions", None):
+                for reg in analysis.speech_regions:
+                    s_i = int(reg.start / hop_sec)
+                    e_i = int(reg.end / hop_sec)
+                    if e_i > s_i:
+                        speech_rms_vals.extend(rms[s_i:e_i])
+            med_speech = float(np.median(speech_rms_vals)) if speech_rms_vals else 0.04
+            floor_rms = float(np.percentile(rms, 10))
+            sp_thresh = max(0.012, floor_rms + 0.12 * (med_speech - floor_rms))
+
+            tight_parsed = []
+            n_ap = len(all_parsed)
+            for i, (ws, we, wt) in enumerate(all_parsed):
+                dur = we - ws
+                if dur <= 0.65:
+                    tight_parsed.append((ws, we, wt))
+                    continue
+                s_idx = max(0, int(ws / hop_sec))
+                e_idx = min(len(rms), int(we / hop_sec))
+                w_rms = rms[s_idx:e_idx]
+                if len(w_rms) == 0:
+                    tight_parsed.append((ws, we, wt))
+                    continue
+
+                raw_clusters = []
+                in_c = False
+                c_s = 0
+                dip = 0
+                for idx, r in enumerate(w_rms):
+                    if r >= sp_thresh:
+                        if not in_c:
+                            in_c = True
+                            c_s = idx
+                        dip = 0
+                    else:
+                        if in_c:
+                            dip += 1
+                            if dip > 6:
+                                raw_clusters.append((c_s, idx - dip))
+                                in_c = False
+                                dip = 0
+                if in_c:
+                    raw_clusters.append((c_s, len(w_rms) - 1))
+
+                valid = [(cs, ce) for cs, ce in raw_clusters if (ce - cs) * hop_sec >= 0.10]
+                if not valid:
+                    valid = raw_clusters[:1] if raw_clusters else []
+                if not valid:
+                    tight_parsed.append((ws, we, wt))
+                    continue
+
+                merged = []
+                for cs, ce in valid:
+                    if not merged:
+                        merged.append((cs, ce))
+                    else:
+                        prev_cs, prev_ce = merged[-1]
+                        if (cs - prev_ce) * hop_sec < 0.16:
+                            merged[-1] = (prev_cs, ce)
+                        else:
+                            merged.append((cs, ce))
+
+                if len(merged) == 1:
+                    best_s, best_e = merged[0]
+                else:
+                    prev_end = all_parsed[i - 1][1] if i > 0 else 0.0
+                    next_start = all_parsed[i + 1][0] if i < n_ap - 1 else analysis.duration
+                    dist_to_prev = abs(ws - prev_end)
+                    dist_to_next = abs(next_start - we)
+                    c0_dur = (merged[0][1] - merged[0][0]) * hop_sec
+                    clast_dur = (merged[-1][1] - merged[-1][0]) * hop_sec
+
+                    if dist_to_prev <= 0.15 and c0_dur >= 0.15:
+                        best_s, best_e = merged[0]
+                    elif dist_to_next <= 0.15 and clast_dur >= 0.15:
+                        best_s, best_e = merged[-1]
+                    elif c0_dur < 0.14 and (merged[1][0] - merged[0][1]) * hop_sec >= 0.30:
+                        best_s, best_e = merged[-1]
+                    elif clast_dur < 0.22 and (merged[-1][0] - merged[-2][1]) * hop_sec >= 0.35:
+                        best_s, best_e = merged[0]
+                    else:
+                        durs = [(ce - cs) * hop_sec for cs, ce in merged]
+                        best_s, best_e = merged[int(np.argmax(durs))]
+
+                new_ws = max(ws, ws + best_s * hop_sec - 0.04)
+                new_we = min(we, ws + best_e * hop_sec + 0.04)
+                if (new_we - new_ws) > 1.15:
+                    new_we = new_ws + 1.15
+                tight_parsed.append((round(new_ws, 3), round(new_we, 3), wt))
+            all_parsed = tight_parsed
+
         rt_cuts = existing_cuts or []
 
         preserved_words = []
@@ -161,8 +258,8 @@ class SilenceDetector:
 
         # Video başı boşluğu
         first_ws = preserved_words[0][0]
-        if first_ws >= 0.35:
-            candidate_silences.append((0.0, max(0.0, first_ws - 0.15)))
+        if first_ws >= 0.20:
+            candidate_silences.append((0.0, max(0.0, first_ws - 0.08)))
 
         # Kelimeler arası duraklamalar
         for i in range(len(preserved_words) - 1):
@@ -178,20 +275,20 @@ class SilenceDetector:
             if rts_between:
                 # İlk retake öncesi boşluk
                 first_rt = rts_between[0]
-                if (first_rt.start - w1_e) >= 0.35:
-                    candidate_silences.append((w1_e + 0.20, first_rt.start))
+                if (first_rt.start - w1_e) >= 0.25:
+                    candidate_silences.append((w1_e + 0.08, first_rt.start))
 
                 # Son retake sonrası boşluk
                 last_rt = rts_between[-1]
-                if (w2_s - last_rt.end) >= 0.35:
-                    candidate_silences.append((last_rt.end, max(last_rt.end, w2_s - 0.15)))
+                if (w2_s - last_rt.end) >= 0.25:
+                    candidate_silences.append((last_rt.end, max(last_rt.end, w2_s - 0.08)))
             else:
                 orig_gap = w2_s - w1_e
-                if orig_gap < 0.35:
+                if orig_gap < 0.25:
                     continue
-                elif orig_gap < 1.0:
-                    pad_trail = 0.15
-                    pad_lead = 0.15
+                elif orig_gap < 0.90:
+                    pad_trail = 0.08
+                    pad_lead = 0.08
                 else:
                     is_sent_end = (
                         w1_txt.endswith(('.', '!', '?', ':')) or
@@ -199,28 +296,28 @@ class SilenceDetector:
                         (w2_txt and w2_txt[0].isupper())
                     )
                     if is_sent_end:
-                        pad_trail = 0.22
-                        pad_lead = 0.18
+                        pad_trail = 0.12
+                        pad_lead = 0.10
                     else:
-                        pad_trail = 0.13
-                        pad_lead = 0.12
+                        pad_trail = 0.08
+                        pad_lead = 0.08
 
                 cs = w1_e + pad_trail
                 ce = w2_s - pad_lead
-                if (ce - cs) >= 0.10:
+                if (ce - cs) >= 0.08:
                     candidate_silences.append((round(cs, 3), round(ce, 3)))
 
         # Video sonu boşluğu
         last_we = preserved_words[-1][1]
-        if (analysis.duration - last_we) >= 0.35:
-            candidate_silences.append((last_we + 0.25, analysis.duration))
+        if (analysis.duration - last_we) >= 0.25:
+            candidate_silences.append((last_we + 0.12, analysis.duration))
 
-        # Kenar İnce Ayarı (RMS Lokal Enerji Minimumuna Tek Yönlü Yaslama)
+        # Kenar İnce Ayarı (RMS Lokal Enerji Minimumuna İki Yönlü Hassas Yaslama)
         refined_intervals: List[Tuple[float, float]] = []
         for s, e in candidate_silences:
-            s_ref = 0.0 if s <= 0.08 else analysis.find_energy_minimum(s, search_window_sec=0.04, direction="forward_only")
-            e_ref = analysis.duration if e >= (analysis.duration - 0.08) else analysis.find_energy_minimum(e, search_window_sec=0.04, direction="backward_only")
-            if (e_ref - s_ref) >= 0.10:
+            s_ref = 0.0 if s <= 0.05 else analysis.find_energy_minimum(s, search_window_sec=0.025, direction="both")
+            e_ref = analysis.duration if e >= (analysis.duration - 0.05) else analysis.find_energy_minimum(e, search_window_sec=0.025, direction="both")
+            if (e_ref - s_ref) >= 0.08:
                 refined_intervals.append((round(s_ref, 3), round(e_ref, 3)))
 
         cuts: List[CutItem] = []

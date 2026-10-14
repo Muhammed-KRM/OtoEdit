@@ -10,6 +10,7 @@ OtoEdit Transcriber Orkestratörü
 import os
 import time
 from typing import List, Optional, Callable, Any
+import numpy as np
 from config import Config
 from models.transcript_model import TranscriptResult, TranscriptSegment, WordTimestamp
 from pipeline.audio_analysis import AudioAnalysis, AudioAnalyzer
@@ -166,43 +167,161 @@ class Transcriber:
     @staticmethod
     def clean_and_trim_words(words: List[Word], analysis: Optional[AudioAnalysis] = None) -> List[Word]:
         """
-        Adım 1: Kelime Temizliği ve Çift Yönlü VAD Kırpması
-        Whisper'ın uzun duraklamalarda kelimeleri aşırı uzatmasını (örn. 'ancak' 7sn)
-        ve sessizlik halüsinasyonlarını engeller.
+        Adım 1: Kelime Temizliği, Halüsinasyon Filtresi ve Akustik Küme Kırpması.
+        Whisper'ın uzun duraklamalarda, nefes alışlarda veya kumanda tıklarında
+        kelimeleri aşırı uzatmasını (örn. 'ancak' 7sn, 'bizzat' 8sn) engelleyip
+        kelime sınırlarını gerçek ses fonasyonuna (RMS zarfı) kilitler.
         """
         if not words:
             return []
 
-        cleaned: List[Word] = []
+        # 1. Halüsinasyon filtreleme ve ilk temizlik
+        cleaned_raw: List[Word] = []
         for w in words:
             w_text = w.word.strip()
-            # Bilinen halüsinasyon filtreleri
             w_norm = w_text.lower().replace(".", "").replace(",", "")
             if w_norm in ("altyazı", "mısır", "diber"):
                 continue
+            if float(w.end) >= float(w.start):
+                cleaned_raw.append(Word(
+                    word=w_text,
+                    start=float(w.start),
+                    end=float(w.end),
+                    confidence=float(getattr(w, "confidence", 1.0))
+                ))
 
-            s = float(w.start)
-            e = float(w.end)
-            dur = e - s
+        if not cleaned_raw:
+            return []
 
-            if analysis is not None and dur > 1.0 and getattr(analysis, "speech_regions", None):
-                # Bu kelime aralığı ile çakışan VAD konuşma bölgelerini bul
-                ov_regions = [r for r in analysis.speech_regions if r.end > s and r.start < e]
-                if ov_regions:
-                    new_s = max(s, ov_regions[0].start)
-                    new_e = min(e, ov_regions[-1].end)
-                    if new_e > new_s and (new_e - new_s) >= 0.05:
-                        s, e = new_s, new_e
+        cleaned_raw.sort(key=lambda w: w.start)
 
-            cleaned.append(Word(
-                word=w_text,
-                start=round(s, 3),
-                end=round(e, 3),
+        # RMS zarfı yoksa veya analiz verilmemişse VAD fallback ile devam et
+        rms = getattr(analysis, "rms_envelope", None) if analysis is not None else None
+        if rms is None or len(rms) == 0:
+            return cleaned_raw
+
+        hop_sec = getattr(analysis, "rms_hop_ms", 10.0) / 1000.0
+
+        # Uyarlanabilir konuşma eşik değeri (Speech Threshold) kalibrasyonu
+        speech_rms_vals = []
+        if getattr(analysis, "speech_regions", None):
+            for reg in analysis.speech_regions:
+                s_idx = int(reg.start / hop_sec)
+                e_idx = int(reg.end / hop_sec)
+                if e_idx > s_idx:
+                    speech_rms_vals.extend(rms[s_idx:e_idx])
+        median_speech_rms = float(np.median(speech_rms_vals)) if speech_rms_vals else 0.04
+        silence_floor = float(np.percentile(rms, 10))
+        speech_thresh = max(0.012, silence_floor + 0.12 * (median_speech_rms - silence_floor))
+
+        refined: List[Word] = []
+        n_words = len(cleaned_raw)
+
+        for i, w in enumerate(cleaned_raw):
+            ws = float(w.start)
+            we = float(w.end)
+            dur = we - ws
+
+            # 0.65s altındaki kelimeler zaten tek hece/kelimedir, aşırı yayılma içermez
+            if dur <= 0.65:
+                refined.append(Word(word=w.word, start=round(ws, 3), end=round(we, 3), confidence=w.confidence))
+                continue
+
+            s_idx = max(0, int(ws / hop_sec))
+            e_idx = min(len(rms), int(we / hop_sec))
+            w_rms = rms[s_idx:e_idx]
+
+            if len(w_rms) == 0:
+                refined.append(Word(word=w.word, start=round(ws, 3), end=round(we, 3), confidence=w.confidence))
+                continue
+
+            # 1. Konuşma kümelerini çıkar (60ms sessizlik toleransı ile)
+            raw_clusters = []
+            in_c = False
+            c_s = 0
+            dip = 0
+            for idx, r in enumerate(w_rms):
+                if r >= speech_thresh:
+                    if not in_c:
+                        in_c = True
+                        c_s = idx
+                    dip = 0
+                else:
+                    if in_c:
+                        dip += 1
+                        if dip > 6:  # 60ms sessizlik kümeyi bitirir
+                            raw_clusters.append((c_s, idx - dip))
+                            in_c = False
+                            dip = 0
+            if in_c:
+                raw_clusters.append((c_s, len(w_rms) - 1))
+
+            # 2. 100ms altındaki mikro-tıkları/parazitleri filtrele
+            valid_clusters = [
+                (cs, ce) for cs, ce in raw_clusters
+                if (ce - cs) * hop_sec >= 0.10
+            ]
+            if not valid_clusters:
+                if raw_clusters:
+                    durs = [(ce - cs) for cs, ce in raw_clusters]
+                    valid_clusters = [raw_clusters[int(np.argmax(durs))]]
+                else:
+                    refined.append(Word(word=w.word, start=round(ws, 3), end=round(we, 3), confidence=w.confidence))
+                    continue
+
+            # 3. Kelime içi sessiz ünsüz patlamalarını (< 160ms) birleştir
+            merged = []
+            for cs, ce in valid_clusters:
+                if not merged:
+                    merged.append((cs, ce))
+                else:
+                    prev_cs, prev_ce = merged[-1]
+                    if (cs - prev_ce) * hop_sec < 0.16:
+                        merged[-1] = (prev_cs, ce)
+                    else:
+                        merged.append((cs, ce))
+
+            # 4. Birden çok küme varsa cümle akışına göre gerçek kelime kümesini seç
+            if len(merged) == 1:
+                best_s, best_e = merged[0]
+            else:
+                prev_end = float(cleaned_raw[i - 1].end) if i > 0 else 0.0
+                next_start = float(cleaned_raw[i + 1].start) if i < n_words - 1 else analysis.duration
+
+                dist_to_prev = abs(ws - prev_end)
+                dist_to_next = abs(next_start - we)
+
+                c0_dur = (merged[0][1] - merged[0][0]) * hop_sec
+                clast_dur = (merged[-1][1] - merged[-1][0]) * hop_sec
+
+                if dist_to_prev <= 0.15 and c0_dur >= 0.15:
+                    best_s, best_e = merged[0]
+                elif dist_to_next <= 0.15 and clast_dur >= 0.15:
+                    best_s, best_e = merged[-1]
+                elif c0_dur < 0.14 and (merged[1][0] - merged[0][1]) * hop_sec >= 0.30:
+                    best_s, best_e = merged[-1]
+                elif clast_dur < 0.22 and (merged[-1][0] - merged[-2][1]) * hop_sec >= 0.35:
+                    best_s, best_e = merged[0]
+                else:
+                    durs = [(ce - cs) * hop_sec for cs, ce in merged]
+                    best_s, best_e = merged[int(np.argmax(durs))]
+
+            new_ws = max(ws, ws + best_s * hop_sec - 0.04)
+            new_we = min(we, ws + best_e * hop_sec + 0.04)
+
+            # Güvenlik sınırı: Türkçe tek kelime fonasyonu nadiren 1.15s'yi geçer
+            if (new_we - new_ws) > 1.15:
+                new_we = new_ws + 1.15
+
+            refined.append(Word(
+                word=w.word,
+                start=round(new_ws, 3),
+                end=round(new_we, 3),
                 confidence=w.confidence
             ))
 
-        cleaned.sort(key=lambda w: w.start)
-        return cleaned
+        refined.sort(key=lambda w: w.start)
+        return refined
 
     @staticmethod
     def regenerate_segments_with_cuts(

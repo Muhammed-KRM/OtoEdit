@@ -108,7 +108,8 @@ class EdlBuilder:
         }
 
         # 3. Repurposing verisine yüz takibini ekle
-        repurposing_data.faceTrackingData = face_data
+        if repurposing_data is not None:
+            repurposing_data.faceTrackingData = face_data
 
         # Gerçek video süresini güvenceye al (Transkript hatasında 1.0s çöküşünü önle)
         effective_duration = float(video_duration) if (video_duration is not None and float(video_duration) > 0.1) else (
