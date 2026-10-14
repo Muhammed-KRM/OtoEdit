@@ -9,14 +9,24 @@ from utils.logger import get_logger
 logger = get_logger(__name__)
 
 
+import urllib.request
+import urllib.error
+
 class GeminiClient:
-    """Google Gemini API ile viral klip tespiti ve transkript zenginleştirme istemcisi."""
+    """Google Gemini API ve Antigravity Proxy ile viral klip tespiti ve transkript zenginleştirme istemcisi."""
 
     def __init__(self):
+        self.proxy_url = getattr(Config, "ANTIGRAVITY_PROXY_URL", "http://host.docker.internal:8045/v1").rstrip("/")
+        self.proxy_key = getattr(Config, "ANTIGRAVITY_PROXY_KEY", "")
+        self.proxy_model = getattr(Config, "ANTIGRAVITY_PROXY_MODEL", "gemini-3.8-flash-tiered")
         self.api_key = Config.GEMINI_API_KEY
         self.model = None
 
-        if self.api_key:
+        if self.proxy_key and self.proxy_url:
+            self.use_proxy = True
+            logger.info(f"🌐 Antigravity Proxy istemcisi yapılandırıldı: {self.proxy_url} (Model: {self.proxy_model})")
+        elif self.api_key:
+            self.use_proxy = False
             try:
                 import importlib
                 genai = importlib.import_module("google.generativeai")
@@ -27,11 +37,38 @@ class GeminiClient:
             except Exception as e:
                 logger.warning(f"Gemini API başlatılamadı, fallback modu kullanılacak: {e}")
         else:
-            logger.warning("GEMINI_API_KEY tanımlı değil. Fallback motoru aktif.")
+            self.use_proxy = False
+            logger.warning("Ne ANTIGRAVITY_PROXY_KEY ne de GEMINI_API_KEY tanımlı. Fallback motoru aktif.")
 
     def _execute_with_retry(self, prompt: str, max_retries: int = 3) -> Optional[str]:
         """Ağ veya Rate Limit durumlarında Exponential Backoff ile tekrar dener."""
         delay = 2.0
+        if getattr(self, "use_proxy", False):
+            url = f"{self.proxy_url}/chat/completions"
+            payload = {
+                "model": self.proxy_model,
+                "messages": [{"role": "user", "content": prompt}]
+            }
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.proxy_key}"
+            }
+            for attempt in range(1, max_retries + 1):
+                try:
+                    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
+                    with urllib.request.urlopen(req, timeout=90) as resp:
+                        data = json.loads(resp.read().decode("utf-8"))
+                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    return content
+                except Exception as ex:
+                    logger.warning(f"Antigravity Proxy çağrı denemesi #{attempt} başarısız: {ex}")
+                    if attempt < max_retries:
+                        time.sleep(delay)
+                        delay *= 2.0
+                    else:
+                        logger.error(f"Antigravity Proxy tüm denemeler ({max_retries}) tükendi: {ex}")
+            return None
+
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.model.generate_content(prompt)

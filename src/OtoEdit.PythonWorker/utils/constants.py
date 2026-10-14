@@ -25,6 +25,12 @@ class PipelineStage:
     RENDER = "Render"
     TAMAMLANDI = "Tamamlandi"
 
+    # Kolaylık ve Takma Adlar (.NET PipelineAsamasi enum eşleşmeleri)
+    RETAKE = "SessizlikAlgilama"
+    VIRAL_KLIP = "Repurposing"
+    BROLL = "OneriOlusturma"
+
+
 
 class RabbitMQConstants:
     # Gelen Mesajlar (.NET -> Python)

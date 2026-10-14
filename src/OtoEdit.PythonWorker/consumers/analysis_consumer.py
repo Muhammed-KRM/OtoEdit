@@ -180,9 +180,21 @@ class AnalysisConsumer:
             transcript = None
             face_data = []
 
+            def on_stt_progress(current_chunk: int, total_chunks: int, msg: str):
+                pct = int(25 + (current_chunk / max(1, total_chunks)) * 30)
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.STT, pct,
+                    message=f"Transkripsiyon: {msg}"
+                )
+
             def _run_transcribe():
                 logger.info("🧵 Thread: STT orkestrasyonu başladı")
-                res = self.transcriber.transcribe(clean_audio_path, analysis=analysis, video_id=video_id)
+                res = self.transcriber.transcribe(
+                    clean_audio_path,
+                    analysis=analysis,
+                    video_id=video_id,
+                    on_progress=on_stt_progress
+                )
                 logger.info("🧵 Thread: STT orkestrasyonu bitti")
                 return res
 
@@ -202,8 +214,8 @@ class AnalysisConsumer:
                 face_data = f_face.result()
 
             self.pipeline_logger.log_progress(
-                project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 55,
-                message="Transkript tamamlandı. Akıllı kesimler (Jump-Cut v2, Retake) ve yapay zeka önerileri hazırlanıyor..."
+                project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 60,
+                message="Jump-Cut v2: Konuşma korumalı sessizlik kesimleri yapılıyor..."
             )
 
             # -------------------------------------------------------------
@@ -227,6 +239,10 @@ class AnalysisConsumer:
             def _run_retakes():
                 if not auto_retake:
                     return []
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.SESSIZLIK_ALGILAMA, 70,
+                    message="Akıllı Yönetmen: Çekim tekrarları (Retake) taranıyor..."
+                )
                 logger.info("🧵 Thread: Akıllı retake analizi başladı")
                 res = self.retake_detector.detect_retakes(
                     clean_audio_path,
@@ -246,6 +262,10 @@ class AnalysisConsumer:
                 return res
 
             def _run_repurposing():
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.REPURPOSING, 80,
+                    message="Viral klip (Reels / Shorts) anları seçiliyor..."
+                )
                 logger.info("🧵 Thread: Repurposing (viral klip) analizi başladı")
                 try:
                     res = self.repurposing.analyze(transcript)
@@ -258,6 +278,10 @@ class AnalysisConsumer:
                     return RepurposingData(clips=[])
 
             def _run_suggestions():
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.ONERI_OLUSTURMA, 88,
+                    message="Yapay Zeka: B-Roll görsel ve vurgu önerileri üretiliyor..."
+                )
                 logger.info("🧵 Thread: Öneri motoru başladı")
                 try:
                     res = self.suggestion_engine.generate_suggestions(transcript)

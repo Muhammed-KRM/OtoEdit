@@ -68,6 +68,7 @@ class GroqEngine(BaseSTTEngine):
             data=bytes(body),
             headers={
                 "Authorization": f"Bearer {self.api_key}",
+                "User-Agent": "OtoEdit/1.0",
                 "Content-Type": f"multipart/form-data; boundary={boundary}"
             },
             method="POST"

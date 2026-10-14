@@ -9,7 +9,7 @@ OtoEdit Transcriber Orkestratörü
 
 import os
 import time
-from typing import List, Optional
+from typing import List, Optional, Callable
 from config import Config
 from models.transcript_model import TranscriptResult, TranscriptSegment, WordTimestamp
 from pipeline.audio_analysis import AudioAnalysis, AudioAnalyzer
@@ -34,7 +34,8 @@ class Transcriber:
         self,
         audio_path: str,
         analysis: Optional[AudioAnalysis] = None,
-        video_id: str = ""
+        video_id: str = "",
+        on_progress: Optional[Callable[[int, int, str], None]] = None
     ) -> TranscriptResult:
         """
         Ses dosyasını çözümler:
@@ -67,16 +68,24 @@ class Transcriber:
             # 3. Her parçayı STT zincirine gönder
             all_words: List[Word] = []
             engine_stats = {}
+            total_chunks = len(chunks)
 
             for chunk in chunks:
                 if not chunk.has_speech:
                     logger.info(f"🔇 Parça {chunk.index} sessiz, STT motoruna gönderilmedi.")
+                    if on_progress:
+                        on_progress(chunk.index, total_chunks, f"Parça {chunk.index}/{total_chunks} sessiz bölge, atlandı.")
                     continue
+
+                if on_progress:
+                    on_progress(chunk.index, total_chunks, f"Parça {chunk.index}/{total_chunks} transkribe ediliyor ({chunk.start_sec:.0f}s - {chunk.end_sec:.0f}s)...")
 
                 try:
                     words, engine_name = self.chain.transcribe_chunk(chunk)
                     all_words.extend(words)
                     engine_stats[engine_name] = engine_stats.get(engine_name, 0) + len(words)
+                    if on_progress:
+                        on_progress(chunk.index, total_chunks, f"Parça {chunk.index}/{total_chunks} tamamlandı ({engine_name}, {len(words)} kelime).")
                 except Exception as ex:
                     logger.warning(
                         f"⚠️ Parça {chunk.index} ({chunk.start_sec:.1f}s -> {chunk.end_sec:.1f}s) STT hatası: {ex}. "
@@ -86,6 +95,8 @@ class Transcriber:
             logger.info(f"📊 STT Motor İstatistikleri: {engine_stats} (Toplam {len(all_words)} kelime)")
 
             # 4. Kayıp Kelime Dedektörü (Gap Filler)
+            if on_progress:
+                on_progress(total_chunks, total_chunks, "Kayıp kelimeler ve konuşma aralıkları taranıyor...")
             all_words = self.gap_filler.fill_gaps(
                 media_path=audio_path,
                 analysis=analysis,

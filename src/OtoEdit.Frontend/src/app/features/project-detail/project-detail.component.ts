@@ -327,9 +327,32 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         })
     );
 
-    // İlerleme yüzdesi güncellemesi
-    // SignalR'dan currentAnalysisProgress değiştiğinde
-    // Angular effect or template direct binding handles it
+    // Canlı Analiz Aşamaları ve Yüzdesi (SignalR)
+    this.sub.add(
+      this.signalr.analysisProgress$
+        .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
+        .subscribe((e) => {
+          this.isAnalyzing.set(true);
+          if (typeof e.yuzde === 'number') {
+            this.analysisPercentage.set(e.yuzde);
+          }
+          if (e.mesaj) {
+            this.analysisStageMessage.set(e.mesaj);
+          } else if (e.asama) {
+            this.analysisStageMessage.set(`${e.asama} aşaması yürütülüyor...`);
+          }
+        })
+    );
+
+    // Pipeline Hata Bildirimi
+    this.sub.add(
+      this.signalr.pipelineError$
+        .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
+        .subscribe((err) => {
+          this.isAnalyzing.set(false);
+          this.analysisStageMessage.set(`Hata oluştu: ${err.hataMesaji}`);
+        })
+    );
   }
 
   canGoToEditor(): boolean {

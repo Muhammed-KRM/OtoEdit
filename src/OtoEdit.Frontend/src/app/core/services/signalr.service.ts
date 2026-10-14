@@ -46,6 +46,7 @@ export class SignalrService {
   readonly currentRenderProgress = signal<RenderProgressEvent | null>(null);
 
   // RxJS Subjects
+  readonly analysisProgress$ = new Subject<AnalysisProgressEvent>();
   readonly analysisCompleted$ = new Subject<AnalysisCompletedEvent>();
   readonly renderProgress$ = new Subject<RenderProgressEvent>();
   readonly renderCompleted$ = new Subject<RenderCompletedEvent>();
@@ -80,6 +81,7 @@ export class SignalrService {
 
     this.hubConnection.on('AnalysisProgress', (data: AnalysisProgressEvent) => {
       this.currentAnalysisProgress.set(data);
+      this.analysisProgress$.next(data);
     });
 
     this.hubConnection.on('AnalysisCompleted', (data: AnalysisCompletedEvent) => {
