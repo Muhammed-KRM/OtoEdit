@@ -84,6 +84,43 @@ public class ChatManager : IChatService
             .FirstOrDefaultAsync(t => t.Video.ProjectId == projectId, cancellationToken);
         var transcriptText = transcript?.HamMetin;
 
+        // Eğer VideoTranscripts tablosunda transkript yoksa, EDL JSON içerisindeki segments alanından zaman damgalı metni çıkar
+        if (string.IsNullOrWhiteSpace(transcriptText) && !string.IsNullOrWhiteSpace(edlJson))
+        {
+            try
+            {
+                using var edlDoc = JsonDocument.Parse(edlJson);
+                if (edlDoc.RootElement.TryGetProperty("transcript", out var tElem))
+                {
+                    if (tElem.TryGetProperty("segments", out var segsElem) && segsElem.ValueKind == JsonValueKind.Array)
+                    {
+                        var sb = new System.Text.StringBuilder();
+                        foreach (var seg in segsElem.EnumerateArray())
+                        {
+                            var start = seg.TryGetProperty("start", out var s) ? s.GetDouble() : 0;
+                            var end = seg.TryGetProperty("end", out var e) ? e.GetDouble() : 0;
+                            var txt = seg.TryGetProperty("text", out var tx) ? tx.GetString() : "";
+                            if (!string.IsNullOrWhiteSpace(txt))
+                            {
+                                int mStart = (int)(start / 60);
+                                int sStart = (int)(start % 60);
+                                sb.AppendLine($"[{mStart:D2}:{sStart:D2} ({start:F1}s)] {txt.Trim()}");
+                            }
+                        }
+                        transcriptText = sb.ToString();
+                    }
+                    else if (tElem.TryGetProperty("fullText", out var ftElem))
+                    {
+                        transcriptText = ftElem.GetString();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "EDL transkripti ayrıştırılırken hata oluştu.");
+            }
+        }
+
         // 4. Kullanıcı mesajını kaydet
         var userChatMessage = new ChatMessage
         {

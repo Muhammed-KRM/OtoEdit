@@ -13,7 +13,7 @@ import { SignalrService } from '../../core/services/signalr.service';
 import { ProjectDetailDto } from '../../core/models/project.model';
 import { DiagnosticsService } from '../../core/services/diagnostics.service';
 import { VideoDetailDto } from '../../core/models/video.model';
-import { CutItem, EdlContent, EdlDto, OverlayItem, SubtitleStyleConfig, BackgroundMusicConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
+import { CutItem, EdlContent, EdlDto, OverlayItem, SubtitleStyleConfig, BackgroundMusicConfig, ColorGradingConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
 import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
 import { ProjectAssetDto } from '../../core/models/asset.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
@@ -196,20 +196,29 @@ export interface ContextMenuState {
               </div>
             </div>
 
-            <!-- Örnek Stok Görseller -->
-            <div class="pt-2 border-t border-slate-800/80">
-              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1.5">Pexels Stok (Örnek)</span>
-              <div class="grid grid-cols-2 gap-2">
-                <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group hover:border-brand-cyan">
-                  <img src="https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
+            <!-- Zengin B-Roll Stok Kütüphanesi -->
+            <div class="pt-2 border-t border-slate-800/80 space-y-2">
+              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">B-Roll Stok Kütüphanesi</span>
+              
+              <!-- Kategori Seçici Çipler -->
+              <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
+                <button 
+                  type="button" 
+                  *ngFor="let cat of stockCategories" 
+                  (click)="selectedStockCategory.set(cat.id)" 
+                  [ngClass]="selectedStockCategory() === cat.id ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-800 text-slate-400 hover:text-white'" 
+                  class="px-2 py-0.8 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer transition-colors">
+                  {{ cat.name }}
+                </button>
+              </div>
+
+              <!-- Görsel Izgarası -->
+              <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
+                <div *ngFor="let img of currentCategoryImages()" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group hover:border-brand-cyan">
+                  <img [src]="img.thumb" [alt]="img.title" class="w-full h-full object-cover" />
                   <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
-                    <button (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/1181675/pexels-photo-1181675.jpeg', 'Yazılım')" class="px-2 py-0.5 bg-brand-cyan text-slate-950 text-[9px] rounded font-bold w-full">+ Katman</button>
-                  </div>
-                </div>
-                <div class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group hover:border-brand-cyan">
-                  <img src="https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg?auto=compress&cs=tinysrgb&w=150" class="w-full h-full object-cover" />
-                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
-                    <button (click)="$event.stopPropagation(); addImageOverlayFromUrl('https://images.pexels.com/photos/3183150/pexels-photo-3183150.jpeg', 'Ekip')" class="px-2 py-0.5 bg-brand-cyan text-slate-950 text-[9px] rounded font-bold w-full">+ Katman</button>
+                    <span class="text-[9px] text-white font-bold truncate max-w-full text-center">{{ img.title }}</span>
+                    <button (click)="$event.stopPropagation(); addImageOverlayFromUrl(img.url, img.title)" class="px-2 py-0.5 bg-brand-cyan text-slate-950 text-[9px] rounded font-bold w-full cursor-pointer hover:bg-cyan-400">+ Katmana Ekle</button>
                   </div>
                 </div>
               </div>
@@ -400,6 +409,7 @@ export interface ContextMenuState {
                 (loadedmetadata)="onMetadataLoaded()"
                 (play)="isPlaying.set(true)"
                 (pause)="isPlaying.set(false)"
+                [style.filter]="videoFilterStyle()"
                 class="w-full h-full object-contain rounded pointer-events-auto">
               </video>
 
@@ -563,8 +573,30 @@ export interface ContextMenuState {
               </button>
             </div>
 
-            <!-- Sağ: Altyazı ve Tam Ekran -->
+            <!-- Sağ: Hız, Renk, Altyazı ve Tam Ekran -->
             <div class="flex items-center gap-2">
+              <!-- Hız Kontrolü (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x) -->
+              <button 
+                type="button"
+                (click)="cyclePlaybackSpeed()" 
+                [ngClass]="playbackSpeed() !== 1.0 ? 'text-brand-cyan bg-brand-cyan/20 border-brand-cyan/40 font-bold' : 'text-slate-400 border-slate-700 bg-dark-800'"
+                class="px-2 py-1 rounded border hover:border-slate-500 transition-colors flex items-center gap-1 text-[11px] font-mono cursor-pointer"
+                title="Oynatma Hızını Değiştir (0.5x - 2.0x)">
+                <span>⚡</span>
+                <span>{{ playbackSpeed() }}x</span>
+              </button>
+
+              <!-- Renk Ayarları (Color Grading) -->
+              <button 
+                type="button"
+                (click)="showColorModal.set(true)" 
+                [ngClass]="isColorGraded() ? 'text-amber-400 bg-amber-500/20 border-amber-500/40 font-bold' : 'text-slate-400 border-slate-700 bg-dark-800'"
+                class="px-2 py-1 rounded border hover:border-slate-500 transition-colors flex items-center gap-1 text-[11px] font-semibold cursor-pointer"
+                title="Renk & Görüntü Ayarları (Parlaklık, Kontrast, Doygunluk, Sıcaklık)">
+                <span>🎨</span>
+                <span>Renk</span>
+              </button>
+
               <button 
                 (click)="toggleSubtitles()" 
                 [ngClass]="showSubtitles() ? 'text-amber-300 bg-amber-400/20 border-amber-400/40' : 'text-slate-400 border-slate-700 bg-dark-800'"
@@ -2165,70 +2197,117 @@ export interface ContextMenuState {
 
             <!-- 2. Kesim Başlangıç Kaydırma (Start Offset) -->
             <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <div>
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex-1">
                   <span class="text-xs font-bold text-white block">Kesim Başlangıç Noktası (Önceki Kelime Payı)</span>
                   <span class="text-[11px] text-slate-400 block">Pozitif (+) değer kesimi ileri iter; önceki kelimeye daha fazla nefes/sönümlenme payı bırakır.</span>
                 </div>
-                <span class="px-2 py-1 rounded bg-indigo-500/20 text-indigo-300 font-mono text-xs font-bold border border-indigo-500/30 shrink-0">
-                  {{ cutStartOffsetMs() > 0 ? '+' : '' }}{{ cutStartOffsetMs() }} ms
-                </span>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <div class="flex items-center bg-dark-900 border border-indigo-500/40 rounded-lg px-2 py-0.5 focus-within:border-indigo-400">
+                    <input 
+                      type="number" 
+                      step="10" 
+                      [value]="cutStartOffsetMs()" 
+                      (input)="onCutStartInput($event)" 
+                      class="w-16 bg-transparent text-right font-mono text-xs font-bold text-indigo-300 focus:outline-none" />
+                    <span class="text-[10px] font-mono font-bold text-indigo-400 ml-1">ms</span>
+                  </div>
+                  <button 
+                    type="button" 
+                    (click)="cutStartOffsetMs.set(0)" 
+                    class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-bold border border-slate-700 transition-colors cursor-pointer"
+                    title="Başlangıç Payını Sıfırla">
+                    0 ms
+                  </button>
+                </div>
               </div>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <button type="button" *ngFor="let val of [-100, -50, 0, 50, 80, 100, 150, 200]" 
+                <button type="button" *ngFor="let val of [-500, -250, -100, -50, 0, 50, 80, 100, 150, 250, 500, 1000]" 
                   (click)="cutStartOffsetMs.set(val)" 
                   [ngClass]="cutStartOffsetMs() === val ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-dark-800 text-slate-300 border-slate-700 hover:bg-slate-700'"
-                  class="px-2 py-1 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer">
+                  class="px-2 py-0.8 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer">
                   {{ val > 0 ? '+' : '' }}{{ val }}ms
                 </button>
               </div>
-              <input 
-                type="range" 
-                min="-200" 
-                max="400" 
-                step="10" 
-                [value]="cutStartOffsetMs()" 
-                (input)="cutStartOffsetMs.set($any($event.target).valueAsNumber)"
-                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-mono text-slate-500 shrink-0">-5000</span>
+                <input 
+                  type="range" 
+                  min="-5000" 
+                  max="5000" 
+                  step="10" 
+                  [value]="cutStartOffsetMs()" 
+                  (input)="cutStartOffsetMs.set($any($event.target).valueAsNumber)"
+                  class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+                <span class="text-[10px] font-mono text-slate-500 shrink-0">+5000</span>
+              </div>
             </div>
 
             <!-- 3. Kesim Bitiş Kaydırma (End Offset) -->
             <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2.5">
-              <div class="flex items-center justify-between">
-                <div>
+              <div class="flex items-center justify-between gap-3">
+                <div class="flex-1">
                   <span class="text-xs font-bold text-white block">Kesim Bitiş Noktası (Sonraki Kelime Payı)</span>
                   <span class="text-[11px] text-slate-400 block">Negatif (-) değer kesimi erken bitirir; sonraki kelimenin başlangıç harfini/atağını korur.</span>
                 </div>
-                <span class="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 font-mono text-xs font-bold border border-emerald-500/30 shrink-0">
-                  {{ cutEndOffsetMs() > 0 ? '+' : '' }}{{ cutEndOffsetMs() }} ms
-                </span>
+                <div class="flex items-center gap-1.5 shrink-0">
+                  <div class="flex items-center bg-dark-900 border border-emerald-500/40 rounded-lg px-2 py-0.5 focus-within:border-emerald-400">
+                    <input 
+                      type="number" 
+                      step="10" 
+                      [value]="cutEndOffsetMs()" 
+                      (input)="onCutEndInput($event)" 
+                      class="w-16 bg-transparent text-right font-mono text-xs font-bold text-emerald-300 focus:outline-none" />
+                    <span class="text-[10px] font-mono font-bold text-emerald-400 ml-1">ms</span>
+                  </div>
+                  <button 
+                    type="button" 
+                    (click)="cutEndOffsetMs.set(0)" 
+                    class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-[10px] font-bold border border-slate-700 transition-colors cursor-pointer"
+                    title="Bitiş Payını Sıfırla">
+                    0 ms
+                  </button>
+                </div>
               </div>
               <div class="flex items-center gap-1.5 flex-wrap">
-                <button type="button" *ngFor="let val of [-200, -150, -100, -80, -50, 0, 50, 100]" 
+                <button type="button" *ngFor="let val of [-1000, -500, -250, -150, -100, -80, -50, 0, 50, 100, 250, 500]" 
                   (click)="cutEndOffsetMs.set(val)" 
                   [ngClass]="cutEndOffsetMs() === val ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-dark-800 text-slate-300 border-slate-700 hover:bg-slate-700'"
-                  class="px-2 py-1 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer">
+                  class="px-2 py-0.8 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer">
                   {{ val > 0 ? '+' : '' }}{{ val }}ms
                 </button>
               </div>
-              <input 
-                type="range" 
-                min="-400" 
-                max="200" 
-                step="10" 
-                [value]="cutEndOffsetMs()" 
-                (input)="cutEndOffsetMs.set($any($event.target).valueAsNumber)"
-                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-mono text-slate-500 shrink-0">-5000</span>
+                <input 
+                  type="range" 
+                  min="-5000" 
+                  max="5000" 
+                  step="10" 
+                  [value]="cutEndOffsetMs()" 
+                  (input)="cutEndOffsetMs.set($any($event.target).valueAsNumber)"
+                  class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+                <span class="text-[10px] font-mono text-slate-500 shrink-0">+5000</span>
+              </div>
             </div>
 
-            <!-- Hızlı Tavsiye Butonları (Presets) -->
-            <div class="flex items-center justify-between p-2.5 rounded-lg bg-indigo-950/30 border border-indigo-900/50 text-[11px]">
-              <span class="text-indigo-300 font-medium">💡 Hızlı Öneri: Kelime sonu erken kesiliyorsa</span>
+            <!-- Hızlı Tavsiye Butonları (Presets) & Sıfırla -->
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-indigo-950/30 border border-indigo-900/50 text-[11px] flex-wrap gap-2">
+              <div class="flex items-center gap-2">
+                <span class="text-indigo-300 font-medium">💡 Hızlı Öneri: Kelime sonu erken kesiliyorsa</span>
+                <button 
+                  type="button"
+                  (click)="cutStartOffsetMs.set(100); cutEndOffsetMs.set(-60)"
+                  class="px-2.5 py-1 rounded bg-indigo-600/40 hover:bg-indigo-600 text-indigo-100 font-bold transition-colors cursor-pointer border border-indigo-400/40">
+                  +100ms Baş / -60ms Son Ayarla
+                </button>
+              </div>
               <button 
                 type="button"
-                (click)="cutStartOffsetMs.set(100); cutEndOffsetMs.set(-60)"
-                class="px-2.5 py-1 rounded bg-indigo-600/40 hover:bg-indigo-600 text-indigo-100 font-bold transition-colors cursor-pointer border border-indigo-400/40">
-                +100ms Baş / -60ms Son Ayarla
+                (click)="resetCutAdjustOffsets()"
+                class="px-3 py-1 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 font-bold transition-colors cursor-pointer flex items-center gap-1.5">
+                <span>🔄</span>
+                <span>Tümünü Sıfırla (0 ms)</span>
               </button>
             </div>
           </div>
@@ -2251,6 +2330,189 @@ export interface ContextMenuState {
                 (click)="applyBatchCutAdjustment()"
                 class="px-5 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold transition-all shadow-glow-sm cursor-pointer disabled:opacity-50">
                 {{ cutAdjustLoading() ? 'Uygulanıyor...' : 'Değişiklikleri Uygula' }}
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- VİDEO RENK AYARLARI (COLOR GRADING) MODALI -->
+      <div 
+        *ngIf="showColorModal()" 
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+        (click)="showColorModal.set(false)">
+        <div 
+          class="bg-dark-900 border border-amber-500/40 rounded-2xl w-full max-w-lg shadow-2xl overflow-hidden flex flex-col"
+          (click)="$event.stopPropagation()">
+          
+          <!-- Modal Başlığı -->
+          <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-dark-950/80">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-lg border border-amber-500/30">
+                🎨
+              </span>
+              <div>
+                <h3 class="text-sm font-bold text-white">Video Renk Ayarları (Color Grading)</h3>
+                <p class="text-[11px] text-slate-400">Canlı parlaklık, kontrast, doygunluk ve renk sıcaklığı filtreleri</p>
+              </div>
+            </div>
+            <button 
+              type="button" 
+              (click)="showColorModal.set(false)"
+              class="w-7 h-7 rounded-lg bg-dark-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm transition-colors cursor-pointer">
+              ✕
+            </button>
+          </div>
+
+          <!-- Modal İçeriği (Kaydırıcılar ve Ön Tanımlar) -->
+          <div class="p-6 space-y-4 max-h-[75vh] overflow-y-auto">
+            
+            <!-- Hazır Filtre Presets -->
+            <div class="space-y-1.5">
+              <label class="text-[10px] text-slate-400 uppercase font-semibold block">Hazır Renk Stilleri (Presets)</label>
+              <div class="grid grid-cols-5 gap-1.5 text-[11px]">
+                <button 
+                  type="button" 
+                  (click)="applyColorPreset('default')"
+                  [ngClass]="!isColorGraded() ? 'bg-amber-500 text-slate-950 font-bold' : 'bg-dark-800 text-slate-300 hover:bg-slate-700'"
+                  class="p-2 rounded-lg border border-slate-700 text-center transition-colors cursor-pointer">
+                  Doğal
+                </button>
+                <button 
+                  type="button" 
+                  (click)="applyColorPreset('vibrant')"
+                  class="p-2 rounded-lg bg-dark-800 hover:bg-slate-700 border border-slate-700 text-center text-slate-300 transition-colors cursor-pointer">
+                  ✨ Canlı
+                </button>
+                <button 
+                  type="button" 
+                  (click)="applyColorPreset('cinematic')"
+                  class="p-2 rounded-lg bg-dark-800 hover:bg-slate-700 border border-slate-700 text-center text-slate-300 transition-colors cursor-pointer">
+                  🎬 Sinematik
+                </button>
+                <button 
+                  type="button" 
+                  (click)="applyColorPreset('cool')"
+                  class="p-2 rounded-lg bg-dark-800 hover:bg-slate-700 border border-slate-700 text-center text-slate-300 transition-colors cursor-pointer">
+                  ❄️ Soğuk
+                </button>
+                <button 
+                  type="button" 
+                  (click)="applyColorPreset('bw')"
+                  class="p-2 rounded-lg bg-dark-800 hover:bg-slate-700 border border-slate-700 text-center text-slate-300 transition-colors cursor-pointer">
+                  🎞️ S&B
+                </button>
+              </div>
+            </div>
+
+            <!-- 1. Parlaklık (Brightness) -->
+            <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-white">☀️ Parlaklık (Brightness)</span>
+                <span class="font-mono text-amber-400 font-bold">%{{ videoBrightness() }}</span>
+              </div>
+              <input 
+                type="range" 
+                min="50" 
+                max="150" 
+                step="1" 
+                [value]="videoBrightness()" 
+                (input)="videoBrightness.set($any($event.target).valueAsNumber)"
+                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+              <div class="flex justify-between text-[9px] text-slate-500 font-mono">
+                <span>Koyu (%50)</span>
+                <span>Varsayılan (%100)</span>
+                <span>Açık (%150)</span>
+              </div>
+            </div>
+
+            <!-- 2. Kontrast (Contrast) -->
+            <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-white">🌓 Kontrast (Contrast)</span>
+                <span class="font-mono text-amber-400 font-bold">%{{ videoContrast() }}</span>
+              </div>
+              <input 
+                type="range" 
+                min="50" 
+                max="160" 
+                step="1" 
+                [value]="videoContrast()" 
+                (input)="videoContrast.set($any($event.target).valueAsNumber)"
+                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+              <div class="flex justify-between text-[9px] text-slate-500 font-mono">
+                <span>Yumuşak (%50)</span>
+                <span>Varsayılan (%100)</span>
+                <span>Keskin (%160)</span>
+              </div>
+            </div>
+
+            <!-- 3. Doygunluk (Saturation) -->
+            <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-white">🌈 Doygunluk (Saturation)</span>
+                <span class="font-mono text-amber-400 font-bold">%{{ videoSaturation() }}</span>
+              </div>
+              <input 
+                type="range" 
+                min="0" 
+                max="200" 
+                step="2" 
+                [value]="videoSaturation()" 
+                (input)="videoSaturation.set($any($event.target).valueAsNumber)"
+                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+              <div class="flex justify-between text-[9px] text-slate-500 font-mono">
+                <span>Gri/Soluk (%0)</span>
+                <span>Varsayılan (%100)</span>
+                <span>Çok Renkli (%200)</span>
+              </div>
+            </div>
+
+            <!-- 4. Renk Sıcaklığı (Temperature / Hue) -->
+            <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-white">🌡️ Renk Sıcaklığı / Ton (Hue)</span>
+                <span class="font-mono text-amber-400 font-bold">{{ videoTemperature() > 0 ? '+' : '' }}{{ videoTemperature() }}°</span>
+              </div>
+              <input 
+                type="range" 
+                min="-30" 
+                max="30" 
+                step="1" 
+                [value]="videoTemperature()" 
+                (input)="videoTemperature.set($any($event.target).valueAsNumber)"
+                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-amber-500" />
+              <div class="flex justify-between text-[9px] text-slate-500 font-mono">
+                <span>Soğuk (-30°)</span>
+                <span>Nötr (0°)</span>
+                <span>Sıcak (+30°)</span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Modal Altı Butonlar -->
+          <div class="px-6 py-3.5 border-t border-slate-800 bg-dark-950/80 flex items-center justify-between">
+            <button 
+              type="button"
+              (click)="resetColorGrading()"
+              class="px-3 py-1.5 rounded-lg bg-dark-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer flex items-center gap-1.5 border border-slate-700">
+              <span>🔄</span>
+              <span>Sıfırla</span>
+            </button>
+            <div class="flex items-center gap-2">
+              <button 
+                type="button"
+                (click)="showColorModal.set(false)"
+                class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer">
+                Kapat
+              </button>
+              <button 
+                type="button"
+                (click)="saveColorGrading()"
+                class="px-5 py-2 rounded-lg bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-bold transition-all shadow-glow-sm cursor-pointer">
+                Kaydet
               </button>
             </div>
           </div>
@@ -2555,6 +2817,67 @@ export class EditorComponent implements OnInit, OnDestroy {
       return r.includes('retake') || r.includes('tekrar');
     }).length;
   });
+
+  // Oynatma Hızı (0.5x, 0.75x, 1x, 1.25x, 1.5x, 2x)
+  readonly playbackSpeed = signal<number>(1.0);
+
+  // Video Renk Ayarları (Color Grading)
+  readonly showColorModal = signal<boolean>(false);
+  readonly videoBrightness = signal<number>(100);
+  readonly videoContrast = signal<number>(100);
+  readonly videoSaturation = signal<number>(100);
+  readonly videoTemperature = signal<number>(0);
+  readonly isColorGraded = computed<boolean>(() => {
+    return this.videoBrightness() !== 100 || 
+           this.videoContrast() !== 100 || 
+           this.videoSaturation() !== 100 || 
+           this.videoTemperature() !== 0;
+  });
+  readonly videoFilterStyle = computed<string>(() => {
+    const b = this.videoBrightness() / 100;
+    const c = this.videoContrast() / 100;
+    const s = this.videoSaturation() / 100;
+    const h = this.videoTemperature();
+    return `brightness(${b}) contrast(${c}) saturate(${s}) hue-rotate(${h}deg)`;
+  });
+
+  // B-Roll Stok Kütüphanesi
+  readonly stockCategories = [
+    { id: 'legal', name: '⚖️ Hukuk & Adalet' },
+    { id: 'tech', name: '💻 Teknoloji' },
+    { id: 'nature', name: '🌿 Doğa' },
+    { id: 'history', name: '📚 Tarih & Kitap' },
+    { id: 'business', name: '📈 İş & Ekonomi' }
+  ];
+  readonly selectedStockCategory = signal<string>('legal');
+  readonly stockImagesLibrary: Record<string, { title: string; thumb: string; url: string }[]> = {
+    legal: [
+      { title: 'Adalet Terazisi', thumb: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=300&q=80', url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=1080&q=80' },
+      { title: 'Mahkeme Tokmağı', thumb: 'https://images.unsplash.com/photo-1589994965851-a8f479c573a9?w=300&q=80', url: 'https://images.unsplash.com/photo-1589994965851-a8f479c573a9?w=1080&q=80' },
+      { title: 'Hukuk Kütüphanesi', thumb: 'https://images.unsplash.com/photo-1505664194779-8beaceb93744?w=300&q=80', url: 'https://images.unsplash.com/photo-1505664194779-8beaceb93744?w=1080&q=80' },
+      { title: 'Anayasa & Kanun', thumb: 'https://images.unsplash.com/photo-1453733197783-64a0888e5243?w=300&q=80', url: 'https://images.unsplash.com/photo-1453733197783-64a0888e5243?w=1080&q=80' }
+    ],
+    tech: [
+      { title: 'Yapay Zeka & Kod', thumb: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=300&q=80', url: 'https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?w=1080&q=80' },
+      { title: 'Siber Güvenlik', thumb: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=300&q=80', url: 'https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1080&q=80' },
+      { title: 'Dijital Ağlar', thumb: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=300&q=80', url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?w=1080&q=80' }
+    ],
+    nature: [
+      { title: 'Dağ & Gökyüzü', thumb: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=300&q=80', url: 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?w=1080&q=80' },
+      { title: 'Deniz Dalgası', thumb: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=300&q=80', url: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1080&q=80' },
+      { title: 'Orman Yolu', thumb: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=300&q=80', url: 'https://images.unsplash.com/photo-1448375240586-882707db888b?w=1080&q=80' }
+    ],
+    history: [
+      { title: 'Antik Kitap & El Yazması', thumb: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?w=300&q=80', url: 'https://images.unsplash.com/photo-1461360370896-922624d12aa1?w=1080&q=80' },
+      { title: 'Klasik Saat & Zaman', thumb: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=300&q=80', url: 'https://images.unsplash.com/photo-1509042239860-f550ce710b93?w=1080&q=80' },
+      { title: 'Tarihi Arşiv', thumb: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=300&q=80', url: 'https://images.unsplash.com/photo-1481627834876-b7833e8f5570?w=1080&q=80' }
+    ],
+    business: [
+      { title: 'Finansal Grafik & Analiz', thumb: 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=300&q=80', url: 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1080&q=80' },
+      { title: 'Modern Ofis', thumb: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=300&q=80', url: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1080&q=80' }
+    ]
+  };
+  readonly currentCategoryImages = computed(() => this.stockImagesLibrary[this.selectedStockCategory()] || []);
 
   // Toplu Kesim & Trim Aracı Durumu
   readonly showCutAdjustModal = signal<boolean>(false);
@@ -3326,6 +3649,21 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.showRestoreDropdown.set(false);
   }
 
+  resetCutAdjustOffsets(): void {
+    this.cutStartOffsetMs.set(0);
+    this.cutEndOffsetMs.set(0);
+  }
+
+  onCutStartInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    this.cutStartOffsetMs.set(isNaN(val) ? 0 : Math.round(val));
+  }
+
+  onCutEndInput(event: Event): void {
+    const val = (event.target as HTMLInputElement).valueAsNumber;
+    this.cutEndOffsetMs.set(isNaN(val) ? 0 : Math.round(val));
+  }
+
   getTargetCutsCount(): number {
     const scope = this.cutAdjustScope();
     if (scope === 'short') return this.shortCuts().length;
@@ -3380,6 +3718,83 @@ export class EditorComponent implements OnInit, OnDestroy {
         console.error('Toplu kesim ayarlama hatası:', err);
         this.cutAdjustLoading.set(false);
         alert('Kesimler güncellenirken bir hata oluştu.');
+      }
+    });
+  }
+
+  cyclePlaybackSpeed(): void {
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    const current = this.playbackSpeed();
+    const idx = speeds.indexOf(current);
+    const next = idx === -1 || idx === speeds.length - 1 ? speeds[0] : speeds[idx + 1];
+    this.setPlaybackSpeed(next);
+  }
+
+  setPlaybackSpeed(speed: number): void {
+    this.playbackSpeed.set(speed);
+    const v = this.videoRef?.nativeElement;
+    if (v) {
+      v.playbackRate = speed;
+    }
+  }
+
+  resetColorGrading(): void {
+    this.videoBrightness.set(100);
+    this.videoContrast.set(100);
+    this.videoSaturation.set(100);
+    this.videoTemperature.set(0);
+  }
+
+  applyColorPreset(preset: 'default' | 'vibrant' | 'cinematic' | 'cool' | 'bw'): void {
+    switch (preset) {
+      case 'default':
+        this.resetColorGrading();
+        break;
+      case 'vibrant':
+        this.videoBrightness.set(105);
+        this.videoContrast.set(115);
+        this.videoSaturation.set(130);
+        this.videoTemperature.set(0);
+        break;
+      case 'cinematic':
+        this.videoBrightness.set(95);
+        this.videoContrast.set(115);
+        this.videoSaturation.set(90);
+        this.videoTemperature.set(8);
+        break;
+      case 'cool':
+        this.videoBrightness.set(100);
+        this.videoContrast.set(105);
+        this.videoSaturation.set(90);
+        this.videoTemperature.set(-12);
+        break;
+      case 'bw':
+        this.videoBrightness.set(100);
+        this.videoContrast.set(120);
+        this.videoSaturation.set(0);
+        this.videoTemperature.set(0);
+        break;
+    }
+  }
+
+  saveColorGrading(): void {
+    const cg: ColorGradingConfig = {
+      brightness: this.videoBrightness(),
+      contrast: this.videoContrast(),
+      saturation: this.videoSaturation(),
+      temperature: this.videoTemperature()
+    };
+    this.edlService.patchEdl(this.projectId, {
+      settings: {
+        colorGrading: cg
+      }
+    }).subscribe({
+      next: () => {
+        this.showColorModal.set(false);
+      },
+      error: (err) => {
+        console.error('Renk ayarları kaydedilemedi:', err);
+        this.showColorModal.set(false);
       }
     });
   }
@@ -3511,6 +3926,13 @@ export class EditorComponent implements OnInit, OnDestroy {
         }
         if (res.edl.settings?.backgroundMusic) {
           this.initBgmFromSettings(res.edl.settings.backgroundMusic);
+        }
+        if (res.edl.settings?.colorGrading) {
+          const cg = res.edl.settings.colorGrading;
+          if (cg.brightness !== undefined) this.videoBrightness.set(cg.brightness);
+          if (cg.contrast !== undefined) this.videoContrast.set(cg.contrast);
+          if (cg.saturation !== undefined) this.videoSaturation.set(cg.saturation);
+          if (cg.temperature !== undefined) this.videoTemperature.set(cg.temperature);
         }
         if (res.edl.duration && res.edl.duration > 5) {
           this.totalDuration.set(res.edl.duration);

@@ -122,6 +122,13 @@ export interface BackgroundMusicConfig {
   loop: boolean;
 }
 
+export interface ColorGradingConfig {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+  temperature: number;
+}
+
 export interface EdlSettings {
   targetFormat?: string;
   templateId?: string;
@@ -131,6 +138,7 @@ export interface EdlSettings {
   subtitlesEnabled?: boolean;
   subtitleStyle?: SubtitleStyleConfig;
   backgroundMusic?: BackgroundMusicConfig;
+  colorGrading?: ColorGradingConfig;
 }
 
 export interface EdlTemplate {
