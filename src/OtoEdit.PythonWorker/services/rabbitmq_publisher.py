@@ -1,3 +1,4 @@
+import threading
 import json
 try:
     import importlib
@@ -17,6 +18,7 @@ class RabbitMQPublisher:
     def __init__(self):
         self._connection = None
         self._channel = None
+        self._lock = threading.Lock()
 
     def _get_connection(self):
         credentials = pika.PlainCredentials(Config.RABBITMQ_USERNAME, Config.RABBITMQ_PASSWORD)
@@ -39,33 +41,34 @@ class RabbitMQPublisher:
         return self._channel
 
     def publish(self, exchange_name: str, message_dict: dict):
-        """Verilen exchange üzerine raw JSON mesajı yayınlar."""
-        try:
-            channel = self._get_channel()
-            exchanges = [exchange_name]
-            if not exchange_name.startswith("OtoEdit.Business.Events:"):
-                exchanges.append(f"OtoEdit.Business.Events:{exchange_name}")
+        """Verilen exchange üzerine raw JSON mesajı yayınlar (Thread-safe)."""
+        with self._lock:
+            try:
+                channel = self._get_channel()
+                exchanges = [exchange_name]
+                if not exchange_name.startswith("OtoEdit.Business.Events:"):
+                    exchanges.append(f"OtoEdit.Business.Events:{exchange_name}")
 
-            body = json.dumps(message_dict, ensure_ascii=False).encode('utf-8')
-            properties = pika.BasicProperties(
-                content_type='application/json',
-                delivery_mode=2  # Persistent mesaj
-            )
-
-            for ex in exchanges:
-                channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
-                channel.basic_publish(
-                    exchange=ex,
-                    routing_key='',
-                    body=body,
-                    properties=properties
+                body = json.dumps(message_dict, ensure_ascii=False).encode('utf-8')
+                properties = pika.BasicProperties(
+                    content_type='application/json',
+                    delivery_mode=2  # Persistent mesaj
                 )
-                logger.info(f"RabbitMQ event yayınlandı: exchange={ex}")
-        except Exception as e:
-            logger.error(f"RabbitMQ yayın hatası (exchange={exchange_name}): {e}", exc_info=True)
-            # Bağlantıyı sıfırla ki bir sonraki istekte yeniden denesin
-            self._close()
-            raise
+
+                for ex in exchanges:
+                    channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
+                    channel.basic_publish(
+                        exchange=ex,
+                        routing_key='',
+                        body=body,
+                        properties=properties
+                    )
+                    logger.info(f"RabbitMQ event yayınlandı: exchange={ex}")
+            except Exception as e:
+                logger.error(f"RabbitMQ yayın hatası (exchange={exchange_name}): {e}", exc_info=True)
+                # Bağlantıyı sıfırla ki bir sonraki istekte yeniden denesin
+                self._close()
+                raise
 
     def publish_stage_changed(self, project_id: str, video_id: str, asama: str, yuzde: int, mesaj: str = ""):
         """Pipeline aşama ilerleme bildirimini .NET'e gönderir."""

@@ -5,6 +5,9 @@ export interface CutItem {
   reason?: string;
   source?: string;
   command?: string;
+  /** Jump-Cut ince ayarı uygulanmadan önceki orijinal (AI) sınırlar */
+  origStart?: number;
+  origEnd?: number;
 }
 
 export interface OverlayItem {

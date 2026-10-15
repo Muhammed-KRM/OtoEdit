@@ -11,6 +11,8 @@ using OtoEdit.Data;
 using OtoEdit.Data.Context;
 using Microsoft.EntityFrameworkCore;
 
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Kök dizinde .env dosyası varsa ortam değişkenlerini yükle

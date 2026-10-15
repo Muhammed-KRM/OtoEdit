@@ -38,9 +38,9 @@ def test_take_aligner_exact_restart():
     assert len(cuts) >= 1
 
     first_cut = cuts[0]
-    # İlk take (70.0) kesilmeli, son take (78.5) korunmalı
+    # İlk take (70.0 - 73.5) kesilmeli (yalnızca elenen kelimeler!), aradaki 5 saniye duraklama JumpCut'a bırakılmalı
     assert 69.9 <= first_cut.start <= 70.1
-    assert 78.4 <= first_cut.end <= 78.6
+    assert 73.4 <= first_cut.end <= 73.6
     assert first_cut.reason == "smart_retake"
 
 
@@ -75,8 +75,8 @@ def test_take_aligner_outtake_and_false_start():
     # Hem restart hem outtake yakalanmalı
     reasons = [c.reason for c in cuts]
     assert "smart_retake" in reasons
-    # 10.0 - 14.6 aralığı kesilmeli
-    assert any(c.start <= 10.1 and c.end >= 14.5 for c in cuts)
+    # 10.0 - 11.6 aralığı (elenen kelimeler) kesilmeli
+    assert any(c.start <= 10.1 and 11.5 <= c.end <= 11.7 for c in cuts)
     # 20.0 - 20.9 aralığı (başa sar) kesilmeli
     assert any(c.start <= 20.1 and c.end >= 20.8 for c in cuts)
 

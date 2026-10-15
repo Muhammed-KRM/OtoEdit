@@ -91,10 +91,12 @@ class RetakeDetector:
             c_start = rc.start
             c_end = rc.end
 
-            # Kenarları lokal RMS enerji minimumuna oturt
+            # Kenarları lokal RMS enerji minimumuna oturt.
+            # Retake artık yalnızca elenen kelimeleri kapsadığı için kenarlar DIŞARI doğru
+            # (sessizliğe) yaslanır: başlangıç geriye, bitiş ileriye.
             if analysis is not None:
-                c_start = analysis.find_energy_minimum(c_start, search_window_sec=0.05, direction="forward_only")
-                c_end = analysis.find_energy_minimum(c_end, search_window_sec=0.05, direction="backward_only")
+                c_start = analysis.find_energy_minimum(c_start, search_window_sec=0.025, direction="backward_only")
+                c_end = analysis.find_energy_minimum(c_end, search_window_sec=0.025, direction="forward_only")
 
             if (c_end - c_start) >= 0.15:
                 cut_items.append(CutItem(

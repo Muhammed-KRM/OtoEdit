@@ -70,7 +70,8 @@ class TakeAligner:
         r'\baltyazı\s*m\.?k\.?\b',
         r'\babone\s*ol\b',
         r'\bbeğenmeyi\s*unutmayın\b',
-        r'\bmısır,?\s*diber,?\s*çay\b'
+        r'\bmısır,?\s*diber,?\s*çay\b',
+        r'^\s*mk\s*$'  # Tek başına "M.K." (Whisper Türkçe sessizlik halüsinasyonu)
     ]
 
     def __init__(
@@ -314,17 +315,32 @@ class TakeAligner:
                 # Kesim: L'deki eşleşmenin ilk kelimesinden, R'nin başlangıcına kadar
                 # (R'nin başındaki bağlaç da korunur)
                 cut_start = match_start_word.start
-                cut_end = r_chunk.words[0].start
-                cut_duration = cut_end - cut_start
+                r_start = r_chunk.words[0].start
 
-                if 0.20 <= cut_duration <= self.max_cut_duration:
+                if 0.20 <= (r_start - cut_start) <= self.max_cut_duration:
                     # Bu aralıktaki kelimeleri topla
                     removed_w = [
                         w for w in words
-                        if w.start >= cut_start - 0.05 and w.end <= cut_end + 0.05 and w.index not in cut_word_indices
+                        if w.start >= cut_start - 0.05 and w.end <= r_start + 0.05 and w.index not in cut_word_indices
                     ]
-                    
-                    if removed_w:
+
+                    # Retake yalnızca elenen kelimeleri kapsar; son elenen kelime ile R arasındaki
+                    # duraklama Jump-Cut motoruna (silence) bırakılır. Böylece retake geri alınırsa
+                    # sessizlik kesik kalır ve retake bloğu gereksiz yere şişmez.
+                    cut_end = min(r_start, max(rw.end for rw in removed_w) + 0.02) if removed_w else r_start
+
+                    # Whisper örtüşen damga üretebilir: önceki TUTULAN kelimenin kuyruğu kesimin içine
+                    # taşıyorsa, kesimi o kelime bittikten sonra başlat (kelime sonu yutulmasın)
+                    overlapping_kept_end = max(
+                        (w.end for w in words
+                         if w.start < cut_start - 0.05 and w.end > cut_start and w.index not in cut_word_indices),
+                        default=None
+                    )
+                    if overlapping_kept_end is not None:
+                        cut_start = overlapping_kept_end + 0.01
+                    cut_duration = cut_end - cut_start
+
+                    if removed_w and cut_duration >= 0.10:
                         for rw in removed_w:
                             cut_word_indices.add(rw.index)
 
@@ -354,17 +370,22 @@ class TakeAligner:
 
             gap = next_c.start - cur_c.end
             if len(cur_c.words) <= 3 and gap >= 2.0:
-                # cur_c kelimelerinden biri next_c'de tekrar ediyor mu?
-                first_cur = self.normalize_word(cur_c.words[0].word)
-                first_next = self.normalize_word(next_c.words[0].word)
+                # Cümle sonu noktalamasıyla biten öbek tamamlanmış bir cümledir, yarım başlangıç değildir
+                # (örn. '... hesap bilmezlikten [duraklama] kaynaklanır.')
+                if cur_c.words[-1].word.strip().endswith(('.', '!', '?', '…')):
+                    continue
 
-                is_repeat = (first_cur == first_next) or (
-                    len(next_c.words) > 1 and first_cur == self.normalize_word(next_c.words[1].word)
+                # Yalnızca gerçekten yeniden başlanmışsa kes: cur_c'nin ilk kelimesi next_c'nin
+                # ilk/ikinci kelimesiyle eşleşmeli. Tek kelime + uzun duraklama tek başına yeterli
+                # DEĞİLDİR; konuşmacı cümle ortasında düşünmek için durabilir ('esasa ... ulaşılamaz.').
+                first_cur = cur_c.words[0].word
+                is_repeat = self.is_word_match(first_cur, next_c.words[0].word) or (
+                    len(next_c.words) > 1 and self.is_word_match(first_cur, next_c.words[1].word)
                 )
 
-                if is_repeat or len(cur_c.words) == 1:
+                if is_repeat:
                     cut_start = cur_c.start
-                    cut_end = next_c.start
+                    cut_end = min(next_c.start, cur_c.end + 0.02)
                     for rw in cur_c.words:
                         cut_word_indices.add(rw.index)
                     cuts.append(RetakeCut(

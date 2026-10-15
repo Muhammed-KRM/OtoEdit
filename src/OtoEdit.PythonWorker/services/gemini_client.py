@@ -82,7 +82,9 @@ class GeminiClient:
                     delay *= 2.0
                 else:
                     logger.error(f"Gemini API tüm denemeler ({max_retries}) tükendi: {ex}")
-        return None
+    def generate_text(self, prompt: str, max_retries: int = 3) -> Optional[str]:
+        """Genel metin/prompt üretimi için Gemini veya Antigravity Proxy'yi çağırır."""
+        return self._execute_with_retry(prompt, max_retries=max_retries)
 
     def find_viral_clips(self, transcript_text: str, duration: float) -> List[Dict[str, Any]]:
         """Transkriptten en viral 30sn (Reels) ve 90sn (Shorts) bölümleri çıkarır."""

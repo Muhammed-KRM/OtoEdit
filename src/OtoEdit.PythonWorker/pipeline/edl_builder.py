@@ -92,6 +92,13 @@ class EdlBuilder:
         # Cuts listesini kronolojik sırala ve çakışanları düzelt
         sorted_cuts = self._merge_overlapping_cuts(cuts)
 
+        # Editör kesimleri id ile güncellediği/sildiği için id'ler benzersiz olmalı
+        seen_ids = set()
+        for i, c in enumerate(sorted_cuts):
+            if not c.id or c.id in seen_ids:
+                c.id = f"{c.id or 'cut'}_{i}"
+            seen_ids.add(c.id)
+
         # 2. Transkripti JSON-friendly yapıya çevir
         transcript_dict = {
             "fullText": transcript.full_text,
@@ -143,37 +150,64 @@ class EdlBuilder:
         """
         Zaman aralıkları çakışan kesimleri birleştirir.
         ÖNEMLİ KURAL: Yalnızca aynı türe sahip kesimler (silence ile silence, smart_retake ile smart_retake)
-        birleştirilir. Farklı türler (retake ve sessizlik) bitişik olsa bile birleştirilmez.
-        Böylece editörde bir retake geri alındığında yanındaki sessizlik kesimi geri gelmez.
+        birleştirilir. Farklı türler asla tek bloğa kaynaştırılmaz:
+        sessizlik (silence) kesimleri, retake / komut gibi öncelikli kesimlerin aralıklarından
+        ÇIKARILIR (kırpılır veya bölünür). Böylece editörde bir retake geri alındığında
+        yanındaki sessizlik kesimi kesik kalmaya devam eder ve retake bloğu sessizliği yutmaz.
         """
         if not cuts:
             return []
 
-        sorted_cuts = sorted(cuts, key=lambda c: (c.start, 0 if c.reason == "smart_retake" else 1))
-        merged: List[CutItem] = [sorted_cuts[0]]
-
-        for current in sorted_cuts[1:]:
-            prev = merged[-1]
-
-            if current.reason == prev.reason:
-                # Aynı sebep: Hem çakışan hem bitişik kesimleri birleştir
-                if current.start <= prev.end:
-                    prev.end = max(prev.end, current.end)
-                    if current.command and current.command not in (prev.command or ""):
-                        prev.command = f"{prev.command} | {current.command}" if prev.command else current.command
+        def merge_same_reason(items: List[CutItem]) -> List[CutItem]:
+            out: List[CutItem] = []
+            for cur in sorted(items, key=lambda c: c.start):
+                if out and cur.reason == out[-1].reason and cur.start <= out[-1].end:
+                    prev = out[-1]
+                    prev.end = max(prev.end, cur.end)
+                    if cur.command and cur.command not in (prev.command or ""):
+                        prev.command = f"{prev.command} | {cur.command}" if prev.command else cur.command
                 else:
-                    merged.append(current)
-            else:
-                # Farklı sebep (örn. silence ve smart_retake):
-                # Yalnızca gerçekten çakışıyorlarsa (strict overlap, start < prev.end) birleştir.
-                # Yalnızca bitişiklerse (start == prev.end), ayrı CutItem olarak tut ki
-                # editörde kullanıcı retake'i geri aldığında yanındaki sessizlik de geri gelmesin!
-                if current.start < prev.end:
-                    prev.end = max(prev.end, current.end)
-                    prev.reason = f"{prev.reason}+{current.reason}"
-                    if current.command and current.command not in (prev.command or ""):
-                        prev.command = f"{prev.command} | {current.command}" if prev.command else current.command
-                else:
-                    merged.append(current)
+                    out.append(cur)
+            return out
 
-        return merged
+        silence = [c for c in cuts if (c.reason or "") == "silence"]
+        priority = [c for c in cuts if (c.reason or "") != "silence"]
+
+        # Öncelikli kesimleri kendi türleri içinde birleştir
+        by_reason: Dict[str, List[CutItem]] = {}
+        for c in priority:
+            by_reason.setdefault(c.reason or "", []).append(c)
+        merged_priority: List[CutItem] = []
+        for items in by_reason.values():
+            merged_priority.extend(merge_same_reason(items))
+
+        blockers = sorted((c.start, c.end) for c in merged_priority)
+
+        # Sessizlikleri öncelikli kesimlerden çıkar
+        clipped_silence: List[CutItem] = []
+        for s in merge_same_reason(silence):
+            pieces = [(s.start, s.end)]
+            for b_start, b_end in blockers:
+                if b_end <= s.start or b_start >= s.end:
+                    continue
+                next_pieces = []
+                for p_start, p_end in pieces:
+                    if b_end <= p_start or b_start >= p_end:
+                        next_pieces.append((p_start, p_end))
+                        continue
+                    if b_start - p_start >= 0.05:
+                        next_pieces.append((p_start, b_start))
+                    if p_end - b_end >= 0.05:
+                        next_pieces.append((b_end, p_end))
+                pieces = next_pieces
+            for k, (p_start, p_end) in enumerate(pieces):
+                clipped_silence.append(CutItem(
+                    id=s.id if k == 0 else f"{s.id}_{k}",
+                    start=round(p_start, 3),
+                    end=round(p_end, 3),
+                    reason=s.reason,
+                    source=getattr(s, "source", "auto"),
+                    command=getattr(s, "command", None)
+                ))
+
+        return sorted(merged_priority + clipped_silence, key=lambda c: c.start)

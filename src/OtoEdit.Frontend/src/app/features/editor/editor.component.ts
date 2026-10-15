@@ -1234,6 +1234,66 @@ export interface ContextMenuState {
               <span>🔄</span>
               <span>{{ retakeCount() }} Retake'i Geri Al</span>
             </button>
+
+            <!-- Toplu Kesim İnce Ayar (Milisaniye Trim) Butonu -->
+            <button 
+              *ngIf="autoCuts().length > 0"
+              (click)="openCutAdjustModal()" 
+              class="px-2.5 py-1 rounded bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 border border-indigo-500/40 font-semibold text-xs shadow-glow-sm flex items-center gap-1.5 transition-all cursor-pointer" 
+              title="Tüm Otomatik Kesimlerin Başlangıç ve Bitiş Sürelerini Milisaniye Bazında Kaydır / Genişlet">
+              <span>⏱️</span>
+              <span>Kesim Payı Ayarla</span>
+            </button>
+
+            <!-- Kesimleri Geri Al Dropdown Menüsü -->
+            <div class="relative inline-block" *ngIf="autoCuts().length > 0">
+              <button 
+                type="button"
+                (click)="showRestoreDropdown.set(!showRestoreDropdown())" 
+                class="px-2.5 py-1 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/40 font-semibold text-xs shadow-glow-sm flex items-center gap-1.5 transition-all cursor-pointer" 
+                title="Otomatik Kesimleri Kategoriye Göre Geri Al">
+                <span>✂️↶</span>
+                <span>Kesimleri Geri Al</span>
+                <span class="text-[9px] px-1 py-0.2 bg-rose-950/80 rounded-full font-mono text-rose-200 border border-rose-800/50">{{ autoCuts().length }}</span>
+                <span class="text-[8px] opacity-70">▼</span>
+              </button>
+              
+              <!-- Dropdown Panel -->
+              <div *ngIf="showRestoreDropdown()" (click)="$event.stopPropagation()" class="absolute left-0 top-full mt-1.5 w-64 bg-dark-900/98 backdrop-blur-xl border border-slate-700 rounded-xl shadow-2xl z-50 p-1.5 space-y-1 text-xs animate-in fade-in zoom-in-95 duration-100">
+                <div class="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider border-b border-slate-800 flex items-center justify-between">
+                  <span>Geri Alma Seçenekleri</span>
+                  <button type="button" (click)="showRestoreDropdown.set(false)" class="text-slate-500 hover:text-white">✕</button>
+                </div>
+                <button 
+                  type="button"
+                  (click)="restoreCutsByScope('short'); showRestoreDropdown.set(false)" 
+                  class="w-full text-left px-2.5 py-2 rounded-lg hover:bg-rose-500/20 text-slate-200 hover:text-rose-200 flex items-center justify-between transition-colors cursor-pointer group">
+                  <div class="flex flex-col">
+                    <span class="font-medium group-hover:text-rose-300">💨 Sadece Kısaları Geri Al</span>
+                    <span class="text-[10px] text-slate-400">1 saniyeden kısa nefes kesimleri</span>
+                  </div>
+                  <span class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-amber-300 border border-slate-700">{{ shortCuts().length }}</span>
+                </button>
+                <button 
+                  type="button"
+                  (click)="restoreCutsByScope('long'); showRestoreDropdown.set(false)" 
+                  class="w-full text-left px-2.5 py-2 rounded-lg hover:bg-rose-500/20 text-slate-200 hover:text-rose-200 flex items-center justify-between transition-colors cursor-pointer group">
+                  <div class="flex flex-col">
+                    <span class="font-medium group-hover:text-rose-300">⏳ Sadece Uzunları Geri Al</span>
+                    <span class="text-[10px] text-slate-400">1 saniyeden uzun duraklamalar</span>
+                  </div>
+                  <span class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-sky-300 border border-slate-700">{{ longCuts().length }}</span>
+                </button>
+                <div class="h-px bg-slate-800 my-1"></div>
+                <button 
+                  type="button"
+                  (click)="restoreCutsByScope('all'); showRestoreDropdown.set(false)" 
+                  class="w-full text-left px-2.5 py-2 rounded-lg hover:bg-rose-600/30 text-rose-300 hover:text-rose-100 flex items-center justify-between transition-colors cursor-pointer">
+                  <span class="font-bold">🚫 Tüm Kesimleri Geri Al</span>
+                  <span class="px-1.5 py-0.5 rounded bg-rose-950 text-[10px] font-mono text-rose-300 border border-rose-800">{{ autoCuts().length }}</span>
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Orta: Görünüm Filtreleri -->
@@ -2041,6 +2101,162 @@ export interface ContextMenuState {
 
         </div>
       </div>
+
+      <!-- TOPLU KESİM İNCE AYAR (MİLİSANİYE TRİM) MODALI -->
+      <div 
+        *ngIf="showCutAdjustModal()" 
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+        (click)="showCutAdjustModal.set(false)">
+        <div 
+          class="bg-dark-900 border border-indigo-500/40 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col"
+          (click)="$event.stopPropagation()">
+          
+          <!-- Modal Başlığı -->
+          <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-dark-950/80">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-indigo-600/20 text-indigo-400 flex items-center justify-center text-lg border border-indigo-500/30">
+                ⏱️
+              </span>
+              <div>
+                <h3 class="text-base font-bold text-white tracking-wide">Toplu Kesim İnce Ayar (Milisaniye Trim)</h3>
+                <p class="text-xs text-slate-400">Kelimelerin erken kesilmesini önlemek ve nefes aralıklarını kusursuz hizalamak için sınırları kaydırın</p>
+              </div>
+            </div>
+            <button 
+              type="button"
+              (click)="showCutAdjustModal.set(false)"
+              class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-sm cursor-pointer">
+              ✕
+            </button>
+          </div>
+
+          <!-- Modal İçeriği -->
+          <div class="p-6 space-y-5">
+            <!-- 1. Kapsam Seçimi -->
+            <div>
+              <label class="text-xs font-semibold text-slate-300 block mb-2">1. Hangi Kesimler Güncellensin?</label>
+              <div class="grid grid-cols-3 gap-2">
+                <button 
+                  type="button"
+                  (click)="cutAdjustScope.set('short')"
+                  [ngClass]="cutAdjustScope() === 'short' ? 'bg-indigo-600 text-white border-indigo-400 shadow-glow-sm' : 'bg-dark-800 text-slate-400 border-slate-700 hover:text-slate-200'"
+                  class="p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1">
+                  <span class="text-xs font-bold">💨 Kısa Kesimler</span>
+                  <span class="text-[10px] opacity-80">&lt; 1.0s ({{ shortCuts().length }} adet)</span>
+                </button>
+                <button 
+                  type="button"
+                  (click)="cutAdjustScope.set('long')"
+                  [ngClass]="cutAdjustScope() === 'long' ? 'bg-indigo-600 text-white border-indigo-400 shadow-glow-sm' : 'bg-dark-800 text-slate-400 border-slate-700 hover:text-slate-200'"
+                  class="p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1">
+                  <span class="text-xs font-bold">⏳ Uzun Kesimler</span>
+                  <span class="text-[10px] opacity-80">&gt;= 1.0s ({{ longCuts().length }} adet)</span>
+                </button>
+                <button 
+                  type="button"
+                  (click)="cutAdjustScope.set('all')"
+                  [ngClass]="cutAdjustScope() === 'all' ? 'bg-indigo-600 text-white border-indigo-400 shadow-glow-sm' : 'bg-dark-800 text-slate-400 border-slate-700 hover:text-slate-200'"
+                  class="p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center gap-1">
+                  <span class="text-xs font-bold">⚡ Tüm Kesimler</span>
+                  <span class="text-[10px] opacity-80">Hepsi ({{ autoCuts().length }} adet)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 2. Kesim Başlangıç Kaydırma (Start Offset) -->
+            <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="text-xs font-bold text-white block">Kesim Başlangıç Noktası (Önceki Kelime Payı)</span>
+                  <span class="text-[11px] text-slate-400 block">Pozitif (+) değer kesimi ileri iter; önceki kelimeye daha fazla nefes/sönümlenme payı bırakır.</span>
+                </div>
+                <span class="px-2 py-1 rounded bg-indigo-500/20 text-indigo-300 font-mono text-xs font-bold border border-indigo-500/30 shrink-0">
+                  {{ cutStartOffsetMs() > 0 ? '+' : '' }}{{ cutStartOffsetMs() }} ms
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <button type="button" *ngFor="let val of [-100, -50, 0, 50, 80, 100, 150, 200]" 
+                  (click)="cutStartOffsetMs.set(val)" 
+                  [ngClass]="cutStartOffsetMs() === val ? 'bg-indigo-600 text-white border-indigo-400' : 'bg-dark-800 text-slate-300 border-slate-700 hover:bg-slate-700'"
+                  class="px-2 py-1 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer">
+                  {{ val > 0 ? '+' : '' }}{{ val }}ms
+                </button>
+              </div>
+              <input 
+                type="range" 
+                min="-200" 
+                max="400" 
+                step="10" 
+                [value]="cutStartOffsetMs()" 
+                (input)="cutStartOffsetMs.set($any($event.target).valueAsNumber)"
+                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-500" />
+            </div>
+
+            <!-- 3. Kesim Bitiş Kaydırma (End Offset) -->
+            <div class="p-3.5 rounded-xl bg-dark-950/60 border border-slate-800 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="text-xs font-bold text-white block">Kesim Bitiş Noktası (Sonraki Kelime Payı)</span>
+                  <span class="text-[11px] text-slate-400 block">Negatif (-) değer kesimi erken bitirir; sonraki kelimenin başlangıç harfini/atağını korur.</span>
+                </div>
+                <span class="px-2 py-1 rounded bg-emerald-500/20 text-emerald-300 font-mono text-xs font-bold border border-emerald-500/30 shrink-0">
+                  {{ cutEndOffsetMs() > 0 ? '+' : '' }}{{ cutEndOffsetMs() }} ms
+                </span>
+              </div>
+              <div class="flex items-center gap-1.5 flex-wrap">
+                <button type="button" *ngFor="let val of [-200, -150, -100, -80, -50, 0, 50, 100]" 
+                  (click)="cutEndOffsetMs.set(val)" 
+                  [ngClass]="cutEndOffsetMs() === val ? 'bg-emerald-600 text-white border-emerald-400' : 'bg-dark-800 text-slate-300 border-slate-700 hover:bg-slate-700'"
+                  class="px-2 py-1 rounded text-[11px] font-mono font-semibold border transition-colors cursor-pointer">
+                  {{ val > 0 ? '+' : '' }}{{ val }}ms
+                </button>
+              </div>
+              <input 
+                type="range" 
+                min="-400" 
+                max="200" 
+                step="10" 
+                [value]="cutEndOffsetMs()" 
+                (input)="cutEndOffsetMs.set($any($event.target).valueAsNumber)"
+                class="w-full h-1.5 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-emerald-500" />
+            </div>
+
+            <!-- Hızlı Tavsiye Butonları (Presets) -->
+            <div class="flex items-center justify-between p-2.5 rounded-lg bg-indigo-950/30 border border-indigo-900/50 text-[11px]">
+              <span class="text-indigo-300 font-medium">💡 Hızlı Öneri: Kelime sonu erken kesiliyorsa</span>
+              <button 
+                type="button"
+                (click)="cutStartOffsetMs.set(100); cutEndOffsetMs.set(-60)"
+                class="px-2.5 py-1 rounded bg-indigo-600/40 hover:bg-indigo-600 text-indigo-100 font-bold transition-colors cursor-pointer border border-indigo-400/40">
+                +100ms Baş / -60ms Son Ayarla
+              </button>
+            </div>
+          </div>
+
+          <!-- Modal Altı Butonlar -->
+          <div class="px-6 py-3.5 border-t border-slate-800 bg-dark-950/80 flex items-center justify-between">
+            <span class="text-xs text-slate-400 font-medium">
+              Uygulanacak: <strong class="text-white">{{ getTargetCutsCount() }}</strong> kesim
+            </span>
+            <div class="flex items-center gap-2">
+              <button 
+                type="button"
+                (click)="showCutAdjustModal.set(false)"
+                class="px-4 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-colors cursor-pointer">
+                Vazgeç
+              </button>
+              <button 
+                type="button"
+                [disabled]="cutAdjustLoading()"
+                (click)="applyBatchCutAdjustment()"
+                class="px-5 py-2 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white text-xs font-bold transition-all shadow-glow-sm cursor-pointer disabled:opacity-50">
+                {{ cutAdjustLoading() ? 'Uygulanıyor...' : 'Değişiklikleri Uygula' }}
+              </button>
+            </div>
+          </div>
+
+        </div>
+      </div>
     </main>
   `
 })
@@ -2338,6 +2554,32 @@ export class EditorComponent implements OnInit, OnDestroy {
       const r = (c.reason || '').toLowerCase();
       return r.includes('retake') || r.includes('tekrar');
     }).length;
+  });
+
+  // Toplu Kesim & Trim Aracı Durumu
+  readonly showCutAdjustModal = signal<boolean>(false);
+  readonly showRestoreDropdown = signal<boolean>(false);
+  readonly cutAdjustScope = signal<'all' | 'short' | 'long'>('short');
+  readonly cutStartOffsetMs = signal<number>(80);
+  readonly cutEndOffsetMs = signal<number>(-50);
+  readonly cutAdjustLoading = signal<boolean>(false);
+
+  readonly autoCuts = computed(() => {
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return [];
+    return edl.cuts.filter(c => {
+      const src = (c.source || 'auto').toLowerCase();
+      const r = (c.reason || '').toLowerCase();
+      return src === 'auto' || r.includes('silence') || r.includes('retake') || r.includes('jump');
+    });
+  });
+
+  readonly shortCuts = computed(() => {
+    return this.autoCuts().filter(c => (c.end - c.start) < 1.0);
+  });
+
+  readonly longCuts = computed(() => {
+    return this.autoCuts().filter(c => (c.end - c.start) >= 1.0);
   });
 
   readonly timelineZoom = signal<number>(1);
@@ -3075,6 +3317,97 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.edlService.patchEdl(this.projectId, { cuts: patchPayload as any }).subscribe({
         next: () => this.loadEdl(),
         error: (err) => console.error('Retake kesimleri kaldırılamadı:', err)
+      });
+    }
+  }
+
+  openCutAdjustModal(): void {
+    this.showCutAdjustModal.set(true);
+    this.showRestoreDropdown.set(false);
+  }
+
+  getTargetCutsCount(): number {
+    const scope = this.cutAdjustScope();
+    if (scope === 'short') return this.shortCuts().length;
+    if (scope === 'long') return this.longCuts().length;
+    return this.autoCuts().length;
+  }
+
+  applyBatchCutAdjustment(): void {
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return;
+
+    const scope = this.cutAdjustScope();
+    let targetCuts = this.autoCuts();
+    if (scope === 'short') {
+      targetCuts = this.shortCuts();
+    } else if (scope === 'long') {
+      targetCuts = this.longCuts();
+    }
+
+    if (targetCuts.length === 0) {
+      alert('Seçilen kapsamda kesim bulunamadı.');
+      return;
+    }
+
+    const startShiftSec = this.cutStartOffsetMs() / 1000.0;
+    const endShiftSec = this.cutEndOffsetMs() / 1000.0;
+    const videoDuration = this.totalDuration() || 999999;
+
+    this.cutAdjustLoading.set(true);
+
+    const patchPayload: Array<{ id: string; start: number; end: number; action?: string }> = [];
+
+    for (const c of targetCuts) {
+      const newStart = Math.max(0, Math.round((c.start + startShiftSec) * 1000) / 1000);
+      const newEnd = Math.min(videoDuration, Math.round((c.end + endShiftSec) * 1000) / 1000);
+
+      // Eğer yeni kesim süresi 60ms'nin altına düşerse veya başlangıç bitişi geçerse kesimi kaldır
+      if (newEnd - newStart < 0.06) {
+        patchPayload.push({ id: c.id, start: 0, end: 0, action: 'remove' });
+      } else {
+        patchPayload.push({ id: c.id, start: newStart, end: newEnd });
+      }
+    }
+
+    this.edlService.patchEdl(this.projectId, { cuts: patchPayload as any }).subscribe({
+      next: () => {
+        this.cutAdjustLoading.set(false);
+        this.showCutAdjustModal.set(false);
+        this.loadEdl();
+      },
+      error: (err) => {
+        console.error('Toplu kesim ayarlama hatası:', err);
+        this.cutAdjustLoading.set(false);
+        alert('Kesimler güncellenirken bir hata oluştu.');
+      }
+    });
+  }
+
+  restoreCutsByScope(scope: 'short' | 'long' | 'all'): void {
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return;
+
+    let targetCuts = this.autoCuts();
+    let scopeDesc = 'tüm otomatik';
+    if (scope === 'short') {
+      targetCuts = this.shortCuts();
+      scopeDesc = '1 saniyeden kısa';
+    } else if (scope === 'long') {
+      targetCuts = this.longCuts();
+      scopeDesc = '1 saniyeden uzun';
+    }
+
+    if (targetCuts.length === 0) {
+      alert(`Seçilen kategoride (${scopeDesc}) kesim bulunamadı.`);
+      return;
+    }
+
+    if (confirm(`Tespit edilen ${targetCuts.length} adet ${scopeDesc} kesim iptal edilecek ve bu sahneler videoya geri eklenecektir. Onaylıyor musunuz?`)) {
+      const patchPayload = targetCuts.map(c => ({ id: c.id, start: 0, end: 0, action: 'remove' }));
+      this.edlService.patchEdl(this.projectId, { cuts: patchPayload as any }).subscribe({
+        next: () => this.loadEdl(),
+        error: (err) => console.error('Kesimler geri alınamadı:', err)
       });
     }
   }

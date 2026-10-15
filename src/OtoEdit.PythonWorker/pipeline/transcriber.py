@@ -18,6 +18,7 @@ from pipeline.stt.base import Word
 from pipeline.stt.chunker import AudioChunker
 from pipeline.stt.engine_chain import STTEngineChain
 from pipeline.stt.gap_filler import GapFiller
+from pipeline.word_refiner import refine_word_boundaries
 from utils.logger import get_logger
 
 logger = get_logger("Transcriber")
@@ -195,131 +196,22 @@ class Transcriber:
 
         cleaned_raw.sort(key=lambda w: w.start)
 
-        # RMS zarfı yoksa veya analiz verilmemişse VAD fallback ile devam et
+        # RMS zarfı yoksa veya analiz verilmemişse ham kelimelerle devam et
         rms = getattr(analysis, "rms_envelope", None) if analysis is not None else None
         if rms is None or len(rms) == 0:
             return cleaned_raw
 
-        hop_sec = getattr(analysis, "rms_hop_ms", 10.0) / 1000.0
+        # 2. Küme kırpması + kenar koruması (tek kaynak: pipeline/word_refiner.py)
+        spans = [(float(w.start), float(w.end)) for w in cleaned_raw]
+        refined_spans = refine_word_boundaries(
+            spans, analysis, getattr(analysis, "duration", None),
+            texts=[w.word for w in cleaned_raw]
+        )
 
-        # Uyarlanabilir konuşma eşik değeri (Speech Threshold) kalibrasyonu
-        speech_rms_vals = []
-        if getattr(analysis, "speech_regions", None):
-            for reg in analysis.speech_regions:
-                s_idx = int(reg.start / hop_sec)
-                e_idx = int(reg.end / hop_sec)
-                if e_idx > s_idx:
-                    speech_rms_vals.extend(rms[s_idx:e_idx])
-        median_speech_rms = float(np.median(speech_rms_vals)) if speech_rms_vals else 0.04
-        silence_floor = float(np.percentile(rms, 10))
-        speech_thresh = max(0.012, silence_floor + 0.12 * (median_speech_rms - silence_floor))
-
-        refined: List[Word] = []
-        n_words = len(cleaned_raw)
-
-        for i, w in enumerate(cleaned_raw):
-            ws = float(w.start)
-            we = float(w.end)
-            dur = we - ws
-
-            # 0.65s altındaki kelimeler zaten tek hece/kelimedir, aşırı yayılma içermez
-            if dur <= 0.65:
-                refined.append(Word(word=w.word, start=round(ws, 3), end=round(we, 3), confidence=w.confidence))
-                continue
-
-            s_idx = max(0, int(ws / hop_sec))
-            e_idx = min(len(rms), int(we / hop_sec))
-            w_rms = rms[s_idx:e_idx]
-
-            if len(w_rms) == 0:
-                refined.append(Word(word=w.word, start=round(ws, 3), end=round(we, 3), confidence=w.confidence))
-                continue
-
-            # 1. Konuşma kümelerini çıkar (60ms sessizlik toleransı ile)
-            raw_clusters = []
-            in_c = False
-            c_s = 0
-            dip = 0
-            for idx, r in enumerate(w_rms):
-                if r >= speech_thresh:
-                    if not in_c:
-                        in_c = True
-                        c_s = idx
-                    dip = 0
-                else:
-                    if in_c:
-                        dip += 1
-                        if dip > 6:  # 60ms sessizlik kümeyi bitirir
-                            raw_clusters.append((c_s, idx - dip))
-                            in_c = False
-                            dip = 0
-            if in_c:
-                raw_clusters.append((c_s, len(w_rms) - 1))
-
-            # 2. 100ms altındaki mikro-tıkları/parazitleri filtrele
-            valid_clusters = [
-                (cs, ce) for cs, ce in raw_clusters
-                if (ce - cs) * hop_sec >= 0.10
-            ]
-            if not valid_clusters:
-                if raw_clusters:
-                    durs = [(ce - cs) for cs, ce in raw_clusters]
-                    valid_clusters = [raw_clusters[int(np.argmax(durs))]]
-                else:
-                    refined.append(Word(word=w.word, start=round(ws, 3), end=round(we, 3), confidence=w.confidence))
-                    continue
-
-            # 3. Kelime içi sessiz ünsüz patlamalarını (< 160ms) birleştir
-            merged = []
-            for cs, ce in valid_clusters:
-                if not merged:
-                    merged.append((cs, ce))
-                else:
-                    prev_cs, prev_ce = merged[-1]
-                    if (cs - prev_ce) * hop_sec < 0.16:
-                        merged[-1] = (prev_cs, ce)
-                    else:
-                        merged.append((cs, ce))
-
-            # 4. Birden çok küme varsa cümle akışına göre gerçek kelime kümesini seç
-            if len(merged) == 1:
-                best_s, best_e = merged[0]
-            else:
-                prev_end = float(cleaned_raw[i - 1].end) if i > 0 else 0.0
-                next_start = float(cleaned_raw[i + 1].start) if i < n_words - 1 else analysis.duration
-
-                dist_to_prev = abs(ws - prev_end)
-                dist_to_next = abs(next_start - we)
-
-                c0_dur = (merged[0][1] - merged[0][0]) * hop_sec
-                clast_dur = (merged[-1][1] - merged[-1][0]) * hop_sec
-
-                if dist_to_prev <= 0.15 and c0_dur >= 0.15:
-                    best_s, best_e = merged[0]
-                elif dist_to_next <= 0.15 and clast_dur >= 0.15:
-                    best_s, best_e = merged[-1]
-                elif c0_dur < 0.14 and (merged[1][0] - merged[0][1]) * hop_sec >= 0.30:
-                    best_s, best_e = merged[-1]
-                elif clast_dur < 0.22 and (merged[-1][0] - merged[-2][1]) * hop_sec >= 0.35:
-                    best_s, best_e = merged[0]
-                else:
-                    durs = [(ce - cs) * hop_sec for cs, ce in merged]
-                    best_s, best_e = merged[int(np.argmax(durs))]
-
-            new_ws = max(ws, ws + best_s * hop_sec - 0.04)
-            new_we = min(we, ws + best_e * hop_sec + 0.04)
-
-            # Güvenlik sınırı: Türkçe tek kelime fonasyonu nadiren 1.15s'yi geçer
-            if (new_we - new_ws) > 1.15:
-                new_we = new_ws + 1.15
-
-            refined.append(Word(
-                word=w.word,
-                start=round(new_ws, 3),
-                end=round(new_we, 3),
-                confidence=w.confidence
-            ))
-
+        refined: List[Word] = [
+            Word(word=w.word, start=s, end=e, confidence=w.confidence)
+            for w, (s, e) in zip(cleaned_raw, refined_spans)
+        ]
         refined.sort(key=lambda w: w.start)
         return refined
 

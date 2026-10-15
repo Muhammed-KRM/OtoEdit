@@ -63,13 +63,19 @@ public class InternalLogsController : ControllerBase
 
         try
         {
+            DateTime baslangic = dto.TimestampUtc.HasValue
+                ? (dto.TimestampUtc.Value.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(dto.TimestampUtc.Value, DateTimeKind.Utc)
+                    : dto.TimestampUtc.Value.ToUniversalTime())
+                : DateTime.UtcNow;
+
             var logEntity = new PipelineLog
             {
                 ProjectId = parsedProjectId,
                 VideoId = parsedVideoId,
                 Asama = parsedStage,
                 Durum = dto.Status ?? "InProgress",
-                BaslangicZamani = dto.TimestampUtc ?? DateTime.UtcNow,
+                BaslangicZamani = baslangic,
                 HataMesaji = dto.ErrorMessage,
                 GirdiMetadata = dto.DetailsJson,
                 CiktiMetadata = dto.Message,
