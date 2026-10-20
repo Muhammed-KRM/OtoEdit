@@ -36,8 +36,10 @@ class OverlayItem(BaseModel):
     backgroundColor: Optional[str] = "#00000080"
     timestamp: float
     duration: float = 5.0
-    animation: Optional[str] = "pop-up"  # "pop-up", "fade", "slide-left"
+    animation: Optional[str] = "pop-up"  # "pop-up", "fade", "slide-left", "bounce", "typewriter", "glitch", "blur-in", "zoom-crash"
     exitAnimation: Optional[str] = "fade"  # "fade", "pop-up", "slide-down", "slide-up", "scale-out", "none"
+    loopAnimation: Optional[str] = "none"  # "none", "pulse", "float", "wiggle", "shake", "pendulum"
+    keyframes: Optional[List[Dict[str, Any]]] = None
     position: List[str] = Field(default_factory=lambda: ["center", "bottom"])
     positionX: Optional[float] = None
     positionY: Optional[float] = None
@@ -46,23 +48,51 @@ class OverlayItem(BaseModel):
     # Tipografi & Rozet (Pillow / ASS)
     strokeColor: Optional[str] = None
     strokeWidth: Optional[float] = 0.0
+    outerStrokeColor: Optional[str] = None
+    outerStrokeWidth: Optional[float] = 0.0
+    fillType: Optional[str] = "solid"  # "solid", "gradient", "radial"
+    gradientStart: Optional[str] = None
+    gradientEnd: Optional[str] = None
+    gradientAngle: Optional[float] = 45.0
+    glowEnabled: Optional[bool] = False
+    glowColor: Optional[str] = None
+    glowRadius: Optional[float] = 0.0
     shadowColor: Optional[str] = None
     shadowBlur: Optional[float] = None
-    boxStyle: Optional[str] = "none"  # "none", "pill", "rounded", "badge"
+    shadowDistance: Optional[float] = 4.0
+    shadowAngle: Optional[float] = 90.0
+    boxStyle: Optional[str] = "none"  # "none", "pill", "rounded", "badge", "highlight-marker"
     boxBgColor: Optional[str] = None
     boxPadding: Optional[int] = 16
     borderRadius: Optional[int] = 24
     allCaps: Optional[bool] = False
     letterSpacing: Optional[float] = 0.0
-    # Görsel Düzenleme & AI Arka Plan
+    curveBend: Optional[float] = 0.0
+    rotateX: Optional[float] = 0.0
+    rotateY: Optional[float] = 0.0
+    skewX: Optional[float] = 0.0
+    skewY: Optional[float] = 0.0
+    # Görsel Düzenleme, Photoshop Katman Ayarları & AI Arka Plan
     removeBg: Optional[bool] = False
     stickerBorder: Optional[bool] = False
     stickerBorderWidth: Optional[int] = 6
     stickerBorderColor: Optional[str] = "#FFFFFF"
     rotation: Optional[float] = 0.0
-    maskShape: Optional[str] = "rect"  # "rect", "circle", "rounded"
+    maskShape: Optional[str] = "rect"  # "rect", "circle", "rounded", "star", "heart", "hexagon", "diamond"
+    maskFeather: Optional[int] = 0
     chromaKeyColor: Optional[str] = None
     chromaKeySimilarity: Optional[float] = 0.35
+    brightness: Optional[float] = 0.0
+    contrast: Optional[float] = 0.0
+    saturation: Optional[float] = 0.0
+    warmth: Optional[float] = 0.0
+    hue: Optional[float] = 0.0
+    blur: Optional[float] = 0.0
+    sharpen: Optional[float] = 0.0
+    opacity: Optional[float] = 100.0
+    flipH: Optional[bool] = False
+    flipV: Optional[bool] = False
+    dropShadow: Optional[bool] = False
 
 
 class SuggestionItem(BaseModel):
@@ -123,6 +153,15 @@ class BackgroundMusicConfig(BaseModel):
     loop: bool = True
 
 
+class ColorGradingConfig(BaseModel):
+    brightness: float = 0.0
+    contrast: float = 0.0
+    saturation: float = 0.0
+    temperature: float = 0.0
+    hue: float = 0.0
+    vignette: float = 0.0
+
+
 class EdlSettings(BaseModel):
     targetFormat: str = "16:9"
     templateId: Optional[str] = None
@@ -130,8 +169,12 @@ class EdlSettings(BaseModel):
     audioEnhancement: bool = True
     gestureCommandsEnabled: bool = True
     subtitlesEnabled: bool = True
+    smartPunchIn: bool = False
+    normalizeAudio: bool = False
+    playbackSpeed: float = 1.0
     subtitleStyle: Optional[SubtitleStyleConfig] = None
     backgroundMusic: Optional[BackgroundMusicConfig] = None
+    colorGrading: Optional[ColorGradingConfig] = None
 
 
 class EdlDocument(BaseModel):
@@ -143,7 +186,10 @@ class EdlDocument(BaseModel):
     transcript: Dict[str, Any] = Field(default_factory=dict)
     cuts: List[CutItem] = Field(default_factory=list)
     overlays: List[OverlayItem] = Field(default_factory=list)
+    transitions: List[Dict[str, Any]] = Field(default_factory=list)
+    sfxClips: List[Dict[str, Any]] = Field(default_factory=list)
     suggestions: List[SuggestionItem] = Field(default_factory=list)
+    proactiveSuggestions: List[Dict[str, Any]] = Field(default_factory=list)
     repurposing: RepurposingData = Field(default_factory=RepurposingData)
     template: Dict[str, Any] = Field(default_factory=dict)
     audioPeaks: Optional[List[float]] = None

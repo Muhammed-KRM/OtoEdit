@@ -76,18 +76,26 @@ Dialogue: 0,0:00:00.00,0:00:02.00,Default,,0,0,0,,FONT TEST
 
 def test_subtitle_sync_visual():
     print("\n--- Test: Subtitle Sync ---")
+    os.makedirs("/app/temp", exist_ok=True)
     input_vid = "/app/temp/test_sync_input.mp4"
     ass_file = "/app/temp/test_sync.ass"
     out_vid = "/app/temp/test_sync_output.mp4"
     
     print("1. 10 saniyelik sayaçlı test videosu oluşturuluyor...")
-    subprocess.run([
+    res = subprocess.run([
         "ffmpeg", "-y", "-f", "lavfi",
         "-i", "color=c=blue:s=1920x1080:d=10:r=30",
         "-vf", "drawtext=text='%{pts\\\\:hms}':fontsize=72:fontcolor=white:x=10:y=10",
         "-c:v", "libx264", "-an",
         input_vid
     ], capture_output=True)
+    if res.returncode != 0 or not os.path.isfile(input_vid):
+        subprocess.run([
+            "ffmpeg", "-y", "-f", "lavfi",
+            "-i", "color=c=blue:s=1920x1080:d=10:r=30",
+            "-c:v", "libx264", "-an",
+            input_vid
+        ], capture_output=True, check=True)
     
     print("2. ASS dosyası oluşturuluyor...")
     ass = """[Script Info]

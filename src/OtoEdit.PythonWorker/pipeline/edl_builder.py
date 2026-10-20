@@ -5,10 +5,32 @@ from models.edl_model import (
     RepurposingData, SuggestionItem
 )
 from models.transcript_model import TranscriptResult
+from pipeline.proactive_director import ProactiveDirector
 from utils.constants import VideoFormat
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
+
+
+class _AttrDict(dict):
+    """Hem sözlük (d['k']) hem nesne (d.k) erişimini ve doğrudan JSON serileştirmeyi destekleyen dict."""
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(f"'dict' object has no attribute '{name}'")
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        self[name] = value
+
+
+def _to_attr_dict(obj: Any) -> Any:
+    if isinstance(obj, dict):
+        return _AttrDict({k: _to_attr_dict(v) for k, v in obj.items()})
+    if isinstance(obj, list):
+        return [_to_attr_dict(v) for v in obj]
+    return obj
 
 
 class EdlBuilder:
@@ -123,7 +145,21 @@ class EdlBuilder:
             float(transcript.duration) if (transcript and float(getattr(transcript, "duration", 0.0)) > 1.0) else 0.0
         )
 
-        # 4. EDL dokümanını oluştur
+        # 4. Otonom Yönetmen (ProactiveDirector) önerilerini üret
+        proactive_sugs = []
+        try:
+            proactive_sugs = ProactiveDirector.generate_suggestions({
+                "duration": effective_duration,
+                "transcript": transcript_dict,
+                "cuts": sorted_cuts,
+                "overlays": overlays,
+                "audioPeaks": audio_peaks,
+                "settings": {"targetFormat": target_format_str},
+            })
+        except Exception as pd_err:
+            logger.warning(f"ProactiveDirector öneri üretimi uyarısı: {pd_err}")
+
+        # 5. EDL dokümanını oluştur
         edl = EdlDocument(
             projectId=project_id,
             videoId=video_id,
@@ -137,13 +173,15 @@ class EdlBuilder:
             cuts=sorted_cuts,
             overlays=overlays,
             suggestions=suggestions,
+            proactiveSuggestions=proactive_sugs,
             repurposing=repurposing_data,
             audioPeaks=audio_peaks
         )
 
         logger.info(f"EDL dokümanı başarıyla inşa edildi: {len(sorted_cuts)} kesim, {len(overlays)} overlay, {len(suggestions)} öneri. Süre={effective_duration:.2f}s")
         dump_fn = getattr(edl, "model_dump", getattr(edl, "dict", None))
-        return dump_fn() if dump_fn else edl.__dict__
+        raw_dict = dump_fn() if dump_fn else edl.__dict__
+        return _to_attr_dict(raw_dict)
 
     @staticmethod
     def _merge_overlapping_cuts(cuts: List[CutItem]) -> List[CutItem]:

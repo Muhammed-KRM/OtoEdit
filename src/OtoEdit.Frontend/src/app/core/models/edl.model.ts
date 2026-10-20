@@ -10,44 +10,143 @@ export interface CutItem {
   origEnd?: number;
 }
 
+export interface OverlayKeyframe {
+  id?: string;
+  /** Katman başlangıcına göre saniye ofseti (0 .. duration) */
+  timeOffset: number;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  opacity: number;
+  easing?: 'linear' | 'ease-in-out' | 'bounce';
+}
+
+export interface EdlTransition {
+  id: string;
+  /** İki klibin birleştiği kaynak saniye noktası */
+  boundarySourceTime?: number;
+  boundaryTime?: number;
+  type:
+    | 'fade'
+    | 'fadeblack'
+    | 'fadewhite'
+    | 'wipeleft'
+    | 'wiperight'
+    | 'slideleft'
+    | 'slideright'
+    | 'slideup'
+    | 'slidedown'
+    | 'circleopen'
+    | 'circleclose'
+    | 'zoomin'
+    | 'radial'
+    | 'pixelize'
+    | 'hlslice'
+    | string;
+  duration: number;
+  autoSfxId?: string;
+  action?: 'add' | 'update' | 'remove';
+}
+
+export interface EdlSfxClip {
+  id: string;
+  name: string;
+  title?: string;
+  category?: 'whoosh' | 'pop' | 'cinematic' | 'ui' | 'funny' | 'custom' | string;
+  presetId?: string;
+  sourceUrl?: string;
+  synthPreset?: string;
+  start: number;
+  duration: number;
+  volume?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+  peaks?: number[];
+  action?: 'add' | 'update' | 'remove';
+}
+
 export interface OverlayItem {
   id: string;
   type: 'text' | 'image';
   content?: string;
   source?: string;
+  originalSource?: string;
   timestamp: number;
   duration: number;
   font?: string;
   fontSize?: number;
+  fontWeight?: string | number;
+  italic?: boolean;
+  underline?: boolean;
+  textAlign?: 'left' | 'center' | 'right';
+  lineHeight?: number;
   color?: string;
   backgroundColor?: string;
-  animation?: 'fade' | 'pop-up' | 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down' | 'none';
-  exitAnimation?: 'fade' | 'pop-up' | 'slide-down' | 'slide-up' | 'scale-out' | 'none';
+  // Gradyan Dolgu (Photoshop Gradient Overlay)
+  fillType?: 'solid' | 'gradient' | 'radial';
+  gradientStart?: string;
+  gradientEnd?: string;
+  gradientAngle?: number;
+  // Zengin Giriş / Çıkış / Döngü Animasyonları
+  animation?: 'fade' | 'pop-up' | 'bounce' | 'slide-left' | 'slide-right' | 'slide-up' | 'slide-down' | 'typewriter' | 'glitch' | 'blur-in' | 'zoom-crash' | 'flip-3d' | 'none';
+  exitAnimation?: 'fade' | 'pop-up' | 'slide-down' | 'slide-up' | 'slide-left' | 'slide-right' | 'scale-out' | 'blur-out' | 'glitch-out' | 'none';
+  loopAnimation?: 'none' | 'pulse' | 'float' | 'wiggle' | 'shake' | 'neon-flicker' | 'pendulum';
   position?: [string, string];
   positionX?: number; // 0-100 percentage
   positionY?: number; // 0-100 percentage
   scale?: number;
   trackId?: number;
-  // Tipografi & Rozet (Pill, Stroke, Shadow)
+  // Tipografi, Çift Kontur, Neon Glow & Rozet (Pill, Stroke, Shadow)
   strokeColor?: string;
   strokeWidth?: number;
+  outerStrokeColor?: string;
+  outerStrokeWidth?: number;
+  glowEnabled?: boolean;
+  glowColor?: string;
+  glowRadius?: number;
   shadowColor?: string;
   shadowBlur?: number;
-  boxStyle?: 'none' | 'pill' | 'rounded' | 'badge';
+  shadowDistance?: number;
+  shadowAngle?: number;
+  boxStyle?: 'none' | 'pill' | 'rounded' | 'badge' | 'highlight-marker';
   boxBgColor?: string;
   boxPadding?: number;
   borderRadius?: number;
   allCaps?: boolean;
   letterSpacing?: number;
-  // Görsel Düzenleme & AI Arka Plan
+  presetId?: string;
+  // Photoshop Deformasyon (Yay / Eğri Metin & 3D Perspektif)
+  curveBend?: number; // -100 .. +100
+  rotateX?: number;   // -75 .. +75 deg
+  rotateY?: number;   // -75 .. +75 deg
+  skewX?: number;     // -45 .. +45 deg
+  skewY?: number;     // -45 .. +45 deg
+  blendMode?: 'normal' | 'multiply' | 'screen' | 'overlay' | 'lighten' | 'darken' | 'difference';
+  // Keyframe (Anahtar Kare ◆)
+  keyframes?: OverlayKeyframe[];
+  // Photoshop Görsel Düzenleme & AI Arka Plan
   removeBg?: boolean;
   stickerBorder?: boolean;
   stickerBorderWidth?: number;
   stickerBorderColor?: string;
   rotation?: number; // -180 to 180 degrees
-  maskShape?: 'rect' | 'circle' | 'rounded';
+  maskShape?: 'rect' | 'circle' | 'rounded' | 'star' | 'heart' | 'hexagon' | 'diamond';
+  feather?: number;
   chromaKeyColor?: string;
   chromaKeySimilarity?: number;
+  brightness?: number; // -100 .. +100
+  contrast?: number;   // -100 .. +100
+  saturation?: number; // -100 .. +100
+  warmth?: number;     // -100 .. +100
+  hue?: number;        // -180 .. +180
+  blur?: number;       // 0 .. 50
+  sharpen?: number;    // 0 .. 100
+  opacity?: number;    // 0 .. 100
+  flipH?: boolean;
+  flipV?: boolean;
+  dropShadow?: boolean;
+  action?: 'add' | 'update' | 'remove';
 }
 
 export interface TranscriptWord {
@@ -82,14 +181,25 @@ export interface ViralClipItem {
 
 export interface SuggestionItem {
   id: string;
-  type: 'image_broll' | 'text_highlight';
+  type: 'image_broll' | 'text_highlight' | 'viral_hook' | 'transition_sfx' | 'sticker_callout' | 'audio_master' | 'smart_zoom' | 'text_template' | 'text_overlay' | 'sticker' | 'audio_enhance' | string;
   title: string;
   content: string;
   sourceUrl?: string;
   timestamp: number;
   duration: number;
   reason?: string;
+  category?: string;
+  confidence?: number;
+  presetId?: string;
+  templatePreset?: string;
+  transitionType?: EdlTransition['type'];
+  sfxPreset?: string;
+  overlayPayload?: Partial<OverlayItem>;
+  transitionPayload?: EdlTransition;
+  sfxPayload?: EdlSfxClip;
+  payload?: any;
   status: 'pending' | 'accepted' | 'rejected';
+  action?: 'add' | 'update' | 'remove';
 }
 
 export interface SubtitleStyleConfig {
@@ -134,10 +244,16 @@ export interface EdlSettings {
   templateId?: string;
   faceTrackingEnabled?: boolean;
   audioEnhancement?: boolean;
+  normalizeAudio?: boolean;
+  smartPunchIn?: boolean;
+  rippleSyncOverlays?: boolean;
+  clipSpeeds?: Record<string, number>;
   gestureCommandsEnabled?: boolean;
   subtitlesEnabled?: boolean;
   subtitleStyle?: SubtitleStyleConfig;
   backgroundMusic?: BackgroundMusicConfig;
+  bgmVolume?: number;
+  bgmAutoDuck?: boolean;
   colorGrading?: ColorGradingConfig;
 }
 
@@ -163,6 +279,8 @@ export interface EdlContent {
   settings?: EdlSettings;
   cuts?: CutItem[];
   overlays?: OverlayItem[];
+  transitions?: EdlTransition[];
+  sfxClips?: EdlSfxClip[];
   transcript?: TranscriptData;
   repurposing?: {
     clips?: ViralClipItem[];
@@ -176,6 +294,8 @@ export interface EdlContent {
 export interface EdlPatchDto {
   cuts?: (CutItem & { action?: 'add' | 'update' | 'remove' })[];
   overlays?: (OverlayItem & { action?: 'add' | 'update' | 'remove' })[];
+  transitions?: (EdlTransition & { action?: 'add' | 'update' | 'remove' })[];
+  sfxClips?: (EdlSfxClip & { action?: 'add' | 'update' | 'remove' })[];
   suggestions?: (SuggestionItem & { action?: 'add' | 'update' | 'remove' })[];
   settings?: Partial<EdlSettings>;
 }

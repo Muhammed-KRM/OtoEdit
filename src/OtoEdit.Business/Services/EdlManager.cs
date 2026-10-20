@@ -131,7 +131,9 @@ public class EdlManager : IEdlService
 
             var isCollectionProp = propName.Equals("cuts", StringComparison.OrdinalIgnoreCase) ||
                                    propName.Equals("overlays", StringComparison.OrdinalIgnoreCase) ||
-                                   propName.Equals("suggestions", StringComparison.OrdinalIgnoreCase);
+                                   propName.Equals("suggestions", StringComparison.OrdinalIgnoreCase) ||
+                                   propName.Equals("transitions", StringComparison.OrdinalIgnoreCase) ||
+                                   propName.Equals("sfxClips", StringComparison.OrdinalIgnoreCase);
 
             if (isCollectionProp && patchValueNode is JsonArray patchArray)
             {

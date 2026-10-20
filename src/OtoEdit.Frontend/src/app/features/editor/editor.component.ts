@@ -13,12 +13,13 @@ import { SignalrService } from '../../core/services/signalr.service';
 import { ProjectDetailDto } from '../../core/models/project.model';
 import { DiagnosticsService } from '../../core/services/diagnostics.service';
 import { VideoDetailDto } from '../../core/models/video.model';
-import { CutItem, EdlContent, EdlDto, OverlayItem, SubtitleStyleConfig, BackgroundMusicConfig, ColorGradingConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
+import { CutItem, EdlContent, EdlDto, EdlPatchDto, OverlayItem, OverlayKeyframe, EdlTransition, EdlSfxClip, SubtitleStyleConfig, BackgroundMusicConfig, ColorGradingConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
 import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
 import { ProjectAssetDto } from '../../core/models/asset.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
 import { DurationPipe } from '../../shared/pipes/duration.pipe';
 import { ClipWaveformDirective } from './clip-waveform.directive';
+import { StudioEngineService, StudioFontOption, FontOption, TextTemplatePreset, SfxLibraryItem, StickerLibraryItem, TransitionLibraryItem } from './studio-engine.service';
 import { environment } from '../../../environments/environment';
 
 export interface ContextMenuState {
@@ -103,30 +104,37 @@ export interface ContextMenuState {
             <button 
               (click)="activeTab.set('media')"
               [ngClass]="activeTab() === 'media' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              class="flex-1 py-2.5 text-[10px] border-b-2 transition-all flex items-center justify-center gap-1 cursor-pointer" title="Medya, Sticker & GIF">
               <span>📁</span>
               <span>Medya</span>
             </button>
             <button 
+              (click)="activeTab.set('sfx')"
+              [ngClass]="activeTab() === 'sfx' ? 'text-emerald-400 border-emerald-400 bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
+              class="flex-1 py-2.5 text-[10px] border-b-2 transition-all flex items-center justify-center gap-1 cursor-pointer" title="Ses Efektleri (SFX) & Ses Mastering">
+              <span>🔊</span>
+              <span>SFX</span>
+            </button>
+            <button 
               (click)="activeTab.set('chat')"
               [ngClass]="activeTab() === 'chat' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              class="flex-1 py-2.5 text-[10px] border-b-2 transition-all flex items-center justify-center gap-1 cursor-pointer" title="Otonom AI Yönetmen & Sohbet">
               <span>🤖</span>
               <span>AI Kurgu</span>
             </button>
             <button 
               (click)="activeTab.set('transcript')"
               [ngClass]="activeTab() === 'transcript' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              class="flex-1 py-2.5 text-[10px] border-b-2 transition-all flex items-center justify-center gap-1 cursor-pointer" title="Transkript & Altyazı">
               <span>📝</span>
               <span>Metin</span>
             </button>
             <button 
               (click)="activeTab.set('overlays')"
               [ngClass]="activeTab() === 'overlays' ? 'text-brand-cyan border-brand-cyan bg-dark-950 font-bold' : 'text-slate-400 hover:text-slate-200 border-transparent'"
-              class="flex-1 py-2.5 text-[11px] border-b-2 transition-all flex items-center justify-center gap-1.5 cursor-pointer">
+              class="flex-1 py-2.5 text-[10px] border-b-2 transition-all flex items-center justify-center gap-1 cursor-pointer" title="Katman Listesi">
               <span>🥞</span>
-              <span>Katman ({{ activeEdl()?.overlays?.length || 0 }})</span>
+              <span>({{ activeEdl()?.overlays?.length || 0 }})</span>
             </button>
           </div>
 
@@ -197,6 +205,42 @@ export interface ContextMenuState {
               </div>
             </div>
 
+            <!-- FAZ 5: Çıkartmalar (Stickers), Hareketli GIF & 3D Emoji Stüdyosu -->
+            <div class="pt-2 border-t border-slate-800/80 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">✨ Çıkartmalar, Emoji & GIF</span>
+                <span class="text-[9px] text-slate-400 font-mono">Tek Tıkla Ekle</span>
+              </div>
+
+              <!-- Çıkartma & Emoji Izgarası -->
+              <div class="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto pr-1">
+                <button
+                  type="button"
+                  *ngFor="let stk of studioEngine.stickerLibrary"
+                  (click)="addStickerOverlay(stk)"
+                  class="p-2 rounded-lg bg-dark-900 border border-slate-800 hover:border-amber-400/70 hover:bg-dark-800 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer group"
+                  [title]="stk.name + ' Ekle'">
+                  <img [src]="stk.dataUrl" [alt]="stk.name" class="h-7 object-contain group-hover:scale-110 transition-transform" />
+                  <span class="text-[8px] text-slate-300 truncate w-full text-center font-medium">{{ stk.name }}</span>
+                </button>
+              </div>
+
+              <!-- Özel Hareketli GIF / Sticker URL Ekle -->
+              <div class="flex gap-1.5 pt-1">
+                <input
+                  type="text"
+                  #gifUrlInput
+                  placeholder="Hareketli GIF / WebP / PNG URL'si yapıştır..."
+                  class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white placeholder-slate-500 focus:border-amber-400 outline-none" />
+                <button
+                  type="button"
+                  (click)="gifUrlInput.value && addImageOverlayFromUrl(gifUrlInput.value, 'Hareketli GIF'); gifUrlInput.value = ''"
+                  class="px-2.5 py-1 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-[10px] font-bold cursor-pointer shrink-0">
+                  + GIF
+                </button>
+              </div>
+            </div>
+
             <!-- Zengin B-Roll Stok Kütüphanesi -->
             <div class="pt-2 border-t border-slate-800/80 space-y-2">
               <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">B-Roll Stok Kütüphanesi</span>
@@ -226,15 +270,153 @@ export interface ContextMenuState {
             </div>
           </div>
 
-          <!-- Sekme 2: AI Kurgu Sohbeti -->
+          <!-- Sekme 1.5 (FAZ 3): Stüdyo Ses Efektleri (SFX) & Ses Mastering -->
+          <div *ngIf="activeTab() === 'sfx'" class="flex-1 p-3 overflow-y-auto space-y-3">
+            <!-- Stüdyo Ses Mastering (-14 LUFS & Smart Punch-In) -->
+            <div class="p-2.5 rounded-xl bg-gradient-to-br from-emerald-950/50 to-dark-900 border border-emerald-500/30 space-y-2">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">🎧 Stüdyo Ses & Kurgu Master</span>
+                <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">Pro</span>
+              </div>
+              <div class="flex items-center justify-between text-xs">
+                <div>
+                  <span class="font-semibold text-slate-200 block text-[11px]">-14 LUFS Ses Normalizasyonu</span>
+                  <span class="text-[9px] text-slate-400">YouTube / Reels yayın standardı</span>
+                </div>
+                <input type="checkbox" [checked]="normalizeAudio()" (change)="toggleNormalizeAudio($any($event.target).checked)" class="rounded accent-emerald-400 cursor-pointer w-4 h-4" />
+              </div>
+              <div class="flex items-center justify-between text-xs pt-1 border-t border-slate-800/70">
+                <div>
+                  <span class="font-semibold text-slate-200 block text-[11px]">🔍 Smart Punch-In Zoom</span>
+                  <span class="text-[9px] text-slate-400">Jump-cut sıçramalarında %10 yakınlaş</span>
+                </div>
+                <input type="checkbox" [checked]="smartPunchIn()" (change)="toggleSmartPunchIn($any($event.target).checked)" class="rounded accent-emerald-400 cursor-pointer w-4 h-4" />
+              </div>
+            </div>
+
+            <!-- SFX Kategori Filtresi -->
+            <div class="space-y-1.5">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider">🔊 Ses Efektleri Kütüphanesi ({{ filteredSfxLibrary().length }})</span>
+                <button type="button" (click)="isBgmSelectorOpen.set(true)" class="text-[9px] text-violet-300 hover:underline cursor-pointer font-semibold">🎵 BGM Müzik</button>
+              </div>
+              <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
+                <button type="button" (click)="selectedSfxCategory.set('all')" [ngClass]="selectedSfxCategory() === 'all' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">Tümü</button>
+                <button type="button" (click)="selectedSfxCategory.set('whoosh')" [ngClass]="selectedSfxCategory() === 'whoosh' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">💨 Geçiş</button>
+                <button type="button" (click)="selectedSfxCategory.set('pop')" [ngClass]="selectedSfxCategory() === 'pop' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">🫧 Pop</button>
+                <button type="button" (click)="selectedSfxCategory.set('cinematic')" [ngClass]="selectedSfxCategory() === 'cinematic' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">💣 Sinematik</button>
+                <button type="button" (click)="selectedSfxCategory.set('ui')" [ngClass]="selectedSfxCategory() === 'ui' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">🔔 Bildirim</button>
+                <button type="button" (click)="selectedSfxCategory.set('funny')" [ngClass]="selectedSfxCategory() === 'funny' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">💿 Mizah</button>
+              </div>
+            </div>
+
+            <!-- SFX Kartları -->
+            <div class="space-y-1.5">
+              <div
+                *ngFor="let sfx of filteredSfxLibrary()"
+                class="p-2 rounded-xl bg-dark-900 border border-slate-800 hover:border-emerald-500/50 flex items-center justify-between gap-2 transition-all group">
+                <div class="flex items-center gap-2 min-w-0">
+                  <button
+                    type="button"
+                    (click)="previewSfxItem(sfx)"
+                    class="w-7 h-7 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 flex items-center justify-center text-xs shrink-0 transition-colors cursor-pointer"
+                    title="Sesi Dinle">
+                    ▶
+                  </button>
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-1.5">
+                      <span class="text-xs">{{ sfx.icon }}</span>
+                      <span class="text-[11px] font-bold text-slate-100 truncate">{{ sfx.name }}</span>
+                      <span class="text-[9px] font-mono text-emerald-400">{{ sfx.duration }}s</span>
+                    </div>
+                    <p class="text-[9px] text-slate-400 truncate">{{ sfx.description }}</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  (click)="addSfxToTimeline(sfx)"
+                  class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 border border-emerald-500/40 text-[10px] font-bold shrink-0 cursor-pointer transition-colors"
+                  title="İmlecin olduğu saniyeye (A2 Kanalına) ekle">
+                  + Ekle
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sekme 2: AI Kurgu Sohbeti & Otonom Video Yönetmeni (FAZ 6) -->
           <div *ngIf="activeTab() === 'chat'" class="flex-1 flex flex-col h-full overflow-hidden">
             <div #chatMessagesContainer class="flex-1 p-3 overflow-y-auto space-y-3">
-              <div *ngIf="chatMessages().length === 0" class="text-center py-6 text-slate-500 text-xs">
-                <p class="mb-2 font-medium">💡 AI ile videonuzu düzenleyin:</p>
+
+              <!-- FAZ 6: OTONOM VİDEO YÖNETMENİ (PROAKTİF AI ÖNERİLERİ) -->
+              <div class="p-3 rounded-xl bg-gradient-to-br from-indigo-950/70 via-dark-900 to-slate-950 border border-indigo-500/40 space-y-2.5 shadow-lg">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-sm">🎬</span>
+                    <span class="text-[11px] font-extrabold text-indigo-300 uppercase tracking-wide">Otonom Video Yönetmeni</span>
+                  </div>
+                  <button
+                    type="button"
+                    (click)="generateAiDirectorSuggestions()"
+                    class="px-2 py-0.5 rounded-md bg-brand-cyan/20 hover:bg-brand-cyan text-brand-cyan hover:text-slate-950 border border-brand-cyan/40 text-[9px] font-bold transition-colors cursor-pointer">
+                    ✨ Sahneyi Analiz Et ({{ pendingSuggestions().length }})
+                  </button>
+                </div>
+                <p class="text-[10px] text-slate-300 leading-snug">
+                  Videonuzun konuşma vurgularına ve kesim noktalarına göre hazırlanan profesyonel kurgu önerileri:
+                </p>
+
+                <div *ngIf="pendingSuggestions().length === 0" class="p-2.5 rounded-lg bg-dark-950/80 border border-slate-800 text-center space-y-1.5">
+                  <p class="text-[10px] text-slate-400">Bu proje için henüz aktif yönetmen önerisi üretilmedi.</p>
+                  <button
+                    type="button"
+                    (click)="generateAiDirectorSuggestions()"
+                    class="px-3 py-1.5 rounded-lg bg-gradient-to-r from-brand-cyan to-indigo-500 text-slate-950 font-extrabold text-[10px] shadow-glow-sm cursor-pointer">
+                    🚀 5 Profesyonel Kurgu Önerisi Üret
+                  </button>
+                </div>
+
+                <!-- Proaktif Öneri Kartları -->
+                <div *ngIf="pendingSuggestions().length > 0" class="space-y-2 max-h-60 overflow-y-auto pr-0.5">
+                  <div
+                    *ngFor="let sug of pendingSuggestions()"
+                    class="p-2.5 rounded-lg bg-dark-950/90 border border-slate-700/80 hover:border-brand-cyan/60 space-y-1.5 transition-all">
+                    <div class="flex items-center justify-between gap-1">
+                      <span class="text-[9px] px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-bold">{{ sug.category || '✨ AI Önerisi' }}</span>
+                      <span class="text-[9px] font-mono text-brand-cyan font-bold cursor-pointer hover:underline" (click)="seekToTranscript(sug.timestamp)">
+                        ⏱ {{ sug.timestamp }}s ({{ sug.duration }}s)
+                      </span>
+                    </div>
+                    <p class="text-[11px] font-bold text-white">{{ sug.title }}</p>
+                    <p class="text-[10px] text-slate-400 leading-snug">{{ sug.reason }}</p>
+                    <div class="flex items-center gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        (click)="seekToTranscript(sug.timestamp)"
+                        class="px-2 py-1 rounded bg-dark-800 hover:bg-slate-700 text-slate-300 text-[9px] font-semibold cursor-pointer">
+                        👁️ Git
+                      </button>
+                      <button
+                        type="button"
+                        (click)="acceptSuggestion(sug)"
+                        class="flex-1 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[10px] font-extrabold cursor-pointer shadow-sm">
+                        ✓ Tek Tıkla Uygula
+                      </button>
+                      <button
+                        type="button"
+                        (click)="rejectSuggestion(sug)"
+                        class="px-2 py-1 rounded bg-rose-500/20 hover:bg-rose-500/40 text-rose-300 text-[9px] font-bold cursor-pointer">
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div *ngIf="chatMessages().length === 0" class="text-center py-3 text-slate-500 text-xs">
+                <p class="mb-2 font-medium">💡 Doğal dille kurgu komutu verin:</p>
                 <div class="space-y-1.5 text-slate-300 text-[11px]">
                   <p class="p-2 rounded-lg bg-dark-900 border border-slate-800 cursor-pointer hover:border-brand-cyan/60 transition-colors" (click)="setPrompt('Girişteki sessizlikleri kes')">"Girişteki sessizlikleri kes"</p>
                   <p class="p-2 rounded-lg bg-dark-900 border border-slate-800 cursor-pointer hover:border-brand-cyan/60 transition-colors" (click)="setPrompt('10. saniyeye Kanala Abone Ol yazısı koy')">"10. saniyeye Kanala Abone Ol yazısı koy"</p>
-                  <p class="p-2 rounded-lg bg-dark-900 border border-slate-800 cursor-pointer hover:border-brand-cyan/60 transition-colors" (click)="setPrompt('20. saniyeye kedi görseli ekle')">"20. saniyeye kedi görseli ekle"</p>
                 </div>
               </div>
 
@@ -395,10 +577,30 @@ export interface ContextMenuState {
         <section class="flex-1 flex flex-col bg-black/95 relative items-center justify-between p-3 min-w-0 overflow-hidden">
           <!-- Monitör Sahnesi Dış Çerçevesi -->
           <div class="relative w-full flex-1 max-w-[860px] bg-black rounded-xl overflow-hidden shadow-2xl border border-slate-800/80 flex items-center justify-center min-h-0">
+            <!-- Canlı BGM Oynatıcı (E2: Auto-Ducking Destekli) -->
+            <audio #bgmAudioPlayer *ngIf="bgmUrl()" [src]="bgmUrl()" loop preload="auto" class="hidden"></audio>
+
+            <!-- Gerçek Silüet Sticker Konturu için SVG Morpholojik Filtre Tanımları -->
+            <svg width="0" height="0" class="absolute pointer-events-none overflow-hidden" aria-hidden="true">
+              <defs>
+                <filter *ngFor="let ov of activeOverlays()" [attr.id]="'sticker-outline-' + ov.id" x="-30%" y="-30%" width="160%" height="160%">
+                  <feMorphology in="SourceAlpha" operator="dilate" [attr.radius]="((ov.stickerBorderWidth || 6) * 0.45).toFixed(1)" result="dilated" />
+                  <feFlood [attr.flood-color]="ov.stickerBorderColor || '#FFFFFF'" result="floodColor" />
+                  <feComposite in="floodColor" in2="dilated" operator="in" result="outline" />
+                  <feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="rgba(0,0,0,0.55)" result="shadowedOutline" />
+                  <feMerge>
+                    <feMergeNode in="shadowedOutline" />
+                    <feMergeNode in="outline" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
+            </svg>
+
             <!-- Video En-Boy Oranına Kilitli Sahne (Video & Kaplamalar Birebir Kilitli) -->
             <div 
               style="container-type: inline-size; container-name: player;"
-              class="relative flex items-center justify-center w-full max-h-[460px] shadow-2xl"
+              class="relative flex items-center justify-center w-full max-h-[460px] shadow-2xl overflow-hidden"
               [style.aspectRatio]="videoAspectRatio()"
               [style.maxWidth]="'calc(460px * (' + videoAspectRatio() + '))'">
               
@@ -408,13 +610,25 @@ export interface ContextMenuState {
                 (timeupdate)="onTimeUpdate()"
                 (seeked)="onVideoSeeked()"
                 (loadedmetadata)="onMetadataLoaded()"
-                (play)="isPlaying.set(true)"
-                (pause)="isPlaying.set(false)"
+                (play)="onVideoPlay()"
+                (pause)="onVideoPause()"
                 [style.filter]="videoFilterStyle()"
-                class="w-full h-full object-contain rounded pointer-events-auto">
+                [style.transform]="videoPreviewTransform()"
+                [style.opacity]="videoPreviewOpacity()"
+                class="w-full h-full object-contain rounded pointer-events-auto transition-transform duration-150">
               </video>
 
-              <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi -->
+              <!-- Canlı Sahne Geçiş Efekti (Transition Overlay) -->
+              <div 
+                *ngIf="activeTransitionEffect() as trEffect"
+                class="absolute inset-0 pointer-events-none z-20 transition-all duration-75 flex items-center justify-center"
+                [ngStyle]="trEffect.overlayStyle">
+                <span *ngIf="trEffect.badge" class="px-2.5 py-1 rounded-full bg-black/75 border border-brand-cyan/40 text-[10px] font-bold text-brand-cyan shadow-lg">
+                  ⚡ {{ trEffect.badge }}
+                </span>
+              </div>
+
+              <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi (Photoshop & CapCut Studio) -->
               <div 
                 *ngFor="let ov of activeOverlays()" 
                 (mousedown)="onCanvasDragStart($event, ov.id)"
@@ -423,6 +637,7 @@ export interface ContextMenuState {
                 [style.top]="getOverlayTop(ov)"
                 [style.left]="getOverlayLeft(ov)"
                 [style.zIndex]="getOverlayZIndex(ov)"
+                [style.mixBlendMode]="ov.blendMode || 'normal'"
                 class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
                 [ngClass]="[
                    selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''
@@ -431,40 +646,80 @@ export interface ContextMenuState {
                 [style.backgroundColor]="ov.backgroundColor || 'transparent'"
                 [style.fontFamily]="ov.font || 'Inter, sans-serif'">
                 
-                <div [ngClass]="getOverlayAnimationClass(ov)">
+                <div [ngClass]="getOverlayAnimationClass(ov)" [style.transform]="getOverlay3DTransform(ov)">
                 
-                <!-- Metin Kaplaması (CapCut Pill / Badge / Dual Stroke) -->
+                <!-- 1A. Yay / Kavisli (Curved SVG TextPath) Metin Kaplaması -->
+                <svg 
+                  *ngIf="ov.type === 'text' && ov.curveBend && (ov.curveBend > 1 || ov.curveBend < -1)"
+                  viewBox="0 0 560 220"
+                  class="overflow-visible pointer-events-none block"
+                  [style.width]="((ov.fontSize || 48) * 7.2 / 19.2) + 'cqi'"
+                  [style.filter]="getTextOverlayFilter(ov)">
+                  <defs>
+                    <path [attr.id]="'curve-path-' + ov.id" [attr.d]="getCurvedTextPath(ov.curveBend)" fill="none" />
+                    <linearGradient *ngIf="ov.fillType === 'gradient' || ov.fillType === 'radial'" [attr.id]="'grad-' + ov.id" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" [attr.stop-color]="ov.gradientStart || ov.color || '#FACC15'" />
+                      <stop offset="100%" [attr.stop-color]="ov.gradientEnd || '#EF4444'" />
+                    </linearGradient>
+                  </defs>
+                  <!-- Outer Stroke (Double Stroke) -->
+                  <text 
+                    *ngIf="ov.outerStrokeWidth && ov.outerStrokeWidth > 0"
+                    [style.fontFamily]="ov.font || 'Montserrat'"
+                    [attr.font-size]="ov.fontSize || 48"
+                    font-weight="800"
+                    [attr.letter-spacing]="ov.letterSpacing || 0"
+                    fill="none"
+                    [attr.stroke]="ov.outerStrokeColor || '#000000'"
+                    [attr.stroke-width]="((ov.strokeWidth || 0) + (ov.outerStrokeWidth || 0)) * 1.6"
+                    stroke-linejoin="round"
+                    stroke-linecap="round">
+                    <textPath [attr.href]="'#curve-path-' + ov.id" startOffset="50%" text-anchor="middle">
+                      {{ ov.allCaps ? (ov.content || '').toUpperCase() : ov.content }}
+                    </textPath>
+                  </text>
+                  <!-- Main Text + Primary Stroke -->
+                  <text 
+                    [style.fontFamily]="ov.font || 'Montserrat'"
+                    [attr.font-size]="ov.fontSize || 48"
+                    font-weight="800"
+                    [attr.letter-spacing]="ov.letterSpacing || 0"
+                    [attr.fill]="(ov.fillType === 'gradient' || ov.fillType === 'radial') ? 'url(#grad-' + ov.id + ')' : (ov.color || '#FFFFFF')"
+                    [attr.stroke]="ov.strokeWidth ? (ov.strokeColor || '#000000') : 'none'"
+                    [attr.stroke-width]="(ov.strokeWidth || 0) * 1.2"
+                    stroke-linejoin="round"
+                    paint-order="stroke fill">
+                    <textPath [attr.href]="'#curve-path-' + ov.id" startOffset="50%" text-anchor="middle">
+                      {{ ov.allCaps ? (ov.content || '').toUpperCase() : ov.content }}
+                    </textPath>
+                  </text>
+                </svg>
+
+                <!-- 1B. Normal & Photoshop Stil Metin Kaplaması (Gradient, Çift Kontur, Neon Glow, Pill/Marker) -->
                 <span 
-                  *ngIf="ov.type === 'text'" 
+                  *ngIf="ov.type === 'text' && (!ov.curveBend || (ov.curveBend >= -1 && ov.curveBend <= 1))" 
                   class="font-bold whitespace-nowrap block transition-all"
-                  [style.fontSize]="((ov.fontSize || 48) / 19.2) + 'cqi'"
-                  [style.textTransform]="ov.allCaps ? 'uppercase' : 'none'"
-                  [style.letterSpacing.px]="ov.letterSpacing || 0"
-                  [style.backgroundColor]="ov.boxStyle && ov.boxStyle !== 'none' ? (ov.boxBgColor || 'rgba(0,0,0,0.75)') : 'transparent'"
-                  [style.padding]="ov.boxStyle && ov.boxStyle !== 'none' ? ((ov.boxPadding || 14) * 0.4) + 'px ' + (ov.boxPadding || 14) + 'px' : '2px 8px'"
-                  [style.borderRadius.px]="ov.boxStyle === 'pill' ? 9999 : (ov.borderRadius || (ov.boxStyle ? 12 : 4))"
-                  [style.webkitTextStroke]="(ov.strokeWidth ? (ov.strokeWidth * 0.4) + 'px ' + (ov.strokeColor || '#000000') : 'none')"
-                  [style.textShadow]="ov.shadowBlur ? '0 2px ' + (ov.shadowBlur * 2) + 'px ' + (ov.shadowColor || 'rgba(0,0,0,0.9)') : '0 2px 4px rgba(0,0,0,0.85)'"
-                  [style.boxShadow]="ov.boxStyle && ov.boxStyle !== 'none' ? '0 4px 15px rgba(0,0,0,0.5)' : 'none'">
-                  {{ ov.content }}
+                  [ngStyle]="getTextOverlayStyle(ov)">
+                  {{ ov.allCaps ? (ov.content || '').toUpperCase() : ov.content }}
                 </span>
 
-                <!-- Görsel / B-Roll Kaplaması (Sticker, Rotation, Shape Mask) -->
+                <!-- 2. Görsel / B-Roll / Sticker / GIF Kaplaması (Photoshop Adjustments + Real Silhouette Sticker + Shape Mask) -->
                 <div 
                   *ngIf="ov.type === 'image'" 
                   class="relative group transition-transform duration-75"
-                  [style.transform]="ov.rotation ? 'rotate(' + ov.rotation + 'deg)' : 'none'">
+                  [style.opacity]="(ov.opacity ?? 100) / 100">
                   <img 
                     *ngIf="ov.source" 
                     [src]="ov.source" 
                     [alt]="ov.content || 'Görsel'" 
-                    class="shadow-xl pointer-events-none object-contain transition-all"
+                    class="pointer-events-none object-contain transition-all"
                     [ngClass]="[
                       ov.maskShape === 'circle' ? 'rounded-full aspect-square object-cover' : (ov.maskShape === 'rounded' ? 'rounded-2xl' : 'rounded-lg'),
-                      ov.stickerBorder ? 'ring-4 ring-white shadow-[0_0_20px_rgba(255,255,255,0.4)]' : 'border border-brand-cyan/50'
+                      (!ov.removeBg && !ov.stickerBorder && (!ov.maskShape || ov.maskShape === 'rect')) ? 'border border-brand-cyan/40 shadow-xl' : ''
                     ]"
                     [style.width]="(160 * (ov.scale || 1.0) / 8.6) + 'cqi'"
-                    [style.filter]="ov.removeBg ? 'drop-shadow(0 10px 15px rgba(0,0,0,0.5))' : 'none'"
+                    [style.filter]="getImageOverlayFilter(ov)"
+                    [style.clipPath]="getImageClipPath(ov)"
                     style="height: auto; max-width: none;" />
                   
                   <div *ngIf="!ov.source" class="px-3 py-2 rounded-lg bg-dark-800/90 border border-brand-cyan/40 text-brand-cyan text-xs font-bold flex items-center gap-1.5">
@@ -473,6 +728,12 @@ export interface ContextMenuState {
                   </div>
                 </div>
                 </div>
+
+                <!-- Keyframe Rozeti -->
+                <span *ngIf="ov.keyframes && ov.keyframes.length > 0 && selectedOverlayId() === ov.id"
+                      class="absolute -top-2.5 -left-2.5 px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 font-black text-[8px] shadow z-30">
+                  ◆ {{ ov.keyframes.length }} KF
+                </span>
 
                 <!-- Canvas Resize Handle -->
                 <div *ngIf="selectedOverlayId() === ov.id"
@@ -616,208 +877,584 @@ export interface ContextMenuState {
           </div>
         </section>
 
-        <!-- 3. SAĞ PANEL: Context-Aware Inspector (Özellikler) -->
-        <aside class="w-[290px] xl:w-[330px] shrink-0 flex flex-col border-l border-slate-800 bg-dark-900 overflow-y-auto p-4 space-y-4">
+        <!-- 3. SAĞ PANEL: Context-Aware Inspector (CapCut / Premiere / Photoshop Studio) -->
+        <aside class="w-[300px] xl:w-[345px] shrink-0 flex flex-col border-l border-slate-800 bg-dark-900 overflow-y-auto p-3.5 space-y-3.5">
           <!-- 1. Durum: Katman Seçili -->
-          <div *ngIf="selectedOverlay()" class="space-y-4">
+          <div *ngIf="selectedOverlay()" class="space-y-3">
             <div class="flex items-center justify-between border-b border-slate-800 pb-2">
-              <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Katman Özellikleri</h3>
-              <span [ngClass]="inspectorData.type === 'text' ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30'" class="px-2 py-0.5 rounded text-[10px] font-bold uppercase border">
-                {{ inspectorData.type === 'text' ? 'Metin Katmanı' : 'Görsel Katmanı' }}
-              </span>
-            </div>
-
-            <!-- İçerik -->
-            <div class="space-y-1">
-              <label class="text-[10px] text-slate-400 uppercase font-semibold">
-                {{ inspectorData.type === 'image' ? 'Görsel Başlığı / Açıklaması' : 'Metin İçeriği' }}
-              </label>
-              <textarea 
-                [(ngModel)]="inspectorData.content" 
-                (ngModelChange)="onInspectorChange()"
-                class="w-full bg-dark-950 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none"
-                rows="2"></textarea>
-            </div>
-
-            <!-- Görsel Kaynağı (Image ise) -->
-            <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
-              <div class="flex items-center justify-between">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Görsel URL / Stok</label>
-                <button type="button" (click)="activeTab.set('media')" class="text-[10px] font-bold text-brand-cyan hover:underline cursor-pointer">📁 Medyadan Seç</button>
-              </div>
-              <input type="text" [(ngModel)]="inspectorData.source" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan focus:outline-none" placeholder="https://..." />
-            </div>
-
-            <!-- Ölçek (Image ise) -->
-            <div class="space-y-1" *ngIf="inspectorData.type === 'image'">
-              <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
-                <span>Ölçek / Boyut</span>
-                <span class="text-brand-cyan font-bold">{{ inspectorData.scale || 1.0 }}x</span>
-              </div>
-              <input type="range" min="0.2" max="2.5" step="0.05" [(ngModel)]="inspectorData.scale" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan cursor-pointer" />
-            </div>
-
-            <!-- Görsel Efektleri & AI Düzenleme (Image ise) -->
-            <div *ngIf="inspectorData.type === 'image'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
-              <div class="flex items-center justify-between border-b border-slate-800 pb-1">
-                <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wider">✨ Görsel Efektleri & AI</span>
-              </div>
-
-              <!-- AI Arka Plan Kaldırma -->
-              <div class="flex items-center justify-between">
-                <div class="flex flex-col">
-                  <span class="text-xs text-slate-200 font-semibold">Arka Planı Kaldır (AI)</span>
-                  <span class="text-[9px] text-slate-400">Şeffaf nesne / portre</span>
-                </div>
-                <label class="relative inline-flex items-center cursor-pointer">
-                  <input type="checkbox" [(ngModel)]="inspectorData.removeBg" (ngModelChange)="onInspectorChange()" class="sr-only peer" />
-                  <div class="w-8 h-4 bg-dark-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-cyan"></div>
-                </label>
-              </div>
-
-              <!-- Beyaz Sticker Çıkartma Kenarlığı -->
-              <div class="space-y-1.5 pt-1 border-t border-slate-800/60">
-                <div class="flex items-center justify-between">
-                  <span class="text-xs text-slate-200 font-semibold">Sticker Kenarlığı</span>
-                  <input type="checkbox" [(ngModel)]="inspectorData.stickerBorder" (ngModelChange)="onInspectorChange()" class="rounded accent-brand-cyan" />
-                </div>
-                <div *ngIf="inspectorData.stickerBorder" class="grid grid-cols-2 gap-2 pt-1">
-                  <div class="space-y-0.5">
-                    <span class="text-[9px] text-slate-400">Kalınlık ({{ inspectorData.stickerBorderWidth || 6 }}px)</span>
-                    <input type="range" min="2" max="16" step="1" [(ngModel)]="inspectorData.stickerBorderWidth" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
-                  </div>
-                  <div class="space-y-0.5">
-                    <span class="text-[9px] text-slate-400">Kenarlık Rengi</span>
-                    <input type="color" [(ngModel)]="inspectorData.stickerBorderColor" (ngModelChange)="onInspectorChange()" class="w-full h-6 rounded bg-transparent border border-slate-700 p-0 cursor-pointer" />
-                  </div>
-                </div>
-              </div>
-
-              <!-- Döndürme (Rotation) -->
-              <div class="space-y-1 pt-1 border-t border-slate-800/60">
-                <div class="flex justify-between items-center text-[10px] text-slate-400 uppercase font-semibold">
-                  <span>Döndürme Açısı</span>
-                  <span class="text-brand-cyan font-mono font-bold">{{ inspectorData.rotation || 0 }}°</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <input type="range" min="-180" max="180" step="5" [(ngModel)]="inspectorData.rotation" (ngModelChange)="onInspectorChange()" class="flex-1 accent-brand-cyan" />
-                  <button type="button" (click)="inspectorData.rotation = 0; onInspectorChange()" class="px-1.5 py-0.5 text-[9px] bg-dark-900 border border-slate-700 rounded text-slate-400 hover:text-white">Sıfırla</button>
-                </div>
-              </div>
-
-              <!-- Maske Şekli -->
-              <div class="space-y-1 pt-1 border-t border-slate-800/60">
-                <span class="text-[10px] text-slate-400 uppercase font-semibold">Kırpma / Şekil Maskesi</span>
-                <div class="grid grid-cols-3 gap-1">
-                  <button type="button" (click)="inspectorData.maskShape = 'rect'; onInspectorChange()" [ngClass]="(!inspectorData.maskShape || inspectorData.maskShape === 'rect') ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700 transition-colors">Normal</button>
-                  <button type="button" (click)="inspectorData.maskShape = 'circle'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'circle' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700 transition-colors">Dairesel</button>
-                  <button type="button" (click)="inspectorData.maskShape = 'rounded'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'rounded' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700 transition-colors">Yuvarlak</button>
-                </div>
-              </div>
-            </div>
-
-            <!-- Zamanlar -->
-            <div class="grid grid-cols-2 gap-2.5">
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Başlangıç (sn)</label>
-                <input type="number" step="0.1" [(ngModel)]="inspectorData.timestamp" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan font-mono" />
-              </div>
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Süre (sn)</label>
-                <input type="number" step="0.1" [(ngModel)]="inspectorData.duration" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan font-mono" />
-              </div>
-            </div>
-
-            <!-- Tipografi & Renk (Text ise) -->
-            <div class="grid grid-cols-2 gap-2.5" *ngIf="inspectorData.type === 'text'">
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Rengi</label>
-                <div class="flex items-center gap-1.5">
-                  <input type="color" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="w-7 h-7 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
-                  <input type="text" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="flex-1 bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
-                </div>
-              </div>
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Boyut (px)</label>
-                <input type="number" [(ngModel)]="inspectorData.fontSize" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
-              </div>
-            </div>
-
-            <div class="space-y-1" *ngIf="inspectorData.type === 'text'">
-              <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (Font)</label>
-              <select [(ngModel)]="inspectorData.font" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
-                <option value="Bebas Neue">Bebas Neue (Büyük & Vurucu)</option>
-                <option value="Montserrat">Montserrat (Modern Kalın)</option>
-                <option value="Anton">Anton (Dikkat Çekici)</option>
-                <option value="Poppins">Poppins (Temiz & Yuvarlak)</option>
-                <option value="Outfit">Outfit (Fütüristik Sans)</option>
-                <option value="Inter">Inter (Ultra Okunabilir UI)</option>
-                <option value="Arial">Arial (Sade & Klasik)</option>
-                <option value="Cinzel">Cinzel (Sinematik Serif)</option>
-              </select>
-            </div>
-
-            <!-- Kutu / Rozet Stili (Pill / Badge) -->
-            <div *ngIf="inspectorData.type === 'text'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
-              <div class="flex items-center justify-between border-b border-slate-800 pb-1">
-                <span class="text-[10px] text-slate-300 uppercase font-bold tracking-wider">🏷️ Kutu / Banner Rozet Stili</span>
-              </div>
-              <div class="grid grid-cols-4 gap-1">
-                <button type="button" (click)="inspectorData.boxStyle = 'none'; onInspectorChange()" [ngClass]="(!inspectorData.boxStyle || inspectorData.boxStyle === 'none') ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Düz</button>
-                <button type="button" (click)="inspectorData.boxStyle = 'pill'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'pill' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Pill (Hap)</button>
-                <button type="button" (click)="inspectorData.boxStyle = 'rounded'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'rounded' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Yuvarlak</button>
-                <button type="button" (click)="inspectorData.boxStyle = 'badge'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'badge' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[10px] border border-slate-700">Rozet</button>
-              </div>
-
-              <!-- Kutu Rengi ve Dolgusu -->
-              <div *ngIf="inspectorData.boxStyle && inspectorData.boxStyle !== 'none'" class="space-y-2 pt-1 border-t border-slate-800/60">
-                <div class="grid grid-cols-2 gap-2">
-                  <div class="space-y-0.5">
-                    <label class="text-[9px] text-slate-400">Kutu Rengi</label>
-                    <input type="color" [(ngModel)]="inspectorData.boxBgColor" (ngModelChange)="onInspectorChange()" class="w-full h-6 rounded bg-transparent border border-slate-700 p-0 cursor-pointer" />
-                  </div>
-                  <div class="space-y-0.5">
-                    <label class="text-[9px] text-slate-400">İç Dolgu ({{ inspectorData.boxPadding || 14 }}px)</label>
-                    <input type="range" min="6" max="32" step="2" [(ngModel)]="inspectorData.boxPadding" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
-                  </div>
-                </div>
-              </div>
-
-              <!-- Kontur & Harf Formatı -->
-              <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/60 items-center">
-                <div class="space-y-0.5">
-                  <label class="text-[9px] text-slate-400">Dış Kontur ({{ inspectorData.strokeWidth || 0 }}px)</label>
-                  <input type="range" min="0" max="8" step="1" [(ngModel)]="inspectorData.strokeWidth" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
-                </div>
-                <div class="flex items-center gap-2 pt-2">
-                  <label class="flex items-center gap-2 cursor-pointer text-[11px] text-slate-300">
-                    <input type="checkbox" [(ngModel)]="inspectorData.allCaps" (ngModelChange)="onInspectorChange()" class="rounded accent-brand-cyan" />
-                    <span>BÜYÜK Harf</span>
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <!-- Pozisyon X & Y -->
-            <div class="grid grid-cols-2 gap-2.5">
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">X Konum (%)</label>
-                <input type="number" step="0.5" [(ngModel)]="inspectorData.positionX" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
-              </div>
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Y Konum (%)</label>
-                <input type="number" step="0.5" [(ngModel)]="inspectorData.positionY" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white font-mono" />
-              </div>
-            </div>
-
-            <!-- Katman Sırası / Track Kanalı -->
-            <div class="p-2.5 bg-dark-950 rounded-xl border border-slate-800 space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="text-[10px] text-slate-400 uppercase font-semibold">🥞 Katman Kanalı</span>
-                <span class="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-brand-cyan/20 text-brand-cyan">
-                  T{{ inspectorData.trackId || 1 }}
+              <div class="flex items-center gap-1.5">
+                <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Stüdyo Özellikleri</h3>
+                <span [ngClass]="inspectorData.type === 'text' ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30'" class="px-2 py-0.5 rounded text-[9px] font-bold uppercase border">
+                  {{ inspectorData.type === 'text' ? 'T Tipografi' : '🖼️ Photoshop & AI' }}
                 </span>
               </div>
+              <button type="button" (click)="selectedOverlayId.set(null)" class="text-slate-500 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-dark-800 cursor-pointer" title="Seçimi Kapat">✕</button>
+            </div>
+
+            <!-- Ortak: İçerik & Zamanlama -->
+            <div class="space-y-2 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+              <div class="space-y-1">
+                <label class="text-[10px] text-slate-400 uppercase font-semibold">
+                  {{ inspectorData.type === 'image' ? 'Görsel / Çıkartma Başlığı' : 'Metin İçeriği' }}
+                </label>
+                <textarea 
+                  [(ngModel)]="inspectorData.content" 
+                  (ngModelChange)="onInspectorChange()"
+                  class="w-full bg-dark-900 border border-slate-700 rounded-lg p-2 text-xs text-white focus:border-brand-cyan focus:outline-none"
+                  rows="2"></textarea>
+              </div>
+              <div class="grid grid-cols-2 gap-2">
+                <div class="space-y-0.5">
+                  <label class="text-[9px] text-slate-400 uppercase font-semibold">Başlangıç (sn)</label>
+                  <input type="number" step="0.1" [(ngModel)]="inspectorData.timestamp" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white focus:border-brand-cyan font-mono" />
+                </div>
+                <div class="space-y-0.5">
+                  <label class="text-[9px] text-slate-400 uppercase font-semibold">Süre (sn)</label>
+                  <input type="number" step="0.1" [(ngModel)]="inspectorData.duration" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white focus:border-brand-cyan font-mono" />
+                </div>
+              </div>
+            </div>
+
+            <!-- ========================================================================= -->
+            <!-- A. METİN STÜDYOSU (5 SEKMELİ CAPCUT / PHOTOSHOP TİPOGRAFİ MOTORU)         -->
+            <!-- ========================================================================= -->
+            <ng-container *ngIf="inspectorData.type === 'text'">
+              <!-- 5 Sekmeli Bar -->
+              <div class="grid grid-cols-5 gap-1 p-1 bg-dark-950 rounded-xl border border-slate-800 text-[9px] font-bold">
+                <button type="button" (click)="textInspectorTab.set('style')" [ngClass]="textInspectorTab() === 'style' ? 'bg-brand-cyan text-slate-950 shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">T Stil</button>
+                <button type="button" (click)="textInspectorTab.set('presets')" [ngClass]="textInspectorTab() === 'presets' ? 'bg-brand-cyan text-slate-950 shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">✨ Şablon</button>
+                <button type="button" (click)="textInspectorTab.set('effects')" [ngClass]="textInspectorTab() === 'effects' ? 'bg-brand-cyan text-slate-950 shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">🔥 Efekt</button>
+                <button type="button" (click)="textInspectorTab.set('anim')" [ngClass]="textInspectorTab() === 'anim' ? 'bg-brand-cyan text-slate-950 shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">🎬 Hareket</button>
+                <button type="button" (click)="textInspectorTab.set('transform')" [ngClass]="textInspectorTab() === 'transform' ? 'bg-brand-cyan text-slate-950 shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">📐 3D & Yay</button>
+              </div>
+
+              <!-- 1. T STİL SEKMESİ (35+ Font, Renk, Degrade, Kutu Rozet) -->
+              <div *ngIf="textInspectorTab() === 'style'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <!-- Kategorili 35+ Google Font Seçici -->
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between">
+                    <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (35+ Profesyonel Font)</label>
+                    <span class="text-[9px] text-brand-cyan font-mono">{{ inspectorData.font }}</span>
+                  </div>
+                  <select [(ngModel)]="inspectorData.font" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
+                    <optgroup *ngFor="let cat of studio.fontCategories" [label]="cat.label">
+                      <option *ngFor="let f of getFontsByCategory(cat.id)" [value]="f.family" [style.fontFamily]="f.family">
+                        {{ f.name }}
+                      </option>
+                    </optgroup>
+                  </select>
+                </div>
+
+                <!-- Boyut & Harf Aralığı -->
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="space-y-1">
+                    <div class="flex justify-between text-[9px] text-slate-400 font-semibold">
+                      <span>Boyut</span>
+                      <span class="text-brand-cyan font-mono">{{ inspectorData.fontSize || 48 }}px</span>
+                    </div>
+                    <input type="range" min="18" max="140" step="2" [(ngModel)]="inspectorData.fontSize" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan cursor-pointer" />
+                  </div>
+                  <div class="space-y-1">
+                    <div class="flex justify-between text-[9px] text-slate-400 font-semibold">
+                      <span>Harf Aralığı</span>
+                      <span class="text-brand-cyan font-mono">{{ inspectorData.letterSpacing || 0 }}px</span>
+                    </div>
+                    <input type="range" min="-3" max="20" step="1" [(ngModel)]="inspectorData.letterSpacing" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan cursor-pointer" />
+                  </div>
+                </div>
+
+                <!-- Dolgu Tipi: Düz Renk vs Degrade (Gradient) -->
+                <div class="space-y-2 pt-1 border-t border-slate-800/70">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[10px] text-slate-400 uppercase font-semibold">Renk & Degrade Dolgu</span>
+                    <div class="flex gap-1">
+                      <button type="button" (click)="inspectorData.fillType = 'solid'; onInspectorChange()" [ngClass]="(!inspectorData.fillType || inspectorData.fillType === 'solid') ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-900 text-slate-400'" class="px-2 py-0.5 rounded text-[9px] border border-slate-700 cursor-pointer">Düz</button>
+                      <button type="button" (click)="inspectorData.fillType = 'gradient'; onInspectorChange()" [ngClass]="inspectorData.fillType === 'gradient' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-900 text-slate-400'" class="px-2 py-0.5 rounded text-[9px] border border-slate-700 cursor-pointer">🌈 Degrade</button>
+                    </div>
+                  </div>
+
+                  <div *ngIf="!inspectorData.fillType || inspectorData.fillType === 'solid'" class="flex items-center gap-2">
+                    <input type="color" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="w-8 h-7 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                    <input type="text" [(ngModel)]="inspectorData.color" (ngModelChange)="onInspectorChange()" class="flex-1 bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white font-mono" />
+                    <label class="flex items-center gap-1.5 cursor-pointer text-[10px] text-slate-300">
+                      <input type="checkbox" [(ngModel)]="inspectorData.allCaps" (ngModelChange)="onInspectorChange()" class="rounded accent-brand-cyan" />
+                      <span>BÜYÜK</span>
+                    </label>
+                  </div>
+
+                  <div *ngIf="inspectorData.fillType === 'gradient'" class="space-y-2 bg-dark-900/80 p-2 rounded-lg border border-slate-800">
+                    <div class="grid grid-cols-2 gap-2">
+                      <div class="space-y-0.5">
+                        <span class="text-[9px] text-slate-400">Başlangıç Rengi</span>
+                        <div class="flex items-center gap-1">
+                          <input type="color" [(ngModel)]="inspectorData.gradientStart" (ngModelChange)="onInspectorChange()" class="w-6 h-6 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                          <input type="text" [(ngModel)]="inspectorData.gradientStart" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded p-1 text-[10px] text-white font-mono" />
+                        </div>
+                      </div>
+                      <div class="space-y-0.5">
+                        <span class="text-[9px] text-slate-400">Bitiş Rengi</span>
+                        <div class="flex items-center gap-1">
+                          <input type="color" [(ngModel)]="inspectorData.gradientEnd" (ngModelChange)="onInspectorChange()" class="w-6 h-6 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                          <input type="text" [(ngModel)]="inspectorData.gradientEnd" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded p-1 text-[10px] text-white font-mono" />
+                        </div>
+                      </div>
+                    </div>
+                    <div class="space-y-0.5">
+                      <div class="flex justify-between text-[9px] text-slate-400">
+                        <span>Degrade Açısı</span>
+                        <span class="text-brand-cyan font-mono">{{ inspectorData.gradientAngle ?? 90 }}°</span>
+                      </div>
+                      <input type="range" min="0" max="360" step="15" [(ngModel)]="inspectorData.gradientAngle" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan cursor-pointer" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Kutu / Banner / Fosforlu Kalem Rozet Stili -->
+                <div class="space-y-2 pt-2 border-t border-slate-800/70">
+                  <span class="text-[10px] text-slate-400 uppercase font-semibold block">🏷️ Arka Plan Kutu / Rozet</span>
+                  <div class="grid grid-cols-5 gap-1">
+                    <button type="button" (click)="inspectorData.boxStyle = 'none'; onInspectorChange()" [ngClass]="(!inspectorData.boxStyle || inspectorData.boxStyle === 'none') ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Yok</button>
+                    <button type="button" (click)="inspectorData.boxStyle = 'pill'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'pill' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Pill</button>
+                    <button type="button" (click)="inspectorData.boxStyle = 'rounded'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'rounded' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Kutu</button>
+                    <button type="button" (click)="inspectorData.boxStyle = 'badge'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'badge' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Rozet</button>
+                    <button type="button" (click)="inspectorData.boxStyle = 'highlight-marker'; onInspectorChange()" [ngClass]="inspectorData.boxStyle === 'highlight-marker' ? 'bg-brand-cyan text-slate-900 font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Marker</button>
+                  </div>
+                  <div *ngIf="inspectorData.boxStyle && inspectorData.boxStyle !== 'none'" class="grid grid-cols-2 gap-2 pt-1">
+                    <div class="space-y-0.5">
+                      <label class="text-[9px] text-slate-400">Kutu Rengi</label>
+                      <input type="color" [(ngModel)]="inspectorData.boxBgColor" (ngModelChange)="onInspectorChange()" class="w-full h-6 rounded bg-transparent border border-slate-700 p-0 cursor-pointer" />
+                    </div>
+                    <div class="space-y-0.5">
+                      <label class="text-[9px] text-slate-400">Dolgu ({{ inspectorData.boxPadding || 14 }}px)</label>
+                      <input type="range" min="4" max="36" step="2" [(ngModel)]="inspectorData.boxPadding" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. ✨ ŞABLON SEKMESİ (12 Viral CapCut / Premiere Hazır Şablonu) -->
+              <div *ngIf="textInspectorTab() === 'presets'" class="space-y-2 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800 max-h-[340px] overflow-y-auto">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-slate-300 uppercase">🔥 Viral Metin Şablonları (12 Preset)</span>
+                  <span class="text-[9px] text-slate-500">Tek Tıkla Uygula</span>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button
+                    *ngFor="let preset of studio.textPresets"
+                    type="button"
+                    (click)="applyTextPreset(preset)"
+                    class="p-2 rounded-xl border border-slate-800 hover:border-brand-cyan/60 text-left flex flex-col justify-between gap-1 transition-all cursor-pointer group overflow-hidden"
+                    [style.background]="preset.previewBg">
+                    <span class="text-[11px] font-black truncate drop-shadow" [style.color]="preset.props.color" [style.fontFamily]="preset.props.font">
+                      {{ preset.name }}
+                    </span>
+                    <span class="text-[8px] px-1.5 py-0.5 rounded bg-black/50 text-slate-200 w-fit uppercase font-mono">
+                      {{ preset.badge }}
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- 3. 🔥 EFEKT SEKMESİ (Çift Kontur, Neon Glow, Yönlü Gölge) -->
+              <div *ngIf="textInspectorTab() === 'effects'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <!-- 1. Ana Kontur (Inner Stroke) -->
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between text-[10px]">
+                    <span class="text-slate-300 font-bold">1. Ana Dış Kontur (Stroke)</span>
+                    <span class="text-brand-cyan font-mono">{{ inspectorData.strokeWidth || 0 }}px</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="color" [(ngModel)]="inspectorData.strokeColor" (ngModelChange)="onInspectorChange()" class="w-7 h-6 rounded border border-slate-700 bg-transparent p-0 cursor-pointer shrink-0" />
+                    <input type="range" min="0" max="12" step="1" [(ngModel)]="inspectorData.strokeWidth" (ngModelChange)="onInspectorChange()" class="flex-1 accent-brand-cyan cursor-pointer" />
+                  </div>
+                </div>
+
+                <!-- 2. İkinci Kontur (Double Stroke) -->
+                <div class="space-y-1 pt-2 border-t border-slate-800/70">
+                  <div class="flex items-center justify-between text-[10px]">
+                    <span class="text-slate-300 font-bold">2. Çift Kontur (Outer Stroke)</span>
+                    <span class="text-amber-300 font-mono">{{ inspectorData.outerStrokeWidth || 0 }}px</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="color" [(ngModel)]="inspectorData.outerStrokeColor" (ngModelChange)="onInspectorChange()" class="w-7 h-6 rounded border border-slate-700 bg-transparent p-0 cursor-pointer shrink-0" />
+                    <input type="range" min="0" max="14" step="1" [(ngModel)]="inspectorData.outerStrokeWidth" (ngModelChange)="onInspectorChange()" class="flex-1 accent-amber-400 cursor-pointer" />
+                  </div>
+                </div>
+
+                <!-- 3. Neon Parıltı (Outer Glow) -->
+                <div class="space-y-1.5 pt-2 border-t border-slate-800/70">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[10px] text-slate-300 font-bold">🔮 Neon Dış Parıltı (Glow)</span>
+                    <input type="checkbox" [(ngModel)]="inspectorData.glowEnabled" (ngModelChange)="onInspectorChange()" class="rounded accent-fuchsia-500 cursor-pointer" />
+                  </div>
+                  <div *ngIf="inspectorData.glowEnabled" class="flex items-center gap-2">
+                    <input type="color" [(ngModel)]="inspectorData.glowColor" (ngModelChange)="onInspectorChange()" class="w-7 h-6 rounded border border-slate-700 bg-transparent p-0 cursor-pointer shrink-0" />
+                    <input type="range" min="4" max="40" step="2" [(ngModel)]="inspectorData.glowRadius" (ngModelChange)="onInspectorChange()" class="flex-1 accent-fuchsia-400 cursor-pointer" />
+                    <span class="text-[9px] font-mono text-fuchsia-300 w-7">{{ inspectorData.glowRadius || 16 }}px</span>
+                  </div>
+                </div>
+
+                <!-- 4. Yönlü Gölge (Directional Drop Shadow) -->
+                <div class="space-y-1.5 pt-2 border-t border-slate-800/70">
+                  <div class="flex items-center justify-between text-[10px]">
+                    <span class="text-slate-300 font-bold">🌑 Yönlü Gölge (Drop Shadow)</span>
+                    <input type="color" [(ngModel)]="inspectorData.shadowColor" (ngModelChange)="onInspectorChange()" class="w-6 h-5 rounded border border-slate-700 bg-transparent p-0 cursor-pointer" />
+                  </div>
+                  <div class="grid grid-cols-3 gap-1.5 text-[9px] text-slate-400">
+                    <div>
+                      <span>Mesafe ({{ inspectorData.shadowDistance ?? 4 }})</span>
+                      <input type="range" min="0" max="24" step="1" [(ngModel)]="inspectorData.shadowDistance" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                    </div>
+                    <div>
+                      <span>Açı ({{ inspectorData.shadowAngle ?? 45 }}°)</span>
+                      <input type="range" min="0" max="360" step="15" [(ngModel)]="inspectorData.shadowAngle" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                    </div>
+                    <div>
+                      <span>Bulanık ({{ inspectorData.shadowBlur ?? 4 }})</span>
+                      <input type="range" min="0" max="24" step="1" [(ngModel)]="inspectorData.shadowBlur" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. 🎬 HAREKET & KEYFRAME SEKMESİ -->
+              <div *ngIf="textInspectorTab() === 'anim'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="space-y-1">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">Giriş Animasyonu</label>
+                    <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                      <option value="none">Yok</option>
+                      <option value="pop-up">💥 Pop-Up (Sıçrama)</option>
+                      <option value="bounce">🏀 Elastic Bounce</option>
+                      <option value="fade">✨ Yumuşak Belirme</option>
+                      <option value="slide-up">⬆️ Aşağıdan Kayma</option>
+                      <option value="slide-down">⬇️ Yukarıdan Kayma</option>
+                      <option value="slide-left">⬅️ Sağdan Kayma</option>
+                      <option value="slide-right">➡️ Soldan Kayma</option>
+                      <option value="zoom-crash">🚀 Zoom Crash</option>
+                      <option value="typewriter">⌨️ Daktilo</option>
+                      <option value="blur-in">🌫️ Sinematik Odak</option>
+                      <option value="glitch">⚡ Siber Glitch</option>
+                    </select>
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">Çıkış Animasyonu</label>
+                    <select [(ngModel)]="inspectorData.exitAnimation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                      <option value="none">Yok</option>
+                      <option value="fade">Fade Out</option>
+                      <option value="scale-out">Scale Out (Küçül)</option>
+                      <option value="slide-down">Aşağı Kayarak Çık</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Sürekli Döngü (Loop) Animasyonu -->
+                <div class="space-y-1">
+                  <label class="text-[9px] text-slate-400 uppercase font-semibold">🔄 Sürekli Döngü (Loop) Efekti</label>
+                  <select [(ngModel)]="inspectorData.loopAnimation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                    <option value="none">Sabit (Döngü Yok)</option>
+                    <option value="pulse">💓 Kalp Atışı (Pulse)</option>
+                    <option value="float">☁️ Havada Süzülme (Float)</option>
+                    <option value="wiggle">🎸 Sallanma (Wiggle)</option>
+                    <option value="shake">🔥 Deprem Titreme (Shake)</option>
+                    <option value="neon-flicker">⚡ Neon Titreme (Flicker)</option>
+                    <option value="pendulum">🕰️ Sarkaç (Pendulum)</option>
+                  </select>
+                </div>
+
+                <!-- Keyframe (◆ Anahtar Kare) Sistemi -->
+                <div class="p-2 bg-dark-900 rounded-lg border border-slate-800 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-bold text-amber-300 flex items-center gap-1">◆ Keyframe (Anahtar Kare)</span>
+                    <button type="button" (click)="addKeyFrameToSelectedOverlay()" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 border border-amber-500/40 text-[9px] font-bold cursor-pointer">
+                      + ◆ Bu Ana Ekle
+                    </button>
+                  </div>
+                  <p class="text-[9px] text-slate-400 leading-tight">
+                    Farklı saniyelerde konum/boyut belirleyerek katmanı ekranda otomatik hareket ettirin.
+                  </p>
+                  <div *ngIf="inspectorData.keyframes && inspectorData.keyframes.length > 0" class="space-y-1 max-h-24 overflow-y-auto">
+                    <div *ngFor="let kf of inspectorData.keyframes; let i = index" class="flex items-center justify-between text-[9px] bg-dark-950 px-2 py-1 rounded border border-slate-800 font-mono">
+                      <span class="text-amber-300">◆ +{{ kf.timeOffset.toFixed(1) }}sn</span>
+                      <span class="text-slate-400">X:{{ kf.x.toFixed(0) }}% Y:{{ kf.y.toFixed(0) }}%</span>
+                      <button type="button" (click)="removeKeyframeFromSelectedOverlay(i)" class="text-rose-400 hover:text-rose-200 cursor-pointer">✕</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 5. 📐 3D & YAY (PHOTOSHOP WARP & PERSPECTIVE) SEKMESİ -->
+              <div *ngIf="textInspectorTab() === 'transform'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <!-- Yay / Kavisli Metin (Curved Text Arc) -->
+                <div class="space-y-1">
+                  <div class="flex justify-between items-center text-[10px]">
+                    <span class="text-slate-200 font-bold">🌈 Yay / Kavisli Yazı (Arc Bend)</span>
+                    <span class="text-brand-cyan font-mono font-bold">{{ inspectorData.curveBend || 0 }}%</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <input type="range" min="-100" max="100" step="5" [(ngModel)]="inspectorData.curveBend" (ngModelChange)="onInspectorChange()" class="flex-1 accent-brand-cyan cursor-pointer" />
+                    <button type="button" (click)="inspectorData.curveBend = 0; onInspectorChange()" class="px-1.5 py-0.5 text-[9px] bg-dark-900 border border-slate-700 rounded text-slate-400 hover:text-white cursor-pointer">0</button>
+                  </div>
+                </div>
+
+                <!-- 3D Perspektif (RotateX, RotateY, Rotation, SkewX) -->
+                <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/70 text-[9px] text-slate-400">
+                  <div>
+                    <div class="flex justify-between"><span>3D Eğim X</span><span class="text-brand-cyan font-mono">{{ inspectorData.rotateX || 0 }}°</span></div>
+                    <input type="range" min="-60" max="60" step="5" [(ngModel)]="inspectorData.rotateX" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>3D Dönüş Y</span><span class="text-brand-cyan font-mono">{{ inspectorData.rotateY || 0 }}°</span></div>
+                    <input type="range" min="-60" max="60" step="5" [(ngModel)]="inspectorData.rotateY" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>2D Döndür</span><span class="text-brand-cyan font-mono">{{ inspectorData.rotation || 0 }}°</span></div>
+                    <input type="range" min="-180" max="180" step="5" [(ngModel)]="inspectorData.rotation" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>İtalik Eğim (Skew)</span><span class="text-brand-cyan font-mono">{{ inspectorData.skewX || 0 }}°</span></div>
+                    <input type="range" min="-35" max="35" step="5" [(ngModel)]="inspectorData.skewX" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                </div>
+
+                <!-- X / Y Konum & Kanal -->
+                <div class="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/70">
+                  <div class="space-y-0.5">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">X Konum (%)</label>
+                    <input type="number" step="0.5" [(ngModel)]="inspectorData.positionX" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white font-mono" />
+                  </div>
+                  <div class="space-y-0.5">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">Y Konum (%)</label>
+                    <input type="number" step="0.5" [(ngModel)]="inspectorData.positionY" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white font-mono" />
+                  </div>
+                </div>
+              </div>
+            </ng-container>
+
+            <!-- ========================================================================= -->
+            <!-- B. GÖRSEL & AI STICKER STÜDYOSU (4 SEKMELİ PHOTOSHOP MOTORU)              -->
+            <!-- ========================================================================= -->
+            <ng-container *ngIf="inspectorData.type === 'image'">
+              <!-- 4 Sekmeli Bar -->
+              <div class="grid grid-cols-4 gap-1 p-1 bg-dark-950 rounded-xl border border-slate-800 text-[9px] font-bold">
+                <button type="button" (click)="imageInspectorTab.set('ai')" [ngClass]="imageInspectorTab() === 'ai' ? 'bg-purple-500 text-white shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">✂️ AI Sticker</button>
+                <button type="button" (click)="imageInspectorTab.set('adjust')" [ngClass]="imageInspectorTab() === 'adjust' ? 'bg-purple-500 text-white shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">🎨 Renk/Işık</button>
+                <button type="button" (click)="imageInspectorTab.set('transform')" [ngClass]="imageInspectorTab() === 'transform' ? 'bg-purple-500 text-white shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">📐 Boyut/3D</button>
+                <button type="button" (click)="imageInspectorTab.set('anim')" [ngClass]="imageInspectorTab() === 'anim' ? 'bg-purple-500 text-white shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">🎬 Hareket</button>
+              </div>
+
+              <!-- 1. ✂️ AI STICKER & MASKE SEKMESİ -->
+              <div *ngIf="imageInspectorTab() === 'ai'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <!-- Canlı AI Arka Plan Kaldırma Butonu -->
+                <div class="p-2.5 rounded-xl bg-gradient-to-br from-purple-950/60 to-indigo-950/40 border border-purple-500/40 space-y-2">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <span class="text-xs font-bold text-white block">🪄 AI Arka Plan Kaldırıcı</span>
+                      <span class="text-[9px] text-purple-200/80">Canlı önizlemede & renderda dekupe</span>
+                    </div>
+                    <input type="checkbox" [(ngModel)]="inspectorData.removeBg" (ngModelChange)="onInspectorChange()" class="rounded accent-purple-500 cursor-pointer" title="Render sırasında rembg AI kullan" />
+                  </div>
+                  <div class="flex gap-1.5">
+                    <button
+                      type="button"
+                      [disabled]="isRemovingBgNow()"
+                      (click)="removeBackgroundNow()"
+                      class="flex-1 py-1.5 px-2 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-bold text-[10px] transition-all cursor-pointer shadow flex items-center justify-center gap-1 disabled:opacity-50">
+                      <span>⚡</span>
+                      <span>{{ isRemovingBgNow() ? 'Dekupe Ediliyor...' : 'Şimdi Arka Planı Sil (Canlı)' }}</span>
+                    </button>
+                    <button
+                      *ngIf="inspectorData.originalSource"
+                      type="button"
+                      (click)="restoreOriginalBackground()"
+                      class="px-2 py-1.5 rounded-lg bg-dark-800 hover:bg-slate-700 text-slate-300 text-[10px] border border-slate-700 cursor-pointer"
+                      title="Orijinal Görsele Dön">
+                      ↩
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Gerçek Silüet Sticker Konturu -->
+                <div class="space-y-1.5 pt-1 border-t border-slate-800/60">
+                  <div class="flex items-center justify-between">
+                    <span class="text-xs text-slate-200 font-semibold">🏷️ Silüet Sticker Konturu</span>
+                    <input type="checkbox" [(ngModel)]="inspectorData.stickerBorder" (ngModelChange)="onInspectorChange()" class="rounded accent-brand-cyan cursor-pointer" />
+                  </div>
+                  <div *ngIf="inspectorData.stickerBorder" class="grid grid-cols-2 gap-2 pt-1">
+                    <div class="space-y-0.5">
+                      <span class="text-[9px] text-slate-400">Kalınlık ({{ inspectorData.stickerBorderWidth || 6 }}px)</span>
+                      <input type="range" min="2" max="18" step="1" [(ngModel)]="inspectorData.stickerBorderWidth" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                    </div>
+                    <div class="space-y-0.5">
+                      <span class="text-[9px] text-slate-400">Kontur Rengi</span>
+                      <input type="color" [(ngModel)]="inspectorData.stickerBorderColor" (ngModelChange)="onInspectorChange()" class="w-full h-6 rounded bg-transparent border border-slate-700 p-0 cursor-pointer" />
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Kırpma / Şekil Maskesi (7 Geometrik Şekil) -->
+                <div class="space-y-1.5 pt-1 border-t border-slate-800/60">
+                  <span class="text-[10px] text-slate-400 uppercase font-semibold block">Kırpma / Şekil Maskesi</span>
+                  <div class="grid grid-cols-4 gap-1">
+                    <button type="button" (click)="inspectorData.maskShape = 'rect'; onInspectorChange()" [ngClass]="(!inspectorData.maskShape || inspectorData.maskShape === 'rect') ? 'bg-purple-500 text-white font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Tam</button>
+                    <button type="button" (click)="inspectorData.maskShape = 'rounded'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'rounded' ? 'bg-purple-500 text-white font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Yuvarlak</button>
+                    <button type="button" (click)="inspectorData.maskShape = 'circle'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'circle' ? 'bg-purple-500 text-white font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">Daire</button>
+                    <button type="button" (click)="inspectorData.maskShape = 'star'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'star' ? 'bg-purple-500 text-white font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">⭐ Yıldız</button>
+                    <button type="button" (click)="inspectorData.maskShape = 'heart'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'heart' ? 'bg-purple-500 text-white font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">❤️ Kalp</button>
+                    <button type="button" (click)="inspectorData.maskShape = 'hexagon'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'hexagon' ? 'bg-purple-500 text-white font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">⬡ Altıgen</button>
+                    <button type="button" (click)="inspectorData.maskShape = 'diamond'; onInspectorChange()" [ngClass]="inspectorData.maskShape === 'diamond' ? 'bg-purple-500 text-white font-bold' : 'bg-dark-900 text-slate-400'" class="py-1 rounded text-[9px] border border-slate-700 cursor-pointer">◆ Elmas</button>
+                  </div>
+                </div>
+
+                <!-- Görsel URL -->
+                <div class="space-y-1 pt-1 border-t border-slate-800/60">
+                  <div class="flex items-center justify-between">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">Görsel / GIF URL</label>
+                    <button type="button" (click)="activeTab.set('media')" class="text-[9px] font-bold text-brand-cyan hover:underline cursor-pointer">📁 Medyadan Seç</button>
+                  </div>
+                  <input type="text" [(ngModel)]="inspectorData.source" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-[11px] text-white focus:border-brand-cyan focus:outline-none" placeholder="https://..." />
+                </div>
+              </div>
+
+              <!-- 2. 🎨 PHOTOSHOP RENK & IŞIK SEKMESİ -->
+              <div *ngIf="imageInspectorTab() === 'adjust'" class="space-y-2.5 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-1">
+                  <span class="text-[10px] font-bold text-slate-300 uppercase">🎨 Katman Renk & Işık (Photoshop)</span>
+                  <button type="button" (click)="resetImageAdjustments()" class="text-[9px] text-amber-400 hover:underline cursor-pointer">Sıfırla</button>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2 text-[9px] text-slate-400">
+                  <div>
+                    <div class="flex justify-between"><span>☀️ Parlaklık</span><span class="text-purple-300 font-mono">{{ inspectorData.brightness || 0 }}</span></div>
+                    <input type="range" min="-80" max="80" step="5" [(ngModel)]="inspectorData.brightness" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>🌓 Kontrast</span><span class="text-purple-300 font-mono">{{ inspectorData.contrast || 0 }}</span></div>
+                    <input type="range" min="-80" max="80" step="5" [(ngModel)]="inspectorData.contrast" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>🌈 Doygunluk</span><span class="text-purple-300 font-mono">{{ inspectorData.saturation || 0 }}</span></div>
+                    <input type="range" min="-100" max="100" step="5" [(ngModel)]="inspectorData.saturation" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>🌡️ Sıcaklık</span><span class="text-purple-300 font-mono">{{ inspectorData.warmth || 0 }}</span></div>
+                    <input type="range" min="-80" max="80" step="5" [(ngModel)]="inspectorData.warmth" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>🎨 Ton (Hue)</span><span class="text-purple-300 font-mono">{{ inspectorData.hue || 0 }}°</span></div>
+                    <input type="range" min="-180" max="180" step="10" [(ngModel)]="inspectorData.hue" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>💧 Bulanıklık</span><span class="text-purple-300 font-mono">{{ inspectorData.blur || 0 }}px</span></div>
+                    <input type="range" min="0" max="20" step="1" [(ngModel)]="inspectorData.blur" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>🔪 Keskinlik</span><span class="text-purple-300 font-mono">{{ inspectorData.sharpen || 0 }}</span></div>
+                    <input type="range" min="0" max="100" step="10" [(ngModel)]="inspectorData.sharpen" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>👻 Opaklık</span><span class="text-purple-300 font-mono">%{{ inspectorData.opacity ?? 100 }}</span></div>
+                    <input type="range" min="10" max="100" step="5" [(ngModel)]="inspectorData.opacity" (ngModelChange)="onInspectorChange()" class="w-full accent-purple-500" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 3. 📐 BOYUT, 3D & KARIŞIM MODU SEKMESİ -->
+              <div *ngIf="imageInspectorTab() === 'transform'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <div class="grid grid-cols-2 gap-2 text-[9px] text-slate-400">
+                  <div>
+                    <div class="flex justify-between"><span>Ölçek (Scale)</span><span class="text-brand-cyan font-mono">{{ inspectorData.scale || 1.0 }}x</span></div>
+                    <input type="range" min="0.2" max="3.0" step="0.05" [(ngModel)]="inspectorData.scale" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                  <div>
+                    <div class="flex justify-between"><span>Döndür</span><span class="text-brand-cyan font-mono">{{ inspectorData.rotation || 0 }}°</span></div>
+                    <input type="range" min="-180" max="180" step="5" [(ngModel)]="inspectorData.rotation" (ngModelChange)="onInspectorChange()" class="w-full accent-brand-cyan" />
+                  </div>
+                </div>
+
+                <!-- Aynalama (Flip H / Flip V) & Karışım Modu -->
+                <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/60">
+                  <button type="button" (click)="inspectorData.flipH = !inspectorData.flipH; onInspectorChange()" [ngClass]="inspectorData.flipH ? 'bg-purple-500/30 border-purple-400 text-purple-200 font-bold' : 'bg-dark-900 border-slate-700 text-slate-400'" class="py-1.5 rounded-lg border text-[10px] cursor-pointer">
+                    ↔️ Yatay Çevir
+                  </button>
+                  <button type="button" (click)="inspectorData.flipV = !inspectorData.flipV; onInspectorChange()" [ngClass]="inspectorData.flipV ? 'bg-purple-500/30 border-purple-400 text-purple-200 font-bold' : 'bg-dark-900 border-slate-700 text-slate-400'" class="py-1.5 rounded-lg border text-[10px] cursor-pointer">
+                    ↕️ Dikey Çevir
+                  </button>
+                </div>
+
+                <div class="space-y-1">
+                  <label class="text-[9px] text-slate-400 uppercase font-semibold">Karışım Modu (Blend Mode)</label>
+                  <select [(ngModel)]="inspectorData.blendMode" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                    <option value="normal">Normal</option>
+                    <option value="screen">Screen (Işık Ekle)</option>
+                    <option value="multiply">Multiply (Koyulaştır)</option>
+                    <option value="overlay">Overlay (Kontrast)</option>
+                  </select>
+                </div>
+
+                <!-- X / Y Konum -->
+                <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/60">
+                  <div class="space-y-0.5">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">X Konum (%)</label>
+                    <input type="number" step="0.5" [(ngModel)]="inspectorData.positionX" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white font-mono" />
+                  </div>
+                  <div class="space-y-0.5">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">Y Konum (%)</label>
+                    <input type="number" step="0.5" [(ngModel)]="inspectorData.positionY" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white font-mono" />
+                  </div>
+                </div>
+              </div>
+
+              <!-- 4. 🎬 GÖRSEL HAREKET & KEYFRAME SEKMESİ -->
+              <div *ngIf="imageInspectorTab() === 'anim'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
+                <div class="grid grid-cols-2 gap-2">
+                  <div class="space-y-1">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">Giriş</label>
+                    <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                      <option value="none">Yok</option>
+                      <option value="pop-up">💥 Pop-Up</option>
+                      <option value="bounce">🏀 Bounce</option>
+                      <option value="fade">✨ Fade In</option>
+                      <option value="slide-up">⬆️ Slide Up</option>
+                      <option value="slide-left">⬅️ Slide Left</option>
+                      <option value="zoom-crash">🚀 Zoom Crash</option>
+                    </select>
+                  </div>
+                  <div class="space-y-1">
+                    <label class="text-[9px] text-slate-400 uppercase font-semibold">Döngü (Loop)</label>
+                    <select [(ngModel)]="inspectorData.loopAnimation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
+                      <option value="none">Sabit</option>
+                      <option value="pulse">💓 Pulse</option>
+                      <option value="float">☁️ Float</option>
+                      <option value="wiggle">🎸 Wiggle</option>
+                      <option value="shake">🔥 Shake</option>
+                      <option value="pendulum">🕰️ Pendulum</option>
+                    </select>
+                  </div>
+                </div>
+
+                <!-- Keyframe -->
+                <div class="p-2 bg-dark-900 rounded-lg border border-slate-800 space-y-1.5">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[10px] font-bold text-amber-300">◆ Keyframe Hareketi</span>
+                    <button type="button" (click)="addKeyFrameToSelectedOverlay()" class="px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/40 text-amber-300 border border-amber-500/40 text-[9px] font-bold cursor-pointer">
+                      + ◆ Keyframe Ekle
+                    </button>
+                  </div>
+                  <div *ngIf="inspectorData.keyframes && inspectorData.keyframes.length > 0" class="space-y-1 max-h-24 overflow-y-auto">
+                    <div *ngFor="let kf of inspectorData.keyframes; let i = index" class="flex items-center justify-between text-[9px] bg-dark-950 px-2 py-1 rounded border border-slate-800 font-mono">
+                      <span class="text-amber-300">◆ +{{ kf.timeOffset.toFixed(1) }}sn</span>
+                      <span class="text-slate-400">X:{{ kf.x.toFixed(0) }}% Y:{{ kf.y.toFixed(0) }}%</span>
+                      <button type="button" (click)="removeKeyframeFromSelectedOverlay(i)" class="text-rose-400 hover:text-rose-200 cursor-pointer">✕</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </ng-container>
+
+            <!-- Katman Sırası / Track Kanalı -->
+            <div class="p-2 bg-dark-950 rounded-xl border border-slate-800 flex items-center justify-between">
+              <span class="text-[10px] text-slate-400 uppercase font-semibold">🥞 Kanal:</span>
               <div class="flex items-center gap-1 flex-wrap">
                 <button 
                   *ngFor="let t of overlayTrackNumbers()" 
@@ -827,36 +1464,14 @@ export interface ContextMenuState {
                   class="px-2 py-0.5 rounded text-[10px] border transition-all cursor-pointer font-mono">
                   T{{ t }}
                 </button>
-                <button type="button" (click)="addTrackLane()" class="px-2 py-0.5 rounded text-[10px] bg-dark-800 text-sky-400 border border-slate-700 font-semibold cursor-pointer">+ Yeni</button>
+                <button type="button" (click)="addTrackLane()" class="px-1.5 py-0.5 rounded text-[10px] bg-dark-800 text-sky-400 border border-slate-700 font-semibold cursor-pointer">+</button>
               </div>
             </div>
 
-            <!-- Animasyonlar -->
-            <div class="grid grid-cols-2 gap-2.5">
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Giriş</label>
-                <select [(ngModel)]="inspectorData.animation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
-                  <option value="none">Yok</option>
-                  <option value="fade">Fade In</option>
-                  <option value="pop-up">Pop Up</option>
-                  <option value="slide-up">Slide Up</option>
-                </select>
-              </div>
-              <div class="space-y-1">
-                <label class="text-[10px] text-slate-400 uppercase font-semibold">Çıkış</label>
-                <select [(ngModel)]="inspectorData.exitAnimation" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-950 border border-slate-700 rounded-lg p-1.5 text-xs text-white outline-none">
-                  <option value="none">Yok</option>
-                  <option value="fade">Fade Out</option>
-                  <option value="scale-out">Scale Out</option>
-                  <option value="slide-down">Slide Down</option>
-                </select>
-              </div>
-            </div>
-
-            <!-- Butonlar -->
-            <div class="pt-2 border-t border-slate-800 flex flex-col gap-1.5">
+            <!-- Kaydet / Çoğalt / Sil Butonları -->
+            <div class="pt-1 border-t border-slate-800 flex flex-col gap-1.5">
               <button (click)="saveInspector()" class="w-full py-2 bg-brand-cyan hover:bg-cyan-400 text-slate-900 font-bold rounded-lg transition-colors shadow-glow-sm cursor-pointer text-xs">
-                Kaydet
+                ✓ Katman Ayarlarını Kaydet
               </button>
               <div class="flex gap-2">
                 <button (click)="duplicateOverlay(selectedOverlayId()!)" class="flex-1 py-1.5 bg-dark-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold cursor-pointer">
@@ -1175,21 +1790,44 @@ export interface ContextMenuState {
               </div>
               <div class="flex justify-between text-slate-400">
                 <span>İşlem Kısayolları:</span>
-                <span class="font-mono text-brand-cyan">Del / B / M</span>
+                <span class="font-mono text-brand-cyan">Del / B / V / M</span>
+              </div>
+            </div>
+
+            <!-- Klip Oynatma Hızı & Sahne Geçişi (CapCut Speed & Transitions) -->
+            <div class="p-3 bg-dark-950 rounded-xl border border-slate-800 space-y-2.5">
+              <div class="flex items-center justify-between text-[10px]">
+                <span class="text-slate-300 uppercase font-bold">⚡ Oynatma Hızı (Speed)</span>
+                <span class="text-brand-cyan font-mono font-bold">{{ playbackSpeed() }}x</span>
+              </div>
+              <div class="grid grid-cols-6 gap-1">
+                <button *ngFor="let spd of [0.5, 0.75, 1.0, 1.25, 1.5, 2.0]"
+                        type="button"
+                        (click)="setPlaybackSpeed(spd)"
+                        [ngClass]="playbackSpeed() === spd ? 'bg-brand-cyan text-slate-950 font-bold border-brand-cyan' : 'bg-dark-900 text-slate-400 border-slate-700 hover:text-white'"
+                        class="py-1 rounded text-[9px] font-mono border transition-colors cursor-pointer">
+                  {{ spd }}x
+                </button>
+              </div>
+              <div class="pt-1 border-t border-slate-800/70">
+                <button type="button" (click)="openTransitionModalForSelectedClip()" class="w-full py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                  <span>⚡</span>
+                  <span>Sahne Geçiş Efekti Ekle / Düzenle</span>
+                </button>
               </div>
             </div>
 
             <div class="space-y-2 pt-1">
-              <button *ngIf="selectedHasKeep()" (click)="deleteSelectedClips()" class="w-full py-2 bg-rose-600/80 hover:bg-rose-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm">
+              <button *ngIf="selectedHasKeep()" (click)="deleteSelectedClips()" class="w-full py-2 bg-rose-600/80 hover:bg-rose-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm cursor-pointer">
                 <span>✕</span> Bu Klipleri Kes / Çıkar (Del)
               </button>
-              <button *ngIf="selectedHasCuts()" (click)="restoreSelectedCuts()" class="w-full py-2 bg-sky-600/80 hover:bg-sky-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm">
+              <button *ngIf="selectedHasCuts()" (click)="restoreSelectedCuts()" class="w-full py-2 bg-sky-600/80 hover:bg-sky-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm cursor-pointer">
                 <span>↩</span> Kesimi İptal Et ve Geri Al
               </button>
-              <button *ngIf="selectedClipIds().length > 1" (click)="mergeSelectedClips()" class="w-full py-2 bg-emerald-600/80 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm">
+              <button *ngIf="selectedClipIds().length > 1" (click)="mergeSelectedClips()" class="w-full py-2 bg-emerald-600/80 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs transition-colors flex items-center justify-center gap-1.5 shadow-glow-sm cursor-pointer">
                 <span>🔗</span> Seçili Klipleri Birleştir (M)
               </button>
-              <button (click)="selectedClipIds.set([])" class="w-full py-1.5 bg-dark-800 text-slate-400 hover:text-white rounded-lg text-xs border border-slate-700">
+              <button (click)="selectedClipIds.set([])" class="w-full py-1.5 bg-dark-800 text-slate-400 hover:text-white rounded-lg text-xs border border-slate-700 cursor-pointer">
                 Seçimi Temizle (Esc)
               </button>
             </div>
@@ -1487,6 +2125,26 @@ export interface ContextMenuState {
                 🎵
               </button>
             </div>
+
+            <!-- Ses Efektleri (SFX) Kanalı Başlığı (A2) -->
+            <div class="h-10 px-2.5 flex items-center justify-between text-xs bg-dark-900/95 border-t border-slate-800 group">
+              <div class="flex items-center gap-1.5">
+                <span class="w-5 h-5 rounded flex items-center justify-center text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  A2
+                </span>
+                <div class="flex flex-col overflow-hidden max-w-[90px]">
+                  <span class="text-[10px] font-bold text-amber-400 truncate">Ses Efektleri</span>
+                  <span class="text-[9px] text-slate-400 font-mono truncate">{{ sfxClips().length }} SFX</span>
+                </div>
+              </div>
+              <button
+                type="button"
+                (click)="activeTab.set('sfx')"
+                class="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-500/25 hover:bg-amber-500/40 text-amber-300 border border-amber-500/40 transition-colors cursor-pointer"
+                title="SFX Kütüphanesini Aç">
+                +🔊
+              </button>
+            </div>
           </div>
 
           <!-- 2. SAĞ KAYDIRILABİLİR ZAMAN ÇİZELGESİ (Scrollable Timeline Canvas) -->
@@ -1517,20 +2175,20 @@ export interface ContextMenuState {
               </div>
 
               
-              <!-- Altyazı Kanalı (Subtitle Track) -->
+              <!-- Altyazı Kanalı (Subtitle Track - O(1) Pre-Computed Layout) -->
               <div [ngClass]="showSubtitles() ? 'opacity-100' : 'opacity-40'"
                    class="relative h-10 bg-dark-900/40 border-b border-slate-800/60 overflow-hidden flex items-center hover:bg-dark-900/70 transition-all">
                 <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
                 
                 <div class="absolute left-0 right-0 top-0 bottom-0 overflow-hidden">
-                  <div *ngFor="let seg of getVisibleSubtitleSegments()"
+                  <div *ngFor="let seg of visibleSubtitleSegments()"
                        (mousedown)="onSubtitleMouseDown($event, seg)"
                        (click)="$event.stopPropagation(); selectSubtitle(seg)"
                        (dblclick)="$event.stopPropagation(); startEditSubtitle(seg)"
                        class="subtitle-segment group absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer select-none"
                        [ngClass]="isSelectedSubtitle(seg) ? 'ring-2 ring-brand-cyan bg-amber-500/50 shadow-glow-sm z-30 font-bold' : (editingSubtitleId() === getSubtitleId(seg) ? 'ring-1 ring-white z-30 bg-amber-500/40' : 'cursor-pointer')"
-                       [style.left.%]="getSubtitleLeft(seg)"
-                       [style.width.%]="getSubtitleWidth(seg)"
+                       [style.left.%]="seg.leftPercent"
+                       [style.width.%]="seg.widthPercent"
                        [title]="editingSubtitleId() === getSubtitleId(seg) ? '' : 'Düzenlemek için tıkla: ' + seg.text">
 
                        <!-- Sol Yeniden Boyutlandırma Kolu -->
@@ -1615,14 +2273,12 @@ export interface ContextMenuState {
                 </div>
               </div>
 
-              <!-- Video Klipleri Şeridi (V1 - Ana Video Kanalı & Gerçek Ses Dalgası) -->
+              <!-- Video Klipleri Şeridi (V1 - Ana Video Kanalı, Gerçek Ses Dalgası & [⚡] Sahne Geçişleri) -->
               <div class="relative bg-dark-950 flex overflow-hidden border-b border-slate-800" [style.height.px]="audioTrackHeight()">
-                <!-- Waveform SVG'si kliplerin içine taşındı (Per-Clip Render) -->
-
-                <!-- Klipler (Flexbox ile ardışık dizilir) -->
+                <!-- Klipler (O(1) Pre-Computed Layout) -->
                 <ng-container *ngFor="let clip of clips()">
                   <div 
-                    *ngIf="isVisible(clip)"
+                    *ngIf="clip.isVisibleClip"
                     (mousedown)="onClipMouseDown($event, clip.id)"
                     (click)="selectClip(clip.id, $event)"
                     (dblclick)="toggleClip(clip, $event)"
@@ -1635,8 +2291,8 @@ export interface ContextMenuState {
                        'bg-emerald-600/20 hover:bg-emerald-500/35': !clip.isCut,
                        'ring-2 ring-inset ring-brand-yellow shadow-[0_0_12px_rgba(250,204,21,0.6)] z-20': selectedClipIds().includes(clip.id)
                     }"
-                    [style.left.%]="getClipLeft(clip)"
-                    [style.width.%]="getClipWidth(clip)"
+                    [style.left.%]="clip.leftPercent"
+                    [style.width.%]="clip.widthPercent"
                     [title]="getClipTooltip(clip)">
                     
                     <!-- Per-Clip Gerçek Ses Dalgası (CapCut & Premiere Pro Bar & Zoom LOD Style) -->
@@ -1676,6 +2332,18 @@ export interface ContextMenuState {
                     </div>
                   </div>
                 </ng-container>
+
+                <!-- Sahne Geçiş İkonları ([⚡] Transition Buttons on Clip Boundaries) -->
+                <button
+                  *ngFor="let b of clipTransitionBoundaries()"
+                  type="button"
+                  (click)="$event.stopPropagation(); openTransitionModal(b)"
+                  [style.left.%]="b.leftPercent"
+                  [ngClass]="b.existing ? 'bg-amber-400 text-slate-950 border-white scale-110 shadow-[0_0_10px_rgba(251,191,36,0.9)]' : 'bg-dark-900/90 text-slate-300 hover:bg-brand-cyan hover:text-slate-950 border-slate-600 opacity-75 hover:opacity-100'"
+                  class="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 rounded-md border flex items-center justify-center text-[10px] font-black z-30 transition-all cursor-pointer"
+                  [title]="b.existing ? ('Geçiş: ' + b.existing.type + ' (' + b.existing.duration + 'sn) — Düzenlemek için tıkla') : 'Sahne Geçiş Efekti Ekle (Fade, Whip Pan, Zoom...)'">
+                  ⚡
+                </button>
               </div>
 
               <!-- Track Yükseklik Boyutlandırıcı (Resizer) -->
@@ -1758,6 +2426,34 @@ export interface ContextMenuState {
                     <span class="text-[11px] font-medium">+ Arka Plan Müziği Ekle (Lo-Fi, Vlog, Sinematik...)</span>
                   </div>
                 </ng-template>
+              </div>
+
+              <!-- Ses Efektleri Kanalı (A2 SFX Track) -->
+              <div class="relative h-10 bg-dark-900/50 border-b border-slate-800/80 overflow-hidden flex items-center select-none">
+                <div class="absolute inset-0 bg-[linear-gradient(to_right,#78350f_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
+
+                <div *ngIf="sfxClips().length === 0" (click)="activeTab.set('sfx')" class="absolute inset-x-2 top-1 bottom-1 rounded border border-dashed border-amber-500/25 hover:border-amber-400/60 flex items-center justify-center gap-1.5 text-[10px] text-amber-400/70 hover:text-amber-300 cursor-pointer transition-colors">
+                  <span>🔊</span>
+                  <span>+ Ses Efekti (SFX) Ekle (Whoosh, Pop, Ding, Bass Drop...)</span>
+                </div>
+
+                <div
+                  *ngFor="let sfx of sfxClips()"
+                  (click)="$event.stopPropagation(); previewSfxClip(sfx)"
+                  [ngStyle]="getSfxClipStyle(sfx)"
+                  class="absolute top-1 bottom-1 rounded-md bg-gradient-to-r from-amber-600/85 to-orange-600/85 border border-amber-300/70 px-2 flex items-center justify-between text-[10px] font-bold text-white shadow z-20 cursor-pointer group overflow-hidden min-w-[24px]"
+                  [title]="(sfx.name || sfx.title || 'SFX') + ' (' + sfx.start.toFixed(1) + 'sn) — Dinlemek için tıkla'">
+                  <div class="flex items-center gap-1 truncate pointer-events-none">
+                    <span>🔊</span>
+                    <span class="truncate">{{ sfx.name || sfx.title || 'SFX' }}</span>
+                  </div>
+                  <button
+                    type="button"
+                    (click)="$event.stopPropagation(); removeSfxClip(sfx.id)"
+                    class="ml-1 text-[9px] text-amber-100 hover:text-rose-200 opacity-80 group-hover:opacity-100 cursor-pointer">
+                    ✕
+                  </button>
+                </div>
               </div>
 
               <!-- Ortak Zaman İmleci (Playhead) -->
@@ -2520,8 +3216,128 @@ export interface ContextMenuState {
 
         </div>
       </div>
+
+      <!-- SAHNE GEÇİŞ EFEKTLERİ (FFMPEG XFADE TRANSITIONS) MODALI -->
+      <div 
+        *ngIf="showTransitionModal()" 
+        class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150"
+        (click)="showTransitionModal.set(false)">
+        <div 
+          class="bg-dark-900 border border-brand-cyan/40 rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col"
+          (click)="$event.stopPropagation()">
+          
+          <div class="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-dark-950/80">
+            <div class="flex items-center gap-2.5">
+              <span class="w-8 h-8 rounded-lg bg-brand-cyan/20 text-brand-cyan flex items-center justify-center text-lg border border-brand-cyan/30">
+                ⚡
+              </span>
+              <div>
+                <h3 class="text-sm font-bold text-white">Sahne Geçiş Efektleri (CapCut & Premiere Transitions)</h3>
+                <p class="text-[11px] text-slate-400">
+                  Kesim Noktası: <strong class="text-brand-cyan font-mono">{{ activeTransitionBoundary()?.boundaryTime?.toFixed(2) }}sn</strong> • FFmpeg xfade + acrossfade
+                </p>
+              </div>
+            </div>
+            <button type="button" (click)="showTransitionModal.set(false)" class="w-7 h-7 rounded-lg bg-dark-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm cursor-pointer">✕</button>
+          </div>
+
+          <div class="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+            <!-- 14 Geçiş Efekti Kartları -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              <button
+                *ngFor="let tr of studio.transitionLibrary"
+                type="button"
+                (click)="selectedTransitionType.set(tr.type)"
+                [ngClass]="selectedTransitionType() === tr.type ? 'border-brand-cyan bg-brand-cyan/15 ring-1 ring-brand-cyan text-white' : 'border-slate-800 bg-dark-950/70 hover:border-slate-700 text-slate-300'"
+                class="p-2.5 rounded-xl border text-left flex items-start gap-2 transition-all cursor-pointer">
+                <span class="text-lg shrink-0">{{ tr.icon }}</span>
+                <div class="min-w-0">
+                  <div class="text-xs font-bold truncate">{{ tr.name }}</div>
+                  <div class="text-[9px] text-slate-400 line-clamp-1">{{ tr.description }}</div>
+                </div>
+              </button>
+            </div>
+
+            <!-- Geçiş Süresi -->
+            <div class="p-3 rounded-xl bg-dark-950/70 border border-slate-800 space-y-1.5">
+              <div class="flex items-center justify-between text-xs">
+                <span class="font-bold text-slate-200">⏱ Geçiş Süresi (Duration)</span>
+                <span class="font-mono text-brand-cyan font-bold">{{ selectedTransitionDuration().toFixed(2) }} sn</span>
+              </div>
+              <input
+                type="range"
+                min="0.2"
+                max="1.5"
+                step="0.05"
+                [value]="selectedTransitionDuration()"
+                (input)="selectedTransitionDuration.set($any($event.target).valueAsNumber)"
+                class="w-full accent-brand-cyan cursor-pointer" />
+            </div>
+          </div>
+
+          <div class="px-6 py-3.5 border-t border-slate-800 bg-dark-950/80 flex items-center justify-between gap-2 flex-wrap">
+            <div class="flex items-center gap-2">
+              <button
+                *ngIf="activeTransitionBoundary()?.existing"
+                type="button"
+                (click)="removeCurrentTransition()"
+                class="px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-xs font-semibold cursor-pointer">
+                🗑 Geçişi Kaldır
+              </button>
+              <button
+                type="button"
+                (click)="applyTransitionToAllCuts()"
+                class="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-bold cursor-pointer">
+                ⚡ Tüm Kesimlere Uygula
+              </button>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" (click)="showTransitionModal.set(false)" class="px-4 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer">
+                Kapat
+              </button>
+              <button type="button" (click)="saveCurrentTransition()" class="px-5 py-1.5 rounded-lg bg-brand-cyan hover:bg-cyan-400 text-slate-950 text-xs font-bold shadow-glow-sm cursor-pointer">
+                ✓ Bu Kesime Uygula
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </main>
-  `
+  `,
+  styles: [`
+    @keyframes loopPulse {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+    @keyframes loopFloat {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-8px); }
+    }
+    @keyframes loopWiggle {
+      0%, 100% { transform: rotate(-3deg); }
+      50% { transform: rotate(3deg); }
+    }
+    @keyframes loopShake {
+      0%, 100% { transform: translate(0, 0); }
+      25% { transform: translate(-3px, 2px); }
+      50% { transform: translate(3px, -2px); }
+      75% { transform: translate(-2px, -2px); }
+    }
+    @keyframes loopNeonFlicker {
+      0%, 19%, 21%, 23%, 25%, 54%, 56%, 100% { opacity: 1; }
+      20%, 24%, 55% { opacity: 0.45; }
+    }
+    @keyframes loopPendulum {
+      0%, 100% { transform: rotate(-6deg); transform-origin: top center; }
+      50% { transform: rotate(6deg); transform-origin: top center; }
+    }
+    .anim-loop-pulse { animation: loopPulse 1.2s ease-in-out infinite; }
+    .anim-loop-float { animation: loopFloat 2.0s ease-in-out infinite; }
+    .anim-loop-wiggle { animation: loopWiggle 0.8s ease-in-out infinite; }
+    .anim-loop-shake { animation: loopShake 0.35s linear infinite; }
+    .anim-loop-neon { animation: loopNeonFlicker 2.2s infinite; }
+    .anim-loop-pendulum { animation: loopPendulum 1.6s ease-in-out infinite; }
+  `]
 })
 export class EditorComponent implements OnInit, OnDestroy {
   isScrubbing = false;
@@ -2698,8 +3514,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   private assetService = inject(AssetService);
   private signalr = inject(SignalrService);
   private diagnostics = inject(DiagnosticsService);
+  readonly studio = inject(StudioEngineService);
+  readonly studioEngine = this.studio;
 
   @ViewChild('videoPlayer') videoRef!: ElementRef<HTMLVideoElement>;
+  @ViewChild('bgmAudioPlayer') bgmAudioRef?: ElementRef<HTMLAudioElement>;
   @ViewChild('chatMessagesContainer') chatContainer!: ElementRef<HTMLDivElement>;
   @ViewChild('timelineTrack') timelineTrackRef!: ElementRef<HTMLDivElement>;
   @ViewChild('timelineScrollContainer') timelineScrollContainerRef?: ElementRef<HTMLDivElement>;
@@ -2749,6 +3568,53 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly bgmAutoDucking = signal<boolean>(true);
   readonly bgmDuckingAmount = signal<number>(0.15);
   readonly isBgmSelectorOpen = signal<boolean>(false);
+
+  // Profesyonel Stüdyo Sekme & Filtre Durumları (Faz 1-6)
+  readonly textInspectorTab = signal<'style' | 'presets' | 'effects' | 'anim' | 'transform'>('style');
+  readonly imageInspectorTab = signal<'ai' | 'adjust' | 'transform' | 'anim'>('ai');
+  readonly selectedSfxCategory = signal<string>('all');
+  readonly selectedStickerCategory = signal<string>('all');
+  customGifUrl = '';
+  readonly isRemovingBgNow = signal<boolean>(false);
+  readonly bgRemovalProcessing = this.isRemovingBgNow;
+  readonly normalizeAudio = signal<boolean>(false);
+  readonly smartPunchIn = signal<boolean>(false);
+  readonly clipSpeedMap = signal<Record<string, number>>({});
+  private triggeredSfxSet = new Set<string>();
+
+  // Sahne Geçişleri (Transitions) Durumu (Faz 4)
+  readonly showTransitionModal = signal<boolean>(false);
+  readonly transitionModalOpen = this.showTransitionModal;
+  readonly activeTransitionBoundary = signal<any | null>(null);
+  readonly editingTransitionBoundaryTime = signal<number>(0);
+  readonly selectedTransitionType = signal<string>('fade');
+  readonly editingTransitionType = this.selectedTransitionType;
+  readonly selectedTransitionDuration = signal<number>(0.45);
+  readonly editingTransitionDuration = this.selectedTransitionDuration;
+
+  readonly filteredSfxLibrary = computed<SfxLibraryItem[]>(() => {
+    const cat = this.selectedSfxCategory();
+    if (cat === 'all') return this.studio.sfxLibrary;
+    return this.studio.sfxLibrary.filter(item => item.category === cat);
+  });
+
+  readonly filteredStickers = computed<StickerLibraryItem[]>(() => {
+    const cat = this.selectedStickerCategory();
+    if (cat === 'all') return this.studio.stickerLibrary;
+    return this.studio.stickerLibrary.filter(item => item.category === cat);
+  });
+
+  readonly sfxClips = computed<EdlSfxClip[]>(() => {
+    return this.activeEdl()?.sfxClips || [];
+  });
+
+  readonly transitions = computed<EdlTransition[]>(() => {
+    return this.activeEdl()?.transitions || [];
+  });
+
+  readonly pendingSuggestions = computed<SuggestionItem[]>(() => {
+    return (this.activeEdl()?.suggestions || []).filter(s => s.status === 'pending' || !s.status);
+  });
 
   readonly currentSubtitleSegment = computed<TranscriptSegment | null>(() => {
     const edl = this.activeEdl();
@@ -2804,7 +3670,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   });
 
   // Sol Panel Aktif Sekmesi
-  readonly activeTab = signal<'chat' | 'overlays' | 'inspector' | 'media' | 'transcript'>('chat');
+  readonly activeTab = signal<'chat' | 'overlays' | 'inspector' | 'media' | 'sfx' | 'transcript'>('chat');
   readonly rendering = signal<boolean>(false);
   readonly rippleAi = signal<boolean>(true);
   readonly rippleManual = signal<boolean>(true);
@@ -3073,12 +3939,16 @@ export class EditorComponent implements OnInit, OnDestroy {
     return { text: String(text), color: String(color), font: String(font), posX, posY };
   });
 
-  // Clips hesaplaması
+  // O(1) Pre-Computed Clips hesaplaması (Zero-Lag Optimization)
   readonly clips = computed(() => {
-    const total = this.totalDuration();
+    const total = Math.max(0.1, this.totalDuration());
     const edl = this.activeEdl();
     const cuts = edl?.cuts || [];
     const splits = [...this.splitMarkers(), total].sort((a,b) => a-b);
+    const rAi = this.rippleAi();
+    const rMan = this.rippleManual();
+    const rRet = this.rippleRetake();
+    const rippleActive = rAi || rMan || rRet;
     
     let allPoints = new Set<number>();
     allPoints.add(0);
@@ -3090,7 +3960,8 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     
     const sortedPoints = Array.from(allPoints).sort((a,b) => a-b);
-    const result: any[] = [];
+    const rawClips: any[] = [];
+    let totalVisDur = 0;
     
     for (let i = 0; i < sortedPoints.length - 1; i++) {
       const start = sortedPoints[i];
@@ -3099,16 +3970,178 @@ export class EditorComponent implements OnInit, OnDestroy {
       
       const mid = (start + end) / 2;
       const cut = cuts.find(c => mid >= c.start && mid <= c.end);
-      result.push({
+      const isCut = !!cut;
+      const reason = (cut?.reason || '').toLowerCase();
+      const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
+      const isManual = isCut && reason.includes('manuel');
+
+      let isVisibleClip = true;
+      if (isCut) {
+        if (isManual) isVisibleClip = !rMan;
+        else if (isRetake) isVisibleClip = !rRet;
+        else isVisibleClip = !rAi;
+      }
+
+      const duration = end - start;
+      if (isVisibleClip) {
+        totalVisDur += duration;
+      }
+
+      rawClips.push({
         id: `clip_${i}_${start}`,
         start,
         end,
-        duration: end - start,
-        isCut: !!cut,
-        cutObj: cut
+        duration,
+        isCut,
+        cutObj: cut,
+        isVisibleClip,
+        leftPercent: 0,
+        widthPercent: 0
       });
     }
-    return result;
+
+    const visDur = Math.max(0.1, totalVisDur);
+    let accVis = 0;
+    let keepIndex = 0;
+    for (const c of rawClips) {
+      if (!c.isCut) {
+        c.keepIndex = keepIndex++;
+      }
+      if (!rippleActive) {
+        c.leftPercent = (c.start / total) * 100;
+        c.widthPercent = (c.duration / total) * 100;
+      } else {
+        c.leftPercent = (accVis / visDur) * 100;
+        c.widthPercent = c.isVisibleClip ? (c.duration / visDur) * 100 : 0;
+        if (c.isVisibleClip) {
+          accVis += c.duration;
+        }
+      }
+    }
+    return rawClips;
+  });
+
+  // O(1) Pre-Computed Altyazı Segmentleri (Zero-Lag Optimization)
+  readonly visibleSubtitleSegments = computed(() => {
+    const segments = this.activeEdl()?.transcript?.segments || [];
+    const total = Math.max(0.1, this.totalDuration());
+    const rippleActive = this.isAnyRippleActive();
+    const visDur = Math.max(0.1, this.visibleDuration());
+    const visibleClips = this.clips().filter(c => c.isVisibleClip);
+
+    const filtered = !rippleActive
+      ? segments
+      : segments.filter(seg => visibleClips.some(c => (Math.min(seg.end, c.end) - Math.max(seg.start, c.start)) > 0.03));
+
+    return filtered.map(seg => {
+      if (!rippleActive) {
+        return {
+          ...seg,
+          leftPercent: (seg.start / total) * 100,
+          widthPercent: Math.max(0.1, ((seg.end - seg.start) / total) * 100)
+        };
+      }
+      const startVis = this.getVisTimeFromRawTime(seg.start);
+      const endVis = this.getVisTimeFromRawTime(seg.end);
+      return {
+        ...seg,
+        leftPercent: (startVis / visDur) * 100,
+        widthPercent: Math.max(0.1, ((endVis - startVis) / visDur) * 100)
+      };
+    });
+  });
+
+  // V1 Klipleri Arasındaki Sahne Geçiş Noktaları ([⚡] Transition Boundaries)
+  readonly clipTransitionBoundaries = computed(() => {
+    const visibleKeepClips = this.clips().filter(c => c.isVisibleClip && !c.isCut);
+    const transitions = this.transitions();
+    const boundaries: Array<{
+      id: string;
+      boundaryTime: number;
+      leftPercent: number;
+      fromClipId: string;
+      toClipId: string;
+      existing?: EdlTransition;
+    }> = [];
+
+    for (let i = 0; i < visibleKeepClips.length - 1; i++) {
+      const prev = visibleKeepClips[i];
+      const next = visibleKeepClips[i + 1];
+      const boundaryTime = next.start;
+      const leftPercent = prev.leftPercent + prev.widthPercent;
+      const existing = transitions.find(tr => Math.abs((tr.boundaryTime || 0) - boundaryTime) < 0.35);
+      boundaries.push({
+        id: `tr_bound_${i}_${boundaryTime.toFixed(2)}`,
+        boundaryTime,
+        leftPercent,
+        fromClipId: prev.id,
+        toClipId: next.id,
+        existing
+      });
+    }
+    return boundaries;
+  });
+
+  // Canlı Önizleme Monitörü için Aktif Geçiş Efekti & Smart Punch-In
+  readonly activeTransitionEffect = computed<{ badge: string; overlayStyle: any; videoScale?: number; videoTranslateX?: number; videoOpacity?: number } | null>(() => {
+    const t = this.currentTime();
+    const transitions = this.transitions();
+    if (!transitions || transitions.length === 0) return null;
+
+    for (const tr of transitions) {
+      const half = (tr.duration || 0.45) / 2;
+      const bTime = tr.boundaryTime || 0;
+      if (t >= bTime - half && t <= bTime + half) {
+        const progress = (t - (bTime - half)) / Math.max(0.1, tr.duration || 0.45); // 0..1
+        const intensity = 1 - Math.abs(progress - 0.5) * 2; // 0 -> 1 -> 0 peak at boundary
+        const trMeta = this.studio.transitionLibrary.find(x => x.type === tr.type);
+        const badge = trMeta?.name || tr.type;
+
+        if (tr.type === 'fadeblack') {
+          return { badge, overlayStyle: { backgroundColor: `rgba(0,0,0,${(intensity * 0.92).toFixed(2)})` } };
+        }
+        if (tr.type === 'fadewhite') {
+          return { badge, overlayStyle: { backgroundColor: `rgba(255,255,255,${(intensity * 0.92).toFixed(2)})` } };
+        }
+        if (tr.type === 'slideleft' || tr.type === 'wipeleft') {
+          return { badge, overlayStyle: { backgroundColor: `rgba(6,182,212,${(intensity * 0.15).toFixed(2)})` }, videoTranslateX: (0.5 - progress) * 14 };
+        }
+        if (tr.type === 'slideright' || tr.type === 'wiperight') {
+          return { badge, overlayStyle: { backgroundColor: `rgba(6,182,212,${(intensity * 0.15).toFixed(2)})` }, videoTranslateX: (progress - 0.5) * 14 };
+        }
+        if (tr.type === 'zoomin' || tr.type === 'circleopen') {
+          return { badge, overlayStyle: { boxShadow: `inset 0 0 ${Math.round(intensity * 60)}px rgba(6,182,212,0.45)` }, videoScale: 1 + intensity * 0.18 };
+        }
+        return { badge, overlayStyle: { backgroundColor: `rgba(15,23,42,${(intensity * 0.5).toFixed(2)})` }, videoOpacity: 1 - intensity * 0.45 };
+      }
+    }
+    return null;
+  });
+
+  readonly videoPreviewTransform = computed<string>(() => {
+    const tr = this.activeTransitionEffect();
+    let scale = 1.0;
+    let tx = 0;
+
+    // Smart Punch-In (1.10x alternatif sahne yakınlaştırması)
+    if (this.smartPunchIn()) {
+      const t = this.currentTime();
+      const curClip = this.clips().find(c => !c.isCut && t >= c.start && t < c.end);
+      if (curClip && curClip.keepIndex % 2 === 1) {
+        scale = 1.10;
+      }
+    }
+
+    if (tr?.videoScale) scale *= tr.videoScale;
+    if (tr?.videoTranslateX) tx = tr.videoTranslateX;
+
+    if (scale === 1.0 && tx === 0) return 'none';
+    return `scale(${scale.toFixed(3)}) translateX(${tx.toFixed(1)}%)`;
+  });
+
+  readonly videoPreviewOpacity = computed<number>(() => {
+    const tr = this.activeTransitionEffect();
+    return tr?.videoOpacity ?? 1.0;
   });
 
   isAnyRippleActive(): boolean {
@@ -3116,51 +4149,19 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getClipLeft(clip: any): number {
-    if (!this.isAnyRippleActive()) {
-      return (clip.start / this.totalDuration()) * 100;
-    }
-    const allClips = this.clips();
-    const visDur = this.visibleDuration();
-    if (visDur <= 0) return 0;
-    let accumulatedDuration = 0;
-    for (const c of allClips) {
-      if (c.id === clip.id) break;
-      if (this.isVisible(c)) {
-        accumulatedDuration += c.duration;
-      }
-    }
-    return (accumulatedDuration / visDur) * 100;
+    return clip.leftPercent ?? 0;
   }
 
   getClipWidth(clip: any): number {
-    if (!this.isAnyRippleActive()) {
-      return ((clip.end - clip.start) / this.totalDuration()) * 100;
-    }
-    const visDur = this.visibleDuration();
-    if (visDur <= 0) return 0;
-    return (clip.duration / visDur) * 100;
+    return clip.widthPercent ?? 0;
   }
 
   getSubtitleLeft(seg: any): number {
-    if (!this.isAnyRippleActive()) {
-      return (seg.start / this.totalDuration()) * 100;
-    }
-    const visDur = this.visibleDuration();
-    if (visDur <= 0) return 0;
-    return (this.getVisTimeFromRawTime(seg.start) / visDur) * 100;
+    return seg.leftPercent ?? 0;
   }
 
   getSubtitleWidth(seg: any): number {
-    if (!this.isAnyRippleActive()) {
-      return ((seg.end - seg.start) / this.totalDuration()) * 100;
-    }
-    const visDur = this.visibleDuration();
-    if (visDur <= 0) return 0;
-    
-    const startVis = this.getVisTimeFromRawTime(seg.start);
-    const endVis = this.getVisTimeFromRawTime(seg.end);
-    const width = ((endVis - startVis) / visDur) * 100;
-    return Math.max(0, width);
+    return seg.widthPercent ?? 0;
   }
 
   getSubtitleId(seg: any): string {
@@ -3917,9 +4918,19 @@ export class EditorComponent implements OnInit, OnDestroy {
             });
           }
         }
+        // Otonom Video Yönetmeni (Faz 6): Eğer henüz proaktif AI önerisi yoksa ilk yüklemede akıllı öneriler üret
+        if (!res.edl.suggestions || res.edl.suggestions.length === 0) {
+          res.edl.suggestions = this.studio.generateProactiveSuggestions(res.edl);
+        }
         this.edl.set(res.edl);
         if (res.edl.settings?.subtitlesEnabled !== undefined) {
           this.showSubtitles.set(res.edl.settings.subtitlesEnabled);
+        }
+        if (res.edl.settings?.normalizeAudio !== undefined) {
+          this.normalizeAudio.set(Boolean(res.edl.settings.normalizeAudio));
+        }
+        if (res.edl.settings?.smartPunchIn !== undefined) {
+          this.smartPunchIn.set(Boolean(res.edl.settings.smartPunchIn));
         }
         if (res.edl.settings?.subtitleStyle) {
           this.initSubtitleStyleFromSettings(res.edl.settings.subtitleStyle);
@@ -4438,12 +5449,36 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   isSkippingCut = false;
+  private playedSfxIdsInPass = new Set<string>();
 
   onVideoSeeked(): void {
     this.isSkippingCut = false;
+    this.playedSfxIdsInPass.clear();
+    const bgm = this.bgmAudioRef?.nativeElement;
+    const video = this.videoRef?.nativeElement;
+    if (bgm && video && this.bgmUrl()) {
+      bgm.currentTime = video.currentTime % Math.max(1, bgm.duration || 60);
+    }
   }
 
-  // --- CANLI EDL SİMÜLASYONU ---
+  onVideoPlay(): void {
+    const bgm = this.bgmAudioRef?.nativeElement;
+    const video = this.videoRef?.nativeElement;
+    if (bgm && this.bgmUrl()) {
+      bgm.currentTime = (video?.currentTime || 0) % Math.max(1, bgm.duration || 60);
+      bgm.volume = (this.edl()?.settings?.bgmVolume ?? 15) / 100;
+      bgm.play().catch(() => {});
+    }
+  }
+
+  onVideoPause(): void {
+    const bgm = this.bgmAudioRef?.nativeElement;
+    if (bgm) {
+      bgm.pause();
+    }
+  }
+
+  // --- CANLI EDL SİMÜLASYONU (Cut Skip + BGM Auto-Ducking + Canlı SFX + Klip Hızı) ---
   onTimeUpdate(): void {
     if (this.isScrubbing) return;
     
@@ -4455,9 +5490,40 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     if (video.seeking || this.isSkippingCut) return;
 
-    // Sadece ripple ile kesilmiş ve gizlenmiş klipleri atla
+    // 1. Canlı BGM Auto-Ducking ([E2])
+    const bgm = this.bgmAudioRef?.nativeElement;
+    if (bgm && this.bgmUrl() && !video.paused) {
+      const baseVol = Math.max(0, Math.min(1, (this.edl()?.settings?.bgmVolume ?? 15) / 100));
+      const autoDuck = this.edl()?.settings?.bgmAutoDuck ?? true;
+      const isSpeaking = autoDuck && this.visibleSubtitleSegments().some((seg: any) => t >= seg.start && t <= seg.end);
+      const targetVol = isSpeaking ? Math.max(0.02, baseVol * 0.25) : baseVol;
+      bgm.volume = bgm.volume + (targetVol - bgm.volume) * 0.35;
+    }
+
+    // 2. Canlı SFX Tetikleme (A2 SFX Kanalı)
+    if (!video.paused) {
+      const sfxList = this.sfxClips();
+      for (const sfx of sfxList) {
+        if (t >= sfx.start && t <= sfx.start + 0.18) {
+          if (!this.playedSfxIdsInPass.has(sfx.id)) {
+            this.playedSfxIdsInPass.add(sfx.id);
+            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.8);
+          }
+        } else if (t < sfx.start - 0.1 || t > sfx.start + (sfx.duration || 1.0)) {
+          this.playedSfxIdsInPass.delete(sfx.id);
+        }
+      }
+    }
+
+    // 3. Klip Hızı (0.5x - 2.0x) ve Kesilmiş Klipleri Atlama
     const allClips = this.clips();
     const currentClip = allClips.find(c => t >= c.start && t < c.end);
+    if (currentClip) {
+      const targetSpeed = this.clipSpeedMap()[currentClip.id] || 1.0;
+      if (Math.abs(video.playbackRate - targetSpeed) > 0.05) {
+        video.playbackRate = targetSpeed;
+      }
+    }
     if (currentClip && !this.isVisible(currentClip)) {
       // Kesilmiş bir klipteyiz. Bu klibi ve ardışık gelen tüm kesilmiş klipleri birleştirip tek seferde atla!
       let targetJumpTime = currentClip.end;
@@ -4797,6 +5863,20 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlayTop(ov: OverlayItem): string {
+    if (ov.keyframes && ov.keyframes.length >= 2) {
+      const relT = Math.max(0, this.currentTime() - ov.timestamp);
+      const sorted = [...ov.keyframes].sort((a, b) => a.timeOffset - b.timeOffset);
+      if (relT <= sorted[0].timeOffset) return `${sorted[0].y}%`;
+      if (relT >= sorted[sorted.length - 1].timeOffset) return `${sorted[sorted.length - 1].y}%`;
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (relT >= sorted[i].timeOffset && relT <= sorted[i + 1].timeOffset) {
+          const span = Math.max(0.01, sorted[i + 1].timeOffset - sorted[i].timeOffset);
+          const ratio = (relT - sorted[i].timeOffset) / span;
+          const y = sorted[i].y + (sorted[i + 1].y - sorted[i].y) * ratio;
+          return `${y.toFixed(2)}%`;
+        }
+      }
+    }
     if (ov.positionY !== undefined && ov.positionY !== null) return `${ov.positionY}%`;
     const vPos = ov.position?.[1] || 'bottom';
     if (vPos === 'top') return '10%';
@@ -4805,6 +5885,20 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlayLeft(ov: OverlayItem): string {
+    if (ov.keyframes && ov.keyframes.length >= 2) {
+      const relT = Math.max(0, this.currentTime() - ov.timestamp);
+      const sorted = [...ov.keyframes].sort((a, b) => a.timeOffset - b.timeOffset);
+      if (relT <= sorted[0].timeOffset) return `${sorted[0].x}%`;
+      if (relT >= sorted[sorted.length - 1].timeOffset) return `${sorted[sorted.length - 1].x}%`;
+      for (let i = 0; i < sorted.length - 1; i++) {
+        if (relT >= sorted[i].timeOffset && relT <= sorted[i + 1].timeOffset) {
+          const span = Math.max(0.01, sorted[i + 1].timeOffset - sorted[i].timeOffset);
+          const ratio = (relT - sorted[i].timeOffset) / span;
+          const x = sorted[i].x + (sorted[i + 1].x - sorted[i].x) * ratio;
+          return `${x.toFixed(2)}%`;
+        }
+      }
+    }
     if (ov.positionX !== undefined && ov.positionX !== null) return `${ov.positionX}%`;
     const hPos = ov.position?.[0] || 'center';
     if (hPos === 'left') return '10%';
@@ -4820,22 +5914,35 @@ export class EditorComponent implements OnInit, OnDestroy {
     const t = this.currentTime();
     const anim = ov.animation || 'fade';
     const exitAnim = ov.exitAnimation || 'fade';
-    
+    const loopAnim = ov.loopAnimation || 'none';
+    const classes: string[] = [];
+
     if (t < ov.timestamp + 0.5) {
-      if (anim === 'fade') return 'animate-fade-in';
-      if (anim === 'pop-up') return 'animate-scale-in';
-      if (anim === 'slide-up') return 'animate-slide-up-forwards';
-      return '';
+      if (anim === 'fade') classes.push('animate-fade-in');
+      else if (anim === 'pop-up') classes.push('animate-scale-in');
+      else if (anim === 'bounce') classes.push('animate-bounce-in');
+      else if (anim === 'zoom-crash') classes.push('animate-zoom-crash');
+      else if (anim === 'slide-up') classes.push('animate-slide-up-forwards');
+      else if (anim === 'slide-down') classes.push('animate-slide-down-in');
+      else if (anim === 'slide-left') classes.push('animate-slide-left-in');
+      else if (anim === 'slide-right') classes.push('animate-slide-right-in');
+      else if (anim === 'glitch') classes.push('animate-glitch-in');
+      else if (anim === 'blur-in') classes.push('animate-blur-in');
+    } else if (t > (ov.timestamp + ov.duration - 0.5)) {
+      if (exitAnim === 'fade') classes.push('animate-fade-out');
+      else if (exitAnim === 'scale-out') classes.push('animate-scale-out');
+      else if (exitAnim === 'slide-down') classes.push('animate-slide-down-out');
+      else if (exitAnim === 'blur-out') classes.push('animate-blur-out');
+    } else if (loopAnim !== 'none') {
+      if (loopAnim === 'pulse') classes.push('animate-loop-pulse');
+      else if (loopAnim === 'float') classes.push('animate-loop-float');
+      else if (loopAnim === 'wiggle') classes.push('animate-loop-wiggle');
+      else if (loopAnim === 'shake') classes.push('animate-loop-shake');
+      else if (loopAnim === 'neon-flicker') classes.push('animate-loop-neon');
+      else if (loopAnim === 'pendulum') classes.push('animate-loop-pendulum');
     }
-    
-    if (t > (ov.timestamp + ov.duration - 0.5)) {
-      if (exitAnim === 'fade') return 'animate-fade-out';
-      if (exitAnim === 'scale-out') return 'animate-scale-out';
-      if (exitAnim === 'slide-down') return 'animate-slide-down-out';
-      return '';
-    }
-    
-    return '';
+
+    return classes.join(' ');
   }
 
   autoAssignOverlayTracks(overlays: OverlayItem[]): { overlays: OverlayItem[]; changed: boolean } {
@@ -5114,6 +6221,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       action: 'add'
     };
 
+    // Anında (0ms) yerel EDL'e ekle ve sağdaki Stüdyo Denetçisini aç
+    this.edl.update(curr => curr ? { ...curr, overlays: [...(curr.overlays || []), newOverlay] } : null);
+    this.selectOverlay(newOvId);
+
     this.edlService.patchEdl(this.projectId, {
       overlays: [newOverlay]
     }).subscribe({
@@ -5181,6 +6292,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       action: 'add'
     };
 
+    // Anında (0ms) yerel EDL'e ekle ve sağdaki Görsel/Photoshop Denetçisini aç
+    this.edl.update(curr => curr ? { ...curr, overlays: [...(curr.overlays || []), newOverlay] } : null);
+    this.selectOverlay(newOvId);
+
     this.edlService.patchEdl(this.projectId, {
       overlays: [newOverlay]
     }).subscribe({
@@ -5214,36 +6329,71 @@ export class EditorComponent implements OnInit, OnDestroy {
           type: ov.type || 'text',
           content: ov.content || '',
           source: ov.source || '',
+          originalSource: ov.originalSource || ov.source || '',
           timestamp: ov.timestamp ?? 0,
           duration: ov.duration ?? 3,
           fontSize: ov.fontSize ?? 48,
           font: ov.font || 'Inter',
+          fontWeight: ov.fontWeight || '900',
+          lineHeight: ov.lineHeight ?? 1.2,
+          textAlign: ov.textAlign || 'center',
           color: ov.color || '#FFFFFF',
+          fillType: ov.fillType || 'solid',
+          gradientStart: ov.gradientStart || '#FACC15',
+          gradientEnd: ov.gradientEnd || '#EF4444',
+          gradientAngle: ov.gradientAngle ?? 90,
           positionX: ov.positionX ?? 50,
           positionY: ov.positionY ?? 50,
           animation: ov.animation || 'none',
           exitAnimation: ov.exitAnimation || 'fade',
+          loopAnimation: ov.loopAnimation || 'none',
+          keyframes: ov.keyframes ? [...ov.keyframes] : [],
           scale: ov.scale ?? 1.0,
           trackId: ov.trackId ?? 1,
-          // Tipografi & Rozet
+          // Tipografi & Efektler
           strokeColor: ov.strokeColor || '#000000',
           strokeWidth: ov.strokeWidth ?? 0,
+          outerStrokeColor: ov.outerStrokeColor || '#EF4444',
+          outerStrokeWidth: ov.outerStrokeWidth ?? 0,
+          glowEnabled: ov.glowEnabled ?? false,
+          glowColor: ov.glowColor || '#22D3EE',
+          glowRadius: ov.glowRadius ?? 18,
           shadowColor: ov.shadowColor || 'rgba(0,0,0,0.8)',
           shadowBlur: ov.shadowBlur ?? 2,
+          shadowDistance: ov.shadowDistance ?? 4,
+          shadowAngle: ov.shadowAngle ?? 45,
           boxStyle: ov.boxStyle || 'none',
           boxBgColor: ov.boxBgColor || '#1E293B',
           boxPadding: ov.boxPadding ?? 14,
           borderRadius: ov.borderRadius ?? 20,
           allCaps: ov.allCaps ?? false,
           letterSpacing: ov.letterSpacing ?? 0,
-          // Görsel & AI
+          curveBend: ov.curveBend ?? 0,
+          rotateX: ov.rotateX ?? 0,
+          rotateY: ov.rotateY ?? 0,
+          skewX: ov.skewX ?? 0,
+          skewY: ov.skewY ?? 0,
+          // Görsel, Photoshop & AI Sticker
           removeBg: ov.removeBg ?? false,
           stickerBorder: ov.stickerBorder ?? false,
           stickerBorderWidth: ov.stickerBorderWidth ?? 6,
           stickerBorderColor: ov.stickerBorderColor || '#FFFFFF',
           rotation: ov.rotation ?? 0,
           maskShape: ov.maskShape || 'rect',
-          chromaKeyColor: ov.chromaKeyColor || ''
+          feather: ov.feather ?? 0,
+          chromaKeyColor: ov.chromaKeyColor || '',
+          brightness: ov.brightness ?? 0,
+          contrast: ov.contrast ?? 0,
+          saturation: ov.saturation ?? 0,
+          warmth: ov.warmth ?? 0,
+          hue: ov.hue ?? 0,
+          blur: ov.blur ?? 0,
+          sharpen: ov.sharpen ?? 0,
+          opacity: ov.opacity ?? 100,
+          flipH: ov.flipH ?? false,
+          flipV: ov.flipV ?? false,
+          blendMode: ov.blendMode || 'normal',
+          dropShadow: ov.dropShadow ?? false
         };
         
         const t = this.currentTime();
@@ -5263,38 +6413,73 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (ov) {
       ov.content = this.inspectorData.content;
       ov.source = this.inspectorData.source;
+      ov.originalSource = this.inspectorData.originalSource || ov.originalSource;
       ov.color = this.inspectorData.color;
       ov.fontSize = Number(this.inspectorData.fontSize) || 48;
       ov.font = this.inspectorData.font;
+      ov.fontWeight = this.inspectorData.fontWeight || '900';
+      ov.lineHeight = Number(this.inspectorData.lineHeight) || 1.2;
+      ov.textAlign = this.inspectorData.textAlign || 'center';
+      ov.fillType = this.inspectorData.fillType || 'solid';
+      ov.gradientStart = this.inspectorData.gradientStart || '#FACC15';
+      ov.gradientEnd = this.inspectorData.gradientEnd || '#EF4444';
+      ov.gradientAngle = Number(this.inspectorData.gradientAngle) ?? 90;
       ov.scale = Number(this.inspectorData.scale) || 1.0;
       ov.animation = this.inspectorData.animation;
       ov.exitAnimation = this.inspectorData.exitAnimation || 'fade';
+      ov.loopAnimation = this.inspectorData.loopAnimation || 'none';
+      ov.keyframes = this.inspectorData.keyframes || [];
       ov.positionX = Number(this.inspectorData.positionX);
       ov.positionY = Number(this.inspectorData.positionY);
       ov.timestamp = Number(this.inspectorData.timestamp);
       ov.duration = Number(this.inspectorData.duration);
       ov.trackId = Number(this.inspectorData.trackId) || 1;
 
-      // Tipografi & Rozet
+      // Tipografi & Rozet & 3D
       ov.strokeColor = this.inspectorData.strokeColor;
       ov.strokeWidth = Number(this.inspectorData.strokeWidth) || 0;
+      ov.outerStrokeColor = this.inspectorData.outerStrokeColor || '#EF4444';
+      ov.outerStrokeWidth = Number(this.inspectorData.outerStrokeWidth) || 0;
+      ov.glowEnabled = Boolean(this.inspectorData.glowEnabled);
+      ov.glowColor = this.inspectorData.glowColor || '#22D3EE';
+      ov.glowRadius = Number(this.inspectorData.glowRadius) || 18;
       ov.shadowColor = this.inspectorData.shadowColor;
       ov.shadowBlur = Number(this.inspectorData.shadowBlur) || 0;
+      ov.shadowDistance = Number(this.inspectorData.shadowDistance) || 0;
+      ov.shadowAngle = Number(this.inspectorData.shadowAngle) || 45;
       ov.boxStyle = this.inspectorData.boxStyle || 'none';
       ov.boxBgColor = this.inspectorData.boxBgColor;
       ov.boxPadding = Number(this.inspectorData.boxPadding) || 14;
       ov.borderRadius = Number(this.inspectorData.borderRadius) || 20;
       ov.allCaps = Boolean(this.inspectorData.allCaps);
       ov.letterSpacing = Number(this.inspectorData.letterSpacing) || 0;
+      ov.curveBend = Number(this.inspectorData.curveBend) || 0;
+      ov.rotateX = Number(this.inspectorData.rotateX) || 0;
+      ov.rotateY = Number(this.inspectorData.rotateY) || 0;
+      ov.skewX = Number(this.inspectorData.skewX) || 0;
+      ov.skewY = Number(this.inspectorData.skewY) || 0;
 
-      // Görsel & AI
+      // Görsel, Photoshop & AI
       ov.removeBg = Boolean(this.inspectorData.removeBg);
       ov.stickerBorder = Boolean(this.inspectorData.stickerBorder);
       ov.stickerBorderWidth = Number(this.inspectorData.stickerBorderWidth) || 6;
       ov.stickerBorderColor = this.inspectorData.stickerBorderColor || '#FFFFFF';
       ov.rotation = Number(this.inspectorData.rotation) || 0;
       ov.maskShape = this.inspectorData.maskShape || 'rect';
+      ov.feather = Number(this.inspectorData.feather) || 0;
       ov.chromaKeyColor = this.inspectorData.chromaKeyColor || '';
+      ov.brightness = Number(this.inspectorData.brightness) || 0;
+      ov.contrast = Number(this.inspectorData.contrast) || 0;
+      ov.saturation = Number(this.inspectorData.saturation) || 0;
+      ov.warmth = Number(this.inspectorData.warmth) || 0;
+      ov.hue = Number(this.inspectorData.hue) || 0;
+      ov.blur = Number(this.inspectorData.blur) || 0;
+      ov.sharpen = Number(this.inspectorData.sharpen) || 0;
+      ov.opacity = Number(this.inspectorData.opacity ?? 100);
+      ov.flipH = Boolean(this.inspectorData.flipH);
+      ov.flipV = Boolean(this.inspectorData.flipV);
+      ov.blendMode = this.inspectorData.blendMode || 'normal';
+      ov.dropShadow = Boolean(this.inspectorData.dropShadow);
       
       this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
       this.diagnostics.logTrace('INSPECTOR', 'Overlay Değiştirildi', {
@@ -5314,38 +6499,16 @@ export class EditorComponent implements OnInit, OnDestroy {
      
      this.edlService.patchEdl(this.projectId, {
         overlays: [{
+          ...this.inspectorData,
           id: selId,
           type: this.inspectorData.type || 'text',
-          content: this.inspectorData.content,
-          source: this.inspectorData.source,
           timestamp: Number(this.inspectorData.timestamp),
           duration: Number(this.inspectorData.duration),
           positionX: Number(this.inspectorData.positionX),
           positionY: Number(this.inspectorData.positionY),
-          color: this.inspectorData.color,
           fontSize: Number(this.inspectorData.fontSize),
-          font: this.inspectorData.font,
           scale: Number(this.inspectorData.scale),
-          animation: this.inspectorData.animation,
-          exitAnimation: this.inspectorData.exitAnimation || 'fade',
           trackId: Number(this.inspectorData.trackId) || 1,
-          strokeColor: this.inspectorData.strokeColor,
-          strokeWidth: Number(this.inspectorData.strokeWidth) || 0,
-          shadowColor: this.inspectorData.shadowColor,
-          shadowBlur: Number(this.inspectorData.shadowBlur) || 0,
-          boxStyle: this.inspectorData.boxStyle || 'none',
-          boxBgColor: this.inspectorData.boxBgColor,
-          boxPadding: Number(this.inspectorData.boxPadding) || 14,
-          borderRadius: Number(this.inspectorData.borderRadius) || 20,
-          allCaps: Boolean(this.inspectorData.allCaps),
-          letterSpacing: Number(this.inspectorData.letterSpacing) || 0,
-          removeBg: Boolean(this.inspectorData.removeBg),
-          stickerBorder: Boolean(this.inspectorData.stickerBorder),
-          stickerBorderWidth: Number(this.inspectorData.stickerBorderWidth) || 6,
-          stickerBorderColor: this.inspectorData.stickerBorderColor || '#FFFFFF',
-          rotation: Number(this.inspectorData.rotation) || 0,
-          maskShape: this.inspectorData.maskShape || 'rect',
-          chromaKeyColor: this.inspectorData.chromaKeyColor || '',
           action: 'update'
         } as any]
      }).subscribe({
@@ -5421,19 +6584,559 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  acceptSuggestion(sug: SuggestionItem): void {
+  // --- FAZ 1: METİN STÜDYOSU & PHOTOSHOP TİPOGRAFİ METOTLARI ---
+  getFontsByCategory(category: string): FontOption[] {
+    return this.studioEngine.fonts.filter(f => f.category === category);
+  }
+
+  applyTextPreset(preset: TextTemplatePreset): void {
+    if (!this.inspectorData) return;
+    const p = preset.props;
+    Object.assign(this.inspectorData, {
+      font: p.font ?? this.inspectorData.font,
+      fontSize: p.fontSize ?? this.inspectorData.fontSize,
+      fontWeight: p.fontWeight ?? '900',
+      color: p.color ?? '#FFFFFF',
+      fillType: p.fillType ?? 'solid',
+      gradientStart: p.gradientStart ?? '#FACC15',
+      gradientEnd: p.gradientEnd ?? '#EF4444',
+      gradientAngle: p.gradientAngle ?? 90,
+      strokeColor: p.strokeColor ?? '#000000',
+      strokeWidth: p.strokeWidth ?? 0,
+      outerStrokeColor: p.outerStrokeColor ?? '#EF4444',
+      outerStrokeWidth: p.outerStrokeWidth ?? 0,
+      glowEnabled: p.glowEnabled ?? false,
+      glowColor: p.glowColor ?? '#22D3EE',
+      glowRadius: p.glowRadius ?? 18,
+      shadowColor: p.shadowColor ?? 'rgba(0,0,0,0.85)',
+      shadowBlur: p.shadowBlur ?? 4,
+      shadowDistance: p.shadowDistance ?? 4,
+      shadowAngle: p.shadowAngle ?? 45,
+      boxStyle: p.boxStyle ?? 'none',
+      boxBgColor: p.boxBgColor ?? '#1E293B',
+      boxPadding: p.boxPadding ?? 14,
+      borderRadius: p.borderRadius ?? 20,
+      allCaps: p.allCaps ?? false,
+      letterSpacing: p.letterSpacing ?? 0,
+      curveBend: p.curveBend ?? 0,
+      rotateX: p.rotateX ?? 0,
+      rotateY: p.rotateY ?? 0,
+      skewX: p.skewX ?? 0,
+      animation: p.animation ?? this.inspectorData.animation,
+      loopAnimation: p.loopAnimation ?? 'none'
+    });
+    this.onInspectorChange();
+  }
+
+  getCurvedTextPath(bend: number): string {
+    const clamped = Math.max(-100, Math.min(100, bend || 0));
+    const ctrlY = 90 - (clamped * 0.75);
+    return `M 20,90 Q 250,${ctrlY.toFixed(1)} 480,90`;
+  }
+
+  getTextOverlayStyle(ov: OverlayItem): any {
+    const scale = ov.scale || 1;
+    const fSize = Math.max(12, ((ov.fontSize || 48) * 0.45) * scale);
+    const angleRad = ((ov.shadowAngle ?? 45) * Math.PI) / 180;
+    const dist = ov.shadowDistance ?? 4;
+    const dx = Math.round(Math.cos(angleRad) * dist);
+    const dy = Math.round(Math.sin(angleRad) * dist);
+    const blur = ov.shadowBlur ?? 2;
+    const sColor = ov.shadowColor || 'rgba(0,0,0,0.85)';
+
+    const shadows: string[] = [];
+    if (blur > 0 || dist > 0) {
+      shadows.push(`${dx}px ${dy}px ${blur}px ${sColor}`);
+    }
+    if (ov.glowEnabled) {
+      const gCol = ov.glowColor || '#22D3EE';
+      const gRad = ov.glowRadius || 18;
+      shadows.push(`0 0 ${Math.round(gRad * 0.5)}px ${gCol}`, `0 0 ${gRad}px ${gCol}`);
+    }
+
+    const isBox = ov.boxStyle && ov.boxStyle !== 'none';
+    const isGrad = ov.fillType === 'gradient' || ov.fillType === 'radial';
+    const gradBg = ov.fillType === 'radial'
+      ? `radial-gradient(circle, ${ov.gradientStart || '#FACC15'}, ${ov.gradientEnd || '#EF4444'})`
+      : `linear-gradient(${ov.gradientAngle ?? 90}deg, ${ov.gradientStart || '#FACC15'}, ${ov.gradientEnd || '#EF4444'})`;
+
+    const style: any = {
+      'font-size.px': fSize,
+      'font-family': ov.font || 'Inter',
+      'font-weight': ov.fontWeight || '900',
+      'line-height': ov.lineHeight || 1.2,
+      'text-align': ov.textAlign || 'center',
+      'text-transform': ov.allCaps ? 'uppercase' : 'none',
+      'letter-spacing.px': ov.letterSpacing || 0,
+      'paint-order': 'stroke fill',
+      '-webkit-text-stroke': ov.strokeWidth ? `${(ov.strokeWidth * 0.45).toFixed(1)}px ${ov.strokeColor || '#000'}` : 'none',
+      'text-shadow': shadows.length > 0 ? shadows.join(', ') : 'none'
+    };
+
+    if (isGrad && !isBox) {
+      style['background-image'] = gradBg;
+      style['-webkit-background-clip'] = 'text';
+      style['background-clip'] = 'text';
+      style['color'] = 'transparent';
+    } else {
+      style['color'] = ov.color || '#FFFFFF';
+    }
+
+    if (isBox) {
+      style['background-color'] = ov.boxBgColor || '#1E293B';
+      style['padding'] = ov.boxStyle === 'highlight-marker'
+        ? '4px 14px'
+        : `${(ov.boxPadding || 14) * 0.45}px ${(ov.boxPadding || 14) * 0.9}px`;
+      style['border-radius'] = ov.boxStyle === 'pill'
+        ? '9999px'
+        : (ov.boxStyle === 'rounded' ? `${ov.borderRadius || 16}px` : '4px');
+      if (ov.boxStyle === 'highlight-marker') {
+        style['transform'] = 'skewX(-8deg)';
+      }
+    }
+
+    return style;
+  }
+
+  getTextOverlayFilter(ov: OverlayItem): string {
+    const filters: string[] = [];
+    if (ov.outerStrokeWidth && ov.outerStrokeWidth > 0) {
+      const w = Math.max(1, Math.round(ov.outerStrokeWidth * 0.45));
+      const c = ov.outerStrokeColor || '#EF4444';
+      filters.push(
+        `drop-shadow(${w}px 0 0 ${c})`,
+        `drop-shadow(-${w}px 0 0 ${c})`,
+        `drop-shadow(0 ${w}px 0 ${c})`,
+        `drop-shadow(0 -${w}px 0 ${c})`
+      );
+    }
+    return filters.length > 0 ? filters.join(' ') : 'none';
+  }
+
+  getOverlay3DTransform(ov: OverlayItem): string {
+    const parts: string[] = [];
+    if (ov.rotateX || ov.rotateY) {
+      parts.push('perspective(600px)');
+    }
+    if (ov.rotation) parts.push(`rotate(${ov.rotation}deg)`);
+    if (ov.rotateX) parts.push(`rotateX(${ov.rotateX}deg)`);
+    if (ov.rotateY) parts.push(`rotateY(${ov.rotateY}deg)`);
+    if (ov.skewX || ov.skewY) parts.push(`skew(${ov.skewX || 0}deg, ${ov.skewY || 0}deg)`);
+    if (ov.flipH) parts.push('scaleX(-1)');
+    if (ov.flipV) parts.push('scaleY(-1)');
+    return parts.length > 0 ? parts.join(' ') : 'none';
+  }
+
+  // --- FAZ 2: PHOTOSHOP GÖRSEL DÜZENLEME & CANLI REMBG AI STICKER METOTLARI ---
+  getImageOverlayFilter(ov: OverlayItem): string {
+    const filters: string[] = [];
+    // Gerçek Silüet Sticker Konturu (SVG feMorphology dilate filtresi)
+    if (ov.stickerBorder) {
+      filters.push(`url(#sticker-outline-${ov.id})`);
+    }
+    if (ov.brightness) {
+      filters.push(`brightness(${Math.max(0.1, 1 + ov.brightness / 100).toFixed(2)})`);
+    }
+    if (ov.contrast) {
+      filters.push(`contrast(${Math.max(0.1, 1 + ov.contrast / 100).toFixed(2)})`);
+    }
+    if (ov.saturation) {
+      filters.push(`saturate(${Math.max(0, 1 + ov.saturation / 100).toFixed(2)})`);
+    }
+    if (ov.warmth && ov.warmth > 0) {
+      filters.push(`sepia(${(ov.warmth / 160).toFixed(2)})`);
+    }
+    if (ov.hue) {
+      filters.push(`hue-rotate(${ov.hue}deg)`);
+    }
+    if (ov.blur && ov.blur > 0) {
+      filters.push(`blur(${ov.blur}px)`);
+    }
+    if (ov.dropShadow) {
+      filters.push(`drop-shadow(0 8px 16px rgba(0,0,0,0.65))`);
+    }
+    return filters.length > 0 ? filters.join(' ') : 'none';
+  }
+
+  getImageClipPath(ov: OverlayItem): string {
+    const shape = ov.maskShape || 'rect';
+    if (shape === 'circle') return 'circle(50% at 50% 50%)';
+    if (shape === 'diamond') return 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
+    if (shape === 'hexagon') return 'polygon(25% 5%, 75% 5%, 100% 50%, 75% 95%, 25% 95%, 0% 50%)';
+    if (shape === 'star') return 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)';
+    if (shape === 'heart') return 'polygon(50% 20%, 65% 5%, 85% 5%, 100% 25%, 100% 50%, 50% 95%, 0% 50%, 0% 25%, 15% 5%, 35% 5%)';
+    return 'none';
+  }
+
+  async removeBackgroundNow(): Promise<void> {
+    if (!this.inspectorData || !this.inspectorData.source) return;
+    this.bgRemovalProcessing.set(true);
+    try {
+      const origUrl = this.inspectorData.originalSource || this.inspectorData.source;
+      this.inspectorData.originalSource = origUrl;
+      const transparentDataUrl = await this.studioEngine.removeImageBackgroundInstant(
+        origUrl,
+        this.inspectorData.chromaKeyColor || undefined
+      );
+      this.inspectorData.source = transparentDataUrl;
+      this.inspectorData.removeBg = true;
+      this.inspectorData.stickerBorder = true;
+      this.onInspectorChange();
+      this.saveInspector();
+    } catch (err) {
+      console.error('Canlı arka plan kaldırma hatası:', err);
+    } finally {
+      this.bgRemovalProcessing.set(false);
+    }
+  }
+
+  restoreOriginalBackground(): void {
+    if (!this.inspectorData || !this.inspectorData.originalSource) return;
+    this.inspectorData.source = this.inspectorData.originalSource;
+    this.inspectorData.removeBg = false;
+    this.onInspectorChange();
+    this.saveInspector();
+  }
+
+  resetImageAdjustments(): void {
+    if (!this.inspectorData) return;
+    Object.assign(this.inspectorData, {
+      brightness: 0,
+      contrast: 0,
+      saturation: 0,
+      warmth: 0,
+      hue: 0,
+      blur: 0,
+      sharpen: 0,
+      opacity: 100,
+      flipH: false,
+      flipV: false,
+      blendMode: 'normal',
+      dropShadow: false,
+      feather: 0
+    });
+    this.onInspectorChange();
+  }
+
+  // --- FAZ 3: SES EFEKTLERİ (SFX), CANLI BGM & -14 LUFS METOTLARI ---
+  previewSfxItem(sfx: SfxLibraryItem, event?: MouseEvent): void {
+    event?.stopPropagation();
+    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85);
+  }
+
+  previewSfxClip(sfx: EdlSfxClip): void {
+    this.studioEngine.playSynthesizedSfx(sfx.presetId || sfx.synthPreset || 'whoosh-fast', sfx.volume ?? 0.85);
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.currentTime = sfx.start;
+      this.currentTime.set(sfx.start);
+    }
+  }
+
+  addSfxToTimeline(sfx: SfxLibraryItem): void {
+    const start = parseFloat(this.currentTime().toFixed(2));
+    const wavDataUri = this.studioEngine.generateSfxWavDataUri(sfx.id, sfx.duration);
+    const newClip: EdlSfxClip = {
+      id: `sfx_${Date.now()}`,
+      name: sfx.name,
+      title: sfx.name,
+      category: sfx.category,
+      presetId: sfx.id,
+      synthPreset: sfx.synthPreset || sfx.id,
+      sourceUrl: wavDataUri,
+      start,
+      duration: sfx.duration,
+      volume: 0.85,
+      action: 'add'
+    };
+
+    // Anında sesli geri bildirim ver
+    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85);
+
     this.edlService.patchEdl(this.projectId, {
-      suggestions: [{ ...sug, status: 'accepted', action: 'update' }],
-      overlays: [{
+      sfxClips: [newClip]
+    }).subscribe(() => this.loadEdl());
+  }
+
+  removeSfxClip(sfxId: string, event?: MouseEvent): void {
+    event?.stopPropagation();
+    this.edlService.patchEdl(this.projectId, {
+      sfxClips: [{ id: sfxId, name: '', start: 0, duration: 0, action: 'remove' }]
+    }).subscribe(() => this.loadEdl());
+  }
+
+  getSfxClipStyle(sfx: EdlSfxClip): any {
+    const totalDur = Math.max(1, this.totalDuration());
+    const start = sfx.start || 0;
+    const dur = Math.max(0.3, sfx.duration || 1.0);
+    if (!this.isAnyRippleActive()) {
+      return {
+        left: `${(start / totalDur) * 100}%`,
+        width: `${Math.max(0.8, (dur / totalDur) * 100)}%`
+      };
+    }
+    const startVis = this.getVisTimeFromRawTime(start);
+    const endVis = this.getVisTimeFromRawTime(start + dur);
+    const visDur = Math.max(0.1, this.visibleDuration());
+    return {
+      left: `${(startVis / visDur) * 100}%`,
+      width: `${Math.max(0.8, ((endVis - startVis) / visDur) * 100)}%`
+    };
+  }
+
+  toggleNormalizeAudio(enabled: boolean): void {
+    this.edlService.patchEdl(this.projectId, {
+      settings: { normalizeAudio: enabled }
+    }).subscribe(() => this.loadEdl());
+  }
+
+  toggleSmartPunchIn(enabled: boolean): void {
+    this.edlService.patchEdl(this.projectId, {
+      settings: { smartPunchIn: enabled }
+    }).subscribe(() => this.loadEdl());
+  }
+
+  // --- FAZ 4: SAHNE GEÇİŞ EFEKTLERİ (XFADE TRANSITIONS) METOTLARI ---
+  getTransitionAtBoundary(boundaryTime: number): EdlTransition | undefined {
+    return this.transitions().find(tr => Math.abs(((tr.boundaryTime ?? tr.boundarySourceTime) || 0) - boundaryTime) < 0.25);
+  }
+
+  openTransitionModal(clipOrBound: any, event?: MouseEvent): void {
+    event?.stopPropagation();
+    const bTime = clipOrBound.boundaryTime ?? clipOrBound.end ?? 0;
+    const existing = this.getTransitionAtBoundary(bTime);
+    this.activeTransitionBoundary.set(clipOrBound);
+    this.editingTransitionBoundaryTime.set(parseFloat(Number(bTime).toFixed(2)));
+    this.editingTransitionType.set(existing?.type || 'fade');
+    this.editingTransitionDuration.set(existing?.duration || 0.5);
+    this.transitionModalOpen.set(true);
+  }
+
+  openTransitionModalForSelectedClip(): void {
+    const selIds = this.selectedClipIds();
+    if (!selIds.length) return;
+    const clip = this.clips().find(c => c.id === selIds[0]);
+    if (!clip) return;
+    const existing = this.getTransitionAtBoundary(clip.end);
+    this.editingTransitionBoundaryTime.set(parseFloat(clip.end.toFixed(2)));
+    this.editingTransitionType.set(existing?.type || 'fade');
+    this.editingTransitionDuration.set(existing?.duration || 0.5);
+    this.transitionModalOpen.set(true);
+  }
+
+  saveCurrentTransition(): void {
+    const bTime = this.editingTransitionBoundaryTime();
+    const existing = this.getTransitionAtBoundary(bTime);
+    const trObj: EdlTransition = {
+      id: existing?.id || `tr_${Date.now()}`,
+      boundaryTime: bTime,
+      boundarySourceTime: bTime,
+      type: this.editingTransitionType(),
+      duration: this.editingTransitionDuration(),
+      action: existing ? 'update' : 'add'
+    };
+    this.edlService.patchEdl(this.projectId, {
+      transitions: [trObj]
+    }).subscribe(() => {
+      this.transitionModalOpen.set(false);
+      this.loadEdl();
+    });
+  }
+
+  applyTransitionToAllCuts(): void {
+    const allClips = this.clips();
+    const patches: EdlTransition[] = [];
+    for (let i = 0; i < allClips.length - 1; i++) {
+      const bTime = parseFloat(allClips[i].end.toFixed(2));
+      const existing = this.getTransitionAtBoundary(bTime);
+      patches.push({
+        id: existing?.id || `tr_all_${Date.now()}_${i}`,
+        boundaryTime: bTime,
+        boundarySourceTime: bTime,
+        type: this.editingTransitionType(),
+        duration: this.editingTransitionDuration(),
+        action: existing ? 'update' : 'add'
+      });
+    }
+    if (patches.length > 0) {
+      this.edlService.patchEdl(this.projectId, { transitions: patches }).subscribe(() => {
+        this.transitionModalOpen.set(false);
+        this.loadEdl();
+      });
+    }
+  }
+
+  removeCurrentTransition(): void {
+    const existing = this.getTransitionAtBoundary(this.editingTransitionBoundaryTime());
+    if (!existing) {
+      this.transitionModalOpen.set(false);
+      return;
+    }
+    this.edlService.patchEdl(this.projectId, {
+      transitions: [{ ...existing, action: 'remove' }]
+    }).subscribe(() => {
+      this.transitionModalOpen.set(false);
+      this.loadEdl();
+    });
+  }
+
+  setSelectedClipSpeed(speed: number): void {
+    const selIds = this.selectedClipIds();
+    if (!selIds.length) return;
+    const map = { ...this.clipSpeedMap() };
+    for (const id of selIds) {
+      map[id] = speed;
+    }
+    this.clipSpeedMap.set(map);
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.playbackRate = speed;
+    }
+  }
+
+  // --- FAZ 5: STICKER, GIF & KEYFRAME METOTLARI ---
+  addStickerOverlay(sticker: StickerLibraryItem): void {
+    this.addImageOverlayFromUrl(sticker.dataUrl || sticker.dataUri || '', sticker.name);
+  }
+
+  addCustomGifFromInput(): void {
+    const url = this.customGifUrl.trim();
+    if (!url) return;
+    this.addImageOverlayFromUrl(url, 'Hareketli GIF');
+    this.customGifUrl = '';
+  }
+
+  addKeyFrameToSelectedOverlay(): void {
+    if (!this.inspectorData) return;
+    const relTime = Math.max(0, parseFloat((this.currentTime() - (this.inspectorData.timestamp || 0)).toFixed(2)));
+    const kfList: OverlayKeyframe[] = [...(this.inspectorData.keyframes || [])];
+    kfList.push({
+      id: `kf_${Date.now()}`,
+      timeOffset: relTime,
+      x: Number(this.inspectorData.positionX ?? 50),
+      y: Number(this.inspectorData.positionY ?? 50),
+      scale: Number(this.inspectorData.scale ?? 1),
+      rotation: Number(this.inspectorData.rotation ?? 0),
+      opacity: Number(this.inspectorData.opacity ?? 100)
+    });
+    kfList.sort((a, b) => a.timeOffset - b.timeOffset);
+    this.inspectorData.keyframes = kfList;
+    this.onInspectorChange();
+  }
+
+  removeKeyframeFromSelectedOverlay(index: number): void {
+    if (!this.inspectorData || !this.inspectorData.keyframes) return;
+    this.inspectorData.keyframes.splice(index, 1);
+    this.onInspectorChange();
+  }
+
+  // --- FAZ 6: OTONOM VİDEO YÖNETMENİ (PROAKTİF AI ÖNERİLERİ [E1]) ---
+  generateAiDirectorSuggestions(): void {
+    const edl = this.activeEdl();
+    if (!edl) return;
+    const generated = this.studioEngine.generateProactiveSuggestions(edl, this.totalDuration());
+    if (generated.length === 0) return;
+
+    this.edlService.patchEdl(this.projectId, {
+      suggestions: generated.map((s: SuggestionItem) => ({ ...s, action: 'add' as const }))
+    }).subscribe(() => this.loadEdl());
+  }
+
+  previewSuggestion(sug: SuggestionItem): void {
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.currentTime = Math.max(0, sug.timestamp);
+      this.currentTime.set(Math.max(0, sug.timestamp));
+    }
+    const sfxId = sug.sfxPreset || sug.sfxPayload?.presetId;
+    if (sfxId) {
+      this.studioEngine.playSynthesizedSfx(sfxId, sug.sfxPayload?.volume ?? 0.85);
+    }
+  }
+
+  acceptSuggestion(sug: SuggestionItem): void {
+    const patch: EdlPatchDto = {
+      suggestions: [{ ...sug, status: 'accepted', action: 'update' }]
+    };
+
+    const sType = String(sug.type || '');
+    const presetKey = sug.templatePreset || sug.presetId;
+
+    // 1. Eğer öneri bir metin şablonu veya sticker/görsel içeriyorsa:
+    if (
+      sType === 'viral_hook' ||
+      sType === 'text_highlight' ||
+      sType === 'text_template' ||
+      sType === 'text_overlay' ||
+      sType === 'sticker_callout' ||
+      sType === 'sticker' ||
+      sType === 'image_broll'
+    ) {
+      const preset = this.studioEngine.textPresets.find((p: TextTemplatePreset) => p.id === presetKey);
+      const isImg = sType === 'image_broll' || sType === 'sticker' || sType === 'sticker_callout';
+      const ov: OverlayItem = {
         id: `ov_${sug.id}`,
-        type: sug.type === 'image_broll' ? 'image' : 'text',
+        type: isImg ? 'image' : 'text',
         content: sug.content,
         source: sug.sourceUrl,
         timestamp: sug.timestamp,
-        duration: sug.duration,
+        duration: sug.duration || 3.5,
+        positionX: 50,
+        positionY: isImg ? 82 : 78,
+        scale: 1.0,
+        stickerBorder: sType === 'sticker_callout',
+        stickerBorderWidth: 6,
+        stickerBorderColor: '#FFFFFF',
+        ...(preset?.props || {}),
+        ...(sug.overlayPayload || {}),
         action: 'add'
-      }]
-    }).subscribe(() => this.loadEdl());
+      };
+      patch.overlays = [ov];
+    }
+
+    // 2. Eğer öneri bir sahne geçişi (Transition) içeriyorsa:
+    if (sug.transitionPayload || sug.transitionType) {
+      const bTime = sug.transitionPayload?.boundaryTime ?? sug.transitionPayload?.boundarySourceTime ?? sug.timestamp;
+      patch.transitions = [{
+        id: sug.transitionPayload?.id || `tr_${sug.id}`,
+        boundaryTime: bTime,
+        boundarySourceTime: bTime,
+        type: sug.transitionPayload?.type || sug.transitionType || 'slideleft',
+        duration: sug.transitionPayload?.duration || sug.duration || 0.45,
+        action: 'add'
+      }];
+    }
+
+    // 3. Eğer öneri bir ses efekti (SFX) içeriyorsa:
+    const sfxPreset = sug.sfxPreset || sug.sfxPayload?.presetId;
+    if (sfxPreset || sug.sfxPayload) {
+      const pId = sfxPreset || 'whoosh-fast';
+      const sfxLibItem = this.studioEngine.sfxLibrary.find(x => x.id === pId);
+      const wavUri = this.studioEngine.generateSfxWavDataUri(pId, sfxLibItem?.duration || 0.8);
+      patch.sfxClips = [{
+        id: sug.sfxPayload?.id || `sfx_${sug.id}`,
+        name: sug.sfxPayload?.name || sfxLibItem?.name || 'Stüdyo SFX',
+        title: sug.sfxPayload?.name || sfxLibItem?.name || 'Stüdyo SFX',
+        category: sug.sfxPayload?.category || sfxLibItem?.category || 'whoosh',
+        presetId: pId,
+        synthPreset: pId,
+        sourceUrl: wavUri,
+        start: sug.sfxPayload?.start ?? sug.timestamp,
+        duration: sug.sfxPayload?.duration ?? sfxLibItem?.duration ?? 0.8,
+        volume: 0.85,
+        action: 'add'
+      }];
+      this.studioEngine.playSynthesizedSfx(pId, 0.85);
+    }
+
+    // 4. Eğer öneri ses dengeleme + Smart Punch-In içeriyorsa:
+    if (sType === 'audio_master' || sType === 'audio_enhance' || sType === 'smart_zoom') {
+      this.normalizeAudio.set(true);
+      this.smartPunchIn.set(true);
+      patch.settings = {
+        normalizeAudio: true,
+        smartPunchIn: true
+      };
+    }
+
+    this.edlService.patchEdl(this.projectId, patch).subscribe(() => this.loadEdl());
   }
 
   rejectSuggestion(sug: SuggestionItem): void {
