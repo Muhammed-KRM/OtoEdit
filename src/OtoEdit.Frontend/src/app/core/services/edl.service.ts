@@ -24,4 +24,8 @@ export class EdlService {
   redoEdl(projectId: string): Observable<EdlDto> {
     return this.api.post<EdlDto>(`/projects/${projectId}/edl/redo`, {});
   }
+
+  getHighResWaveform(projectId: string): Observable<number[]> {
+    return this.api.get<number[]>(`/projects/${projectId}/edl/waveform`);
+  }
 }

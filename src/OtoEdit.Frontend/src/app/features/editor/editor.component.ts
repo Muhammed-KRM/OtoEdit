@@ -18,6 +18,7 @@ import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
 import { ProjectAssetDto } from '../../core/models/asset.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
 import { DurationPipe } from '../../shared/pipes/duration.pipe';
+import { ClipWaveformDirective } from './clip-waveform.directive';
 import { environment } from '../../../environments/environment';
 
 export interface ContextMenuState {
@@ -33,7 +34,7 @@ export interface ContextMenuState {
 @Component({
   selector: 'app-editor',
   standalone: true,
-  imports: [CommonModule, RouterLink, FormsModule, NavbarComponent, DurationPipe],
+  imports: [CommonModule, RouterLink, FormsModule, NavbarComponent, DurationPipe, ClipWaveformDirective],
   template: `
     <app-navbar [projectTitle]="project()?.ad"></app-navbar>
 
@@ -1638,19 +1639,19 @@ export interface ContextMenuState {
                     [style.width.%]="getClipWidth(clip)"
                     [title]="getClipTooltip(clip)">
                     
-                    <!-- Per-Clip Gerçek Ses Dalgası (CapCut Style) -->
-                    <div *ngIf="audioPeaks()?.length && getWaveformPathForClip(clip)" class="absolute inset-0 flex items-end pointer-events-none z-0 mix-blend-screen opacity-90 overflow-hidden" style="bottom: -1px;">
-                      <svg class="w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 56" style="filter: drop-shadow(0px -1px 3px rgba(245, 158, 11, 0.5));">
-                        <defs>
-                          <linearGradient [id]="'waveGrad_' + clip.id" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" stop-color="#ef4444" stop-opacity="1" />
-                            <stop offset="25%" stop-color="#f59e0b" stop-opacity="0.9" />
-                            <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.8" />
-                            <stop offset="100%" stop-color="#0284c7" stop-opacity="0.7" />
-                          </linearGradient>
-                        </defs>
-                        <path [attr.d]="getWaveformPathForClip(clip)" [attr.fill]="'url(#waveGrad_' + clip.id + ')'" />
-                      </svg>
+                    <!-- Per-Clip Gerçek Ses Dalgası (CapCut & Premiere Pro Bar & Zoom LOD Style) -->
+                    <div class="absolute inset-0 pointer-events-none z-0 overflow-hidden">
+                      <canvas
+                        appClipWaveform
+                        [peaks]="audioPeaks()"
+                        [clipStart]="clip.start"
+                        [clipEnd]="clip.end"
+                        [totalDuration]="totalDuration()"
+                        [isCut]="clip.isCut"
+                        [zoom]="timelineZoom()"
+                        [trackHeight]="audioTrackHeight()"
+                        class="w-full h-full block">
+                      </canvas>
                     </div>
 
                     <!-- Üst Klip Başlığı -->
@@ -2968,7 +2969,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   // Dinamik Zaman Cetveli İşaretleri
   readonly timelineRulerMarks = computed<{ time: number; label: string; percent: number; isMajor: boolean }[]>(() => {
-    const dur = Math.max(1, this.totalDuration() || 60);
+    const dur = Math.max(1, (this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration()) || 60);
     const zoom = Math.max(1, this.timelineZoom() || 1);
     
     let step = 10;
@@ -3884,7 +3885,6 @@ export class EditorComponent implements OnInit, OnDestroy {
         
         if (streamUrl) {
           this.videoUrl.set(streamUrl);
-          this.loadAudioWaveform(streamUrl);
         }
         
         if (v.sure) {
@@ -3944,135 +3944,45 @@ export class EditorComponent implements OnInit, OnDestroy {
             this.inspectorData = { ...this.inspectorData, ...ov };
           }
         }
-        // EDL içerisinden gelen gerçek peaks varsa öncelikli olarak kullan
+        // EDL içerisinden gelen gerçek peaks varsa öncelikli olarak yükle
         if (res.edl.audioPeaks && res.edl.audioPeaks.length > 0) {
-          console.log('[WAVEFORM:EDL_PEAKS] EDL içerisinden gelen gerçek peaks kullanılıyor:', res.edl.audioPeaks.length);
           this.audioPeaks.set(res.edl.audioPeaks);
-        } else if (!this.audioPeaks() || this.audioPeaks()!.length === 0) {
-          console.log('[WAVEFORM:FALLBACK] EDL peaks eksik, transkripte dayalı fallback dalgası üretiliyor.');
-          this.generateFallbackWaveform();
+        }
+        // Eğer eski düşük çözünürlüklü (örn. 1000 noktalı) bir projeyse arka planda otomatik olarak yüksek çözünürlüğe yükselt
+        const dur = Math.max(10, res.edl.duration || this.totalDuration() || 60);
+        const minHighResPoints = Math.max(2000, Math.round(dur * 20));
+        if (!res.edl.audioPeaks || res.edl.audioPeaks.length < minHighResPoints) {
+          this.ensureHighResWaveform();
         }
       },
       error: (err) => console.error('EDL yüklenemedi:', err)
     });
   }
 
-  // --- GERÇEK SES DALGASI (WEB AUDIO API) ---
-  loadAudioWaveform(url: string): void {
-    if (!url) return;
-    // Eğer EDL'den gelen gerçek ses peaks zaten yüklendiyse tarayıcıda GB'larca video indirip çözmeye gerek yok
-    if (this.audioPeaks() && this.audioPeaks()!.length > 0) {
-      console.log('[WAVEFORM] EDL peaks zaten mevcut, Web Audio API indirmesi atlanıyor.');
-      return;
-    }
+  // --- YÜKSEK ÇÖZÜNÜRLÜKLÜ (ZERO-DRIFT dBFS) GERÇEK SES DALGASI YÜKSELTİCİ ---
+  private isUpgradingWaveform = false;
+
+  ensureHighResWaveform(): void {
+    if (!this.projectId || this.isUpgradingWaveform) return;
+    this.isUpgradingWaveform = true;
     this.isWaveformLoading.set(true);
+    console.log('[WAVEFORM:UPGRADE] Eski/Düşük çözünürlüklü dalga formu tespit edildi, yüksek çözünürlüklü (Zero-Drift dBFS) ses verisi talep ediliyor...');
 
-    fetch(url)
-      .then(res => {
-        if (!res.ok) throw new Error('Audio stream fetch error: ' + res.status);
-        return res.arrayBuffer();
-      })
-      .then(arrayBuffer => {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        if (!AudioContextClass) throw new Error('AudioContext not supported in this browser');
-        const audioCtx = new AudioContextClass();
-        return audioCtx.decodeAudioData(arrayBuffer);
-      })
-      .then(audioBuffer => {
-        const raw = audioBuffer.getChannelData(0);
-        const dur = Math.max(1, audioBuffer.duration || this.totalDuration() || 60);
-        // Yüksek Hassasiyet (High Density) - Saniyede ~50 nokta
-        const totalPoints = Math.min(10000, Math.max(500, Math.round(dur * 50)));
-        const blockSize = Math.floor(raw.length / totalPoints);
-        const peaks: number[] = [];
-
-        for (let i = 0; i < totalPoints; i++) {
-          const start = i * blockSize;
-          let max = 0;
-          let sum = 0;
-          const step = Math.max(1, Math.floor(blockSize / 20));
-          let count = 0;
-          for (let j = 0; j < blockSize; j += step) {
-            const val = Math.abs(raw[start + j] || 0);
-            if (val > max) max = val;
-            sum += val * val;
-            count++;
-          }
-          const rms = Math.sqrt(sum / (count || 1));
-          const peak = Math.min(0.95, Math.max(0.05, max * 0.7 + rms * 1.6));
-          peaks.push(parseFloat(peak.toFixed(3)));
-        }
-        console.log('[WAVEFORM:DECODE] Web Audio API ile gerçek ses başarıyla çözüldü ve waveform çizildi.');
-        this.audioPeaks.set(peaks);
-        this.isWaveformLoading.set(false);
-      })
-      .catch(err => {
-        console.warn('[Waveform] Real decode fallback:', err);
-        // Eğer EDL'den peaks zaten yüklendiyse ASLA üzerine yazma
-        if (!this.audioPeaks() || this.audioPeaks()!.length === 0) {
-          this.generateFallbackWaveform();
+    this.edlService.getHighResWaveform(this.projectId).subscribe({
+      next: (peaks) => {
+        if (peaks && peaks.length > (this.audioPeaks()?.length || 0)) {
+          console.log(`[WAVEFORM:UPGRADE_SUCCESS] Yüksek çözünürlüklü dalga formu yüklendi: ${peaks.length} nokta.`);
+          this.audioPeaks.set(peaks);
         }
         this.isWaveformLoading.set(false);
-      });
-  }
-
-  generateFallbackWaveform(): void {
-    const dur = Math.max(1, this.totalDuration() || 60);
-    // Yüksek Hassasiyet (High Density) - Saniyede ~50 nokta
-    const totalPoints = Math.min(10000, Math.max(500, Math.round(dur * 50)));
-    const edl = this.activeEdl();
-    const cuts = edl?.cuts || [];
-    const segments = edl?.transcript?.segments || [];
-    const peaks: number[] = [];
-
-    for (let i = 0; i < totalPoints; i++) {
-      const time = (i / totalPoints) * dur;
-      const isCut = cuts.some(c => time >= c.start && time <= c.end);
-      const isSpeech = segments.some(s => time >= s.start && time <= s.end);
-
-      if (isCut) {
-        peaks.push(0.04 + Math.random() * 0.03);
-      } else if (isSpeech) {
-        const seed = Math.sin(i * 0.8) * Math.cos(i * 0.3);
-        const val = 0.35 + Math.abs(seed) * 0.55 + Math.random() * 0.1;
-        peaks.push(parseFloat(Math.min(0.95, val).toFixed(3)));
-      } else {
-        // Fallback: Transkript dışı alanlar için dalga boyutunu biraz daha makul tut (0.25 - 0.40)
-        peaks.push(0.25 + Math.random() * 0.15);
+        this.isUpgradingWaveform = false;
+      },
+      error: (err) => {
+        console.warn('[WAVEFORM:UPGRADE_WARN] Yüksek çözünürlüklü dalga formu alınamadı:', err);
+        this.isWaveformLoading.set(false);
+        this.isUpgradingWaveform = false;
       }
-    }
-    this.audioPeaks.set(peaks);
-  }
-
-  getWaveformPathForClip(clip: any): string {
-    const allPeaks = this.audioPeaks();
-    if (!allPeaks || allPeaks.length === 0) return '';
-    
-    const totalDur = Math.max(1, this.totalDuration());
-    
-    // Klip için startIndex ve endIndex hesaplama
-    const startIndex = Math.floor((clip.start / totalDur) * allPeaks.length);
-    const endIndex = Math.ceil((clip.end / totalDur) * allPeaks.length);
-    
-    const peaks = allPeaks.slice(startIndex, endIndex);
-    if (peaks.length === 0) return '';
-    
-    const width = 100;
-    const height = 56;
-    const numPoints = peaks.length;
-    const dx = width / Math.max(1, numPoints - 1);
-    
-    // Asimetrik (Tek yönlü, alttan yukarıya) CapCut Style Waveform
-    let path = `M 0 ${height}`; // Sol alt köşeden başla
-    for (let i = 0; i < numPoints; i++) {
-      const x = i * dx;
-      const peakH = peaks[i] * height; 
-      const y = height - peakH; 
-      path += ` L ${x.toFixed(2)} ${y.toFixed(2)}`;
-    }
-    path += ` L ${width} ${height} Z`; // Sağ alt köşeye in ve kapat
-    
-    return path;
+    });
   }
 
   // --- OYNATMA & TRANSPORT İŞLEMLERİ ---
@@ -4587,9 +4497,8 @@ export class EditorComponent implements OnInit, OnDestroy {
         duration: video.duration
       });
     }
-    if (!this.audioPeaks()) {
-      const url = this.videoUrl();
-      if (url) this.loadAudioWaveform(url);
+    if (!this.audioPeaks() || this.audioPeaks()!.length === 0) {
+      this.ensureHighResWaveform();
     }
   }
 

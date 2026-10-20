@@ -63,4 +63,16 @@ public class EdlController : ControllerBase
         var result = await _edlService.RedoAsync(projectId, cancellationToken);
         return Ok(result);
     }
+
+    /// <summary>
+    /// Projeye ait yüksek çözünürlüklü (Zero-Drift dBFS) ses dalga formunu getirir veya eski projeler için otomatik üretir.
+    /// </summary>
+    [HttpGet("waveform")]
+    [ProducesResponseType(typeof(IReadOnlyList<double>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetHighResWaveform(Guid projectId, CancellationToken cancellationToken)
+    {
+        var peaks = await _edlService.EnsureHighResolutionWaveformAsync(projectId, cancellationToken);
+        return Ok(peaks);
+    }
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -19,6 +20,7 @@ public class EdlManager : IEdlService
     private readonly AppDbContext _context;
     private readonly ICacheService _cacheService;
     private readonly ILogger<EdlManager> _logger;
+    private readonly IFileStorageService? _fileStorageService;
 
     private const string CachePrefix = "edl:";
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -26,11 +28,16 @@ public class EdlManager : IEdlService
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    public EdlManager(AppDbContext context, ICacheService cacheService, ILogger<EdlManager> logger)
+    public EdlManager(
+        AppDbContext context,
+        ICacheService cacheService,
+        ILogger<EdlManager> logger,
+        IFileStorageService? fileStorageService = null)
     {
         _context = context;
         _cacheService = cacheService;
         _logger = logger;
+        _fileStorageService = fileStorageService;
     }
 
     public async Task<EdlDto> GetEdlAsync(Guid projectId, CancellationToken cancellationToken = default)
@@ -402,5 +409,235 @@ public class EdlManager : IEdlService
         await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
 
         return newEdl;
+    }
+
+    public async Task<IReadOnlyList<double>> EnsureHighResolutionWaveformAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var edl = await _context.EditDecisionLists
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId, cancellationToken);
+
+        if (edl == null)
+        {
+            throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
+        }
+
+        double duration = 0;
+        var existingPeaks = new List<double>();
+
+        using (var doc = JsonDocument.Parse(edl.EdlJson))
+        {
+            if (doc.RootElement.TryGetProperty("duration", out var dProp) && dProp.TryGetDouble(out var dVal))
+            {
+                duration = dVal;
+            }
+            if (doc.RootElement.TryGetProperty("audioPeaks", out var pProp) && pProp.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in pProp.EnumerateArray())
+                {
+                    if (item.TryGetDouble(out var val))
+                    {
+                        existingPeaks.Add(val);
+                    }
+                }
+            }
+        }
+
+        // Eğer zaten yüksek çözünürlüklü dalga formu varsa (> 2000 nokta veya saniyede >= 20 örnek) doğrudan dön
+        int minExpectedHighRes = Math.Max(2000, (int)Math.Round(Math.Max(10.0, duration) * 20.0));
+        if (existingPeaks.Count >= minExpectedHighRes || _fileStorageService == null)
+        {
+            return existingPeaks;
+        }
+
+        var video = await _context.Videos
+            .AsNoTracking()
+            .FirstOrDefaultAsync(v => v.ProjectId == projectId, cancellationToken);
+
+        if (video == null || string.IsNullOrWhiteSpace(video.DosyaYolu))
+        {
+            return existingPeaks;
+        }
+
+        var objectKey = !string.IsNullOrWhiteSpace(video.TemizSesYolu) ? video.TemizSesYolu : video.DosyaYolu;
+        var presignedUrl = await _fileStorageService.GetPresignedUrlAsync(objectKey, TimeSpan.FromHours(2), cancellationToken);
+
+        _logger.LogInformation("Eski/Düşük çözünürlüklü dalga formu tespit edildi ({ExistingCount} nokta). Yüksek çözünürlüklü (Zero-Drift dBFS) dalga formu üretiliyor: ProjectId={ProjectId}", existingPeaks.Count, projectId);
+
+        var highResPeaks = await ExtractPerceptualWaveformFromUrlAsync(presignedUrl, duration, cancellationToken);
+        if (highResPeaks.Count == 0 && presignedUrl.Contains("://minio:"))
+        {
+            var localUrl = presignedUrl.Replace("://minio:", "://localhost:");
+            highResPeaks = await ExtractPerceptualWaveformFromUrlAsync(localUrl, duration, cancellationToken);
+        }
+
+        if (highResPeaks.Count == 0)
+        {
+            return existingPeaks;
+        }
+
+        // EDL JSON içerisindeki audioPeaks dizisini kalıcı olarak güncelle
+        var rootNode = JsonNode.Parse(edl.EdlJson) as JsonObject ?? new JsonObject();
+        var peaksJsonArray = new JsonArray();
+        foreach (var p in highResPeaks)
+        {
+            peaksJsonArray.Add(p);
+        }
+        rootNode["audioPeaks"] = peaksJsonArray;
+
+        edl.EdlJson = rootNode.ToJsonString(JsonOptions);
+        edl.GuncellemeTarihi = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
+
+        _logger.LogInformation("Yüksek çözünürlüklü dalga formu başarıyla üretildi ve EDL'ye kaydedildi: ProjectId={ProjectId}, YeniNoktaSayisi={Count}", projectId, highResPeaks.Count);
+        return highResPeaks;
+    }
+
+    private async Task<List<double>> ExtractPerceptualWaveformFromUrlAsync(string mediaUrl, double fallbackDuration, CancellationToken cancellationToken)
+    {
+        try
+        {
+            const int sampleRate = 8000;
+            const int hopSamples = 80; // 10ms window at 8kHz = 100 Hz
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "ffmpeg",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+            psi.ArgumentList.Add("-v");
+            psi.ArgumentList.Add("error");
+            psi.ArgumentList.Add("-i");
+            psi.ArgumentList.Add(mediaUrl);
+            psi.ArgumentList.Add("-vn");
+            psi.ArgumentList.Add("-acodec");
+            psi.ArgumentList.Add("pcm_s16le");
+            psi.ArgumentList.Add("-ar");
+            psi.ArgumentList.Add(sampleRate.ToString());
+            psi.ArgumentList.Add("-ac");
+            psi.ArgumentList.Add("1");
+            psi.ArgumentList.Add("-f");
+            psi.ArgumentList.Add("s16le");
+            psi.ArgumentList.Add("-");
+
+            using var proc = Process.Start(psi);
+            if (proc == null) return new List<double>();
+
+            var hybridWindows = new List<float>(60000);
+            var buffer = new byte[hopSamples * 2 * 250]; // 250 windows per read chunk
+            int leftoverBytes = 0;
+            var windowBuf = new byte[hopSamples * 2];
+
+            var baseStream = proc.StandardOutput.BaseStream;
+            while (true)
+            {
+                int bytesRead = await baseStream.ReadAsync(buffer.AsMemory(leftoverBytes, buffer.Length - leftoverBytes), cancellationToken);
+                if (bytesRead <= 0) break;
+
+                int totalBytes = leftoverBytes + bytesRead;
+                int fullWindows = totalBytes / (hopSamples * 2);
+                int consumedBytes = fullWindows * hopSamples * 2;
+
+                for (int w = 0; w < fullWindows; w++)
+                {
+                    int offset = w * hopSamples * 2;
+                    float maxPeak = 0f;
+                    double sumSq = 0.0;
+                    for (int s = 0; s < hopSamples; s++)
+                    {
+                        short sample = BitConverter.ToInt16(buffer, offset + s * 2);
+                        float absVal = Math.Abs(sample / 32768f);
+                        if (absVal > maxPeak) maxPeak = absVal;
+                        sumSq += absVal * absVal;
+                    }
+                    float rms = (float)Math.Sqrt(sumSq / hopSamples);
+                    hybridWindows.Add(0.65f * maxPeak + 0.35f * rms);
+                }
+
+                leftoverBytes = totalBytes - consumedBytes;
+                if (leftoverBytes > 0)
+                {
+                    Buffer.BlockCopy(buffer, consumedBytes, buffer, 0, leftoverBytes);
+                }
+            }
+
+            await proc.WaitForExitAsync(cancellationToken);
+
+            int numWindows = hybridWindows.Count;
+            if (numWindows == 0) return new List<double>();
+
+            double duration = numWindows * 0.010;
+            if (duration <= 0.1) duration = Math.Max(1.0, fallbackDuration);
+
+            int peaksPerSec = duration <= 1200.0 ? 80 : (duration <= 3600.0 ? 50 : 40);
+            int targetPeaks = Math.Max(500, (int)Math.Round(duration * peaksPerSec));
+
+            var rawPeaks = new float[targetPeaks];
+            for (int i = 0; i < targetPeaks; i++)
+            {
+                int sIdx = (int)Math.Floor((double)i * numWindows / targetPeaks);
+                int eIdx = (int)Math.Floor((double)(i + 1) * numWindows / targetPeaks);
+                sIdx = Math.Clamp(sIdx, 0, numWindows - 1);
+                eIdx = Math.Clamp(Math.Max(sIdx + 1, eIdx), 1, numWindows);
+
+                float maxVal = 0f;
+                for (int k = sIdx; k < eIdx; k++)
+                {
+                    if (hybridWindows[k] > maxVal) maxVal = hybridWindows[k];
+                }
+                rawPeaks[i] = maxVal;
+            }
+
+            // Akustik Gürültü Tabanı (15. Persentil) ve 99.2 Persentil Algısal dBFS Ölçekleme
+            var sortedAll = (float[])rawPeaks.Clone();
+            Array.Sort(sortedAll);
+            float noiseFloor = sortedAll[(int)Math.Clamp(sortedAll.Length * 0.15, 0, sortedAll.Length - 1)];
+            float gate = Math.Clamp(noiseFloor * 2.2f, 0.0012f, 0.0080f);
+
+            var activeList = new List<float>(rawPeaks.Length);
+            foreach (var v in rawPeaks)
+            {
+                if (v > gate) activeList.Add(v);
+            }
+
+            float refCeiling;
+            if (activeList.Count > 10)
+            {
+                activeList.Sort();
+                refCeiling = activeList[(int)Math.Clamp(activeList.Count * 0.992, 0, activeList.Count - 1)];
+            }
+            else
+            {
+                refCeiling = sortedAll[^1];
+            }
+
+            float denom = Math.Max(1e-5f, refCeiling - gate);
+            var result = new List<double>(targetPeaks);
+            for (int i = 0; i < targetPeaks; i++)
+            {
+                float v = rawPeaks[i];
+                if (v <= gate)
+                {
+                    result.Add(0.0);
+                }
+                else
+                {
+                    double norm = Math.Clamp((v - gate) / denom, 0.0, 1.0);
+                    double perceptual = Math.Pow(norm, 0.52);
+                    result.Add(Math.Round(perceptual, 3));
+                }
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "FFmpeg ile yüksek çözünürlüklü dalga formu çıkarılamadı: {Url}", mediaUrl);
+            return new List<double>();
+        }
     }
 }

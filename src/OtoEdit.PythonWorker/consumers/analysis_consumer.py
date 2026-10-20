@@ -390,32 +390,3 @@ class AnalysisConsumer:
                     to_clean.append(local_video_path)
                 cleanup_files(*to_clean)
 
-    def _extract_audio_peaks(self, audio_path: str, num_peaks: int = 1000) -> list:
-        try:
-            # 🚀 Önbellekteki ses varsa diskten tekrar okuma
-            cached_audio = getattr(self.retake_detector.scorer, "_cached_audio", None)
-            cached_path = getattr(self.retake_detector.scorer, "_cached_path", None)
-            if cached_audio is not None and cached_path == audio_path:
-                audio = cached_audio
-            else:
-                from pydub import AudioSegment
-                audio = AudioSegment.from_file(audio_path)
-
-            data = np.array(audio.get_array_of_samples(), dtype=np.float32)
-
-            if audio.channels > 1:
-                data = data.reshape((-1, audio.channels))
-                data = data.mean(axis=1)
-
-            chunk_size = max(1, len(data) // num_peaks)
-            peaks = []
-            for i in range(num_peaks):
-                chunk = data[i * chunk_size : (i+1) * chunk_size]
-                if len(chunk) > 0:
-                    peak = np.sqrt(np.mean(chunk**2))
-                    peaks.append(float(peak))
-            max_val = max(peaks) if peaks and max(peaks) > 0 else 1
-            return [p / max_val for p in peaks]
-        except Exception as e:
-            logger.error(f"Waveform çıkarılamadı: {e}")
-            return []

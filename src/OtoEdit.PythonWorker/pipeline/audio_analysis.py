@@ -137,19 +137,89 @@ class AudioAnalyzer:
         audio_float32 = audio_int16.astype(np.float32) / 32768.0
         return audio_float32
 
+    @staticmethod
+    def compute_perceptual_peaks(
+        audio: np.ndarray,
+        sample_rate: int,
+        duration: float,
+        num_peaks: int = None
+    ) -> List[float]:
+        """
+        Sıfır zaman kaymalı (Zero-Drift), gürültü kapılı (Noise-Gated) ve
+        algısal desibel (dBFS / Power-Law) ölçekli yüksek çözünürlüklü dalga formu üretir.
+        """
+        total_samples = len(audio)
+        if total_samples == 0 or duration <= 0:
+            return []
+
+        # 1. Çözünürlük belirleme: num_peaks belirtilmemişse adaptif yüksek yoğunluk (40-80 Hz = 12.5ms-25ms)
+        if num_peaks is None or num_peaks <= 0:
+            if duration <= 1200.0:
+                peaks_per_sec = 80  # <= 20 dk: 12.5 ms çözünürlük
+            elif duration <= 3600.0:
+                peaks_per_sec = 50  # 20-60 dk: 20 ms çözünürlük
+            else:
+                peaks_per_sec = 40  # > 60 dk: 25 ms çözünürlük
+            target_peaks = max(500, int(round(duration * peaks_per_sec)))
+        else:
+            target_peaks = int(num_peaks)
+
+        # 2. 10ms (100 Hz) temel akustik pencereleme (Peak + RMS hibrit enerji)
+        hop_samples = max(1, int(sample_rate * 0.010))
+        num_windows = total_samples // hop_samples
+        if num_windows <= 0:
+            return [0.0] * target_peaks
+
+        trimmed = np.abs(audio[:num_windows * hop_samples]).reshape((num_windows, hop_samples))
+        peak_env = np.max(trimmed, axis=1).astype(np.float32)
+        rms_env = np.sqrt(np.mean(trimmed ** 2, axis=1)).astype(np.float32)
+        hybrid_env = 0.65 * peak_env + 0.35 * rms_env
+
+        # 3. Sıfır zaman kaymalı (Zero-Drift) kayan noktalı sınır eşlemesi
+        if target_peaks >= num_windows:
+            idx_map = np.linspace(0, num_windows - 1, target_peaks).astype(np.int64)
+            raw_peaks = hybrid_env[idx_map]
+        else:
+            edges = np.linspace(0, num_windows, target_peaks + 1, dtype=np.int64)
+            starts = np.clip(edges[:-1], 0, num_windows - 1)
+            raw_peaks = np.maximum.reduceat(hybrid_env, starts)
+
+        if len(raw_peaks) == 0:
+            return []
+
+        # 4. Akustik Gürültü Tabanı (Noise Floor) ve 99.2 Persentil Algısal dBFS Ölçekleme
+        noise_floor = float(np.percentile(raw_peaks, 15))
+        gate = max(0.0012, min(0.0080, noise_floor * 2.2))
+
+        active = raw_peaks[raw_peaks > gate]
+        if len(active) > 10:
+            ref_ceiling = float(np.percentile(active, 99.2))
+        else:
+            ref_ceiling = float(np.max(raw_peaks))
+
+        denom = max(1e-5, ref_ceiling - gate)
+        normalized = np.clip((raw_peaks - gate) / denom, 0.0, 1.0)
+
+        # İnsan kulağının fısıltı ve vurguları algılama eğrisi (Power-Law 0.52)
+        perceptual = np.power(normalized, 0.52)
+        # Gürültü kapısı altındaki tam sessizlikleri 0.0 olarak koru
+        perceptual = np.where(raw_peaks <= gate, 0.0, perceptual)
+
+        return np.round(perceptual, 3).tolist()
+
     def analyze(
         self,
         media_path: str,
         vad_threshold: float = None,
         min_silence_ms: int = None,
-        num_peaks: int = 1000
+        num_peaks: int = None
     ) -> AudioAnalysis:
         """
         Medya dosyasını analiz eder:
         1. 16 kHz PCM çıkarımı
         2. Silero VAD (speech regions)
         3. RMS enerji zarfı (10ms adımlı)
-        4. Normalize UI dalga formu (num_peaks)
+        4. Sıfır kaymalı, yüksek çözünürlüklü algısal UI dalga formu (peaks)
         """
         threshold = vad_threshold if vad_threshold is not None else Config.VAD_THRESHOLD
         min_silence = min_silence_ms if min_silence_ms is not None else Config.VAD_MIN_SILENCE_MS
@@ -199,18 +269,14 @@ class AudioAnalyzer:
         else:
             rms_envelope = np.zeros(0, dtype=np.float32)
 
-        # 3. Waveform Peaks (UI için num_peaks adet normalize tepe)
-        peaks: List[float] = []
-        if len(rms_envelope) > 0 and num_peaks > 0:
-            chunk_size = max(1, len(rms_envelope) // num_peaks)
-            for i in range(num_peaks):
-                chunk = rms_envelope[i * chunk_size : (i + 1) * chunk_size]
-                if len(chunk) > 0:
-                    peaks.append(float(np.max(chunk)))
-                else:
-                    peaks.append(0.0)
-            max_p = max(peaks) if peaks and max(peaks) > 0 else 1.0
-            peaks = [round(p / max_p, 4) for p in peaks]
+        # 3. Yüksek Çözünürlüklü, Sıfır Kaymalı Algısal Dalga Formu (Waveform Peaks)
+        peaks = self.compute_perceptual_peaks(
+            audio=audio,
+            sample_rate=self.sample_rate,
+            duration=duration,
+            num_peaks=num_peaks
+        )
+        logger.info(f"📊 Yüksek çözünürlüklü ses dalga formu üretildi: {len(peaks)} nokta ({len(peaks)/max(0.1, duration):.1f} Hz)")
 
         return AudioAnalysis(
             duration=duration,
