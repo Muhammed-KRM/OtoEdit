@@ -26,6 +26,7 @@ except Exception:
     ffmpeg = None
 
 XFADE_TRANSITION_MAP: Dict[str, str] = {
+    # Temel Geçişler
     "fade": "fade",
     "crossfade": "dissolve",
     "dissolve": "dissolve",
@@ -35,6 +36,10 @@ XFADE_TRANSITION_MAP: Dict[str, str] = {
     "fadewhite": "fadewhite",
     "fade-white": "fadewhite",
     "dip-to-white": "fadewhite",
+    "fadegrays": "fadegrays",
+    "fade-grays": "fadegrays",
+    "distance": "distance",
+    # Wipe (Silme) Geçişleri
     "wipeleft": "wipeleft",
     "wipe-left": "wipeleft",
     "wiperight": "wiperight",
@@ -43,6 +48,15 @@ XFADE_TRANSITION_MAP: Dict[str, str] = {
     "wipe-up": "wipeup",
     "wipedown": "wipedown",
     "wipe-down": "wipedown",
+    "wipetl": "wipetl",
+    "wipe-tl": "wipetl",
+    "wipetr": "wipetr",
+    "wipe-tr": "wipetr",
+    "wipebl": "wipebl",
+    "wipe-bl": "wipebl",
+    "wipebr": "wipebr",
+    "wipe-br": "wipebr",
+    # Slide (Kaydırma) Geçişleri
     "slideleft": "slideleft",
     "slide-left": "slideleft",
     "slideright": "slideright",
@@ -51,16 +65,76 @@ XFADE_TRANSITION_MAP: Dict[str, str] = {
     "slide-up": "slideup",
     "slidedown": "slidedown",
     "slide-down": "slidedown",
-    "circleopen": "circleopen",
-    "circle-open": "circleopen",
-    "iris": "circleopen",
-    "circleclose": "circleclose",
-    "zoomin": "zoomin",
-    "zoom-in": "zoomin",
+    # Smooth (Yumuşak Kaydırma) Geçişleri
     "smoothleft": "smoothleft",
     "smooth-left": "smoothleft",
     "smoothright": "smoothright",
     "smooth-right": "smoothright",
+    "smoothup": "smoothup",
+    "smooth-up": "smoothup",
+    "smoothdown": "smoothdown",
+    "smooth-down": "smoothdown",
+    # Geometrik & Iris Geçişleri
+    "circlecrop": "circlecrop",
+    "circle-crop": "circlecrop",
+    "rectcrop": "rectcrop",
+    "rect-crop": "rectcrop",
+    "circleopen": "circleopen",
+    "circle-open": "circleopen",
+    "iris": "circleopen",
+    "circleclose": "circleclose",
+    "circle-close": "circleclose",
+    "vertopen": "vertopen",
+    "vert-open": "vertopen",
+    "vertclose": "vertclose",
+    "vert-close": "vertclose",
+    "horzopen": "horzopen",
+    "horz-open": "horzopen",
+    "horzclose": "horzclose",
+    "horz-close": "horzclose",
+    # Efekt & Diyagonal Geçişler
+    "pixelize": "pixelize",
+    "diagtl": "diagtl",
+    "diag-tl": "diagtl",
+    "diagtr": "diagtr",
+    "diag-tr": "diagtr",
+    "diagbl": "diagbl",
+    "diag-bl": "diagbl",
+    "diagbr": "diagbr",
+    "diag-br": "diagbr",
+    # Dilim (Slice) Geçişleri
+    "hlslice": "hlslice",
+    "hrslice": "hrslice",
+    "vuslice": "vuslice",
+    "vdslice": "vdslice",
+    # Blur, Squeeze & Zoom Geçişleri
+    "hblur": "hblur",
+    "squeezeh": "squeezeh",
+    "squeezev": "squeezev",
+    "zoomin": "zoomin",
+    "zoom-in": "zoomin",
+    # Rüzgar (Wind) Geçişleri
+    "hlwind": "hlwind",
+    "hrwind": "hrwind",
+    "vuwind": "vuwind",
+    "vdwind": "vdwind",
+    # Cover & Reveal Geçişleri
+    "coverleft": "coverleft",
+    "cover-left": "coverleft",
+    "coverright": "coverright",
+    "cover-right": "coverright",
+    "coverup": "coverup",
+    "cover-up": "coverup",
+    "coverdown": "coverdown",
+    "cover-down": "coverdown",
+    "revealleft": "revealleft",
+    "reveal-left": "revealleft",
+    "revealright": "revealright",
+    "reveal-right": "revealright",
+    "revealup": "revealup",
+    "reveal-up": "revealup",
+    "revealdown": "revealdown",
+    "reveal-down": "revealdown",
 }
 
 
@@ -334,13 +408,22 @@ class VideoRenderer:
         overlays = edl_json.get("overlays", [])
         transcript = edl_json.get("transcript")
         transitions = edl_json.get("transitions") or settings.get("transitions") or []
+        video_clips = edl_json.get("videoClips") or settings.get("videoClips") or []
         text_overlays = [ov for ov in overlays if ov.get("type") == "text"]
-        image_overlays = [ov for ov in overlays if ov.get("type") == "image"]
+        image_overlays = [
+            ov for ov in overlays
+            if ov.get("type") in ("image", "video", "sticker", "gif")
+        ]
 
         # 1. Segmentleri Kes ve Gerçek Süreleri Ölç
         actual_durations = None
         segment_files: List[str] = []
         merge_concat = None
+
+        active_video_clips = [
+            c for c in (video_clips or [])
+            if isinstance(c, dict) and not c.get("isCut")
+        ]
 
         has_cuts = (
             keep_segments
@@ -351,7 +434,35 @@ class VideoRenderer:
         smart_punch_in = bool(settings.get("smartPunchIn", False))
         playback_speed = float(settings.get("playbackSpeed") or settings.get("speed") or 1.0)
 
-        if has_cuts:
+        if active_video_clips:
+            logger.info(f"🎞️ V1 Klipleri Sıralı Kesim Modu: {len(active_video_clips)} aktif klip")
+            segment_files, actual_durations, merge_concat = self._cut_ordered_video_clips(
+                video_clips=video_clips,
+                main_video_path=video_path,
+                temp_dir=temp_dir,
+                smart_punch_in=smart_punch_in,
+                playback_speed=playback_speed,
+            )
+            keep_segments = [
+                (
+                    float(c.get("sourceStart") if c.get("sourceStart") is not None else c.get("start", 0.0)),
+                    float(c.get("sourceEnd") if c.get("sourceEnd") is not None else c.get("end", 0.0)),
+                )
+                for c in active_video_clips
+            ]
+            has_cuts = len(segment_files) > 0
+
+            if transitions and len(segment_files) >= 2:
+                segment_files, actual_durations, merge_concat = self.apply_transitions_between_segments(
+                    segment_files=segment_files,
+                    actual_durations=actual_durations,
+                    keep_segments=keep_segments,
+                    transitions=transitions,
+                    temp_dir=temp_dir,
+                )
+
+            trimmed_duration = sum(actual_durations) if actual_durations else trimmed_duration
+        elif has_cuts:
             logger.info(f"🚀 Frame-Accurate Kesim başlıyor: {len(keep_segments)} korunan segment")
             concat_txt_path = os.path.join(temp_dir, f"cuts_{os.path.basename(output_path)}.txt")
             self._create_concat_file(keep_segments, video_path, concat_txt_path)
@@ -602,6 +713,74 @@ class VideoRenderer:
         logger.info(f"Render tamamen başarıyla tamamlandı: {output_path}")
         return output_path
 
+    def _cut_ordered_video_clips(
+        self,
+        video_clips: List[Dict[str, Any]],
+        main_video_path: str,
+        temp_dir: str,
+        smart_punch_in: bool = False,
+        playback_speed: float = 1.0,
+    ) -> Tuple[List[str], List[float], str]:
+        """
+        V1 zaman çizgisinde yeniden sıralanmış (reordered) veya harici kaynaklı (sourceUrl)
+        videoClips öğelerini tam sırasıyla keser ve concat listesi üretir.
+        """
+        os.makedirs(temp_dir, exist_ok=True)
+        active_clips = [
+            c for c in (video_clips or [])
+            if isinstance(c, dict) and not c.get("isCut")
+        ]
+        if not active_clips:
+            return [], [], ""
+
+        concat_txt_path = os.path.join(temp_dir, "ordered_video_clips.txt")
+        segment_speeds: Dict[int, float] = {}
+
+        with open(concat_txt_path, "w", encoding="utf-8") as f:
+            f.write("ffconcat version 1.0\n")
+            for idx, clip in enumerate(active_clips):
+                raw_src = clip.get("sourceUrl") or clip.get("source") or clip.get("url") or ""
+                resolved_src = main_video_path
+                if raw_src:
+                    if os.path.isfile(raw_src):
+                        resolved_src = raw_src
+                    else:
+                        dl_src = self.image_overlay.resolve_image_path(raw_src, temp_dir=temp_dir)
+                        if dl_src and os.path.isfile(dl_src):
+                            resolved_src = dl_src
+
+                clean_src = os.path.abspath(resolved_src).replace("\\", "/")
+                start_t = float(
+                    clip.get("sourceStart")
+                    if clip.get("sourceStart") is not None
+                    else clip.get("start", 0.0)
+                )
+                if clip.get("sourceEnd") is not None:
+                    end_t = float(clip["sourceEnd"])
+                elif clip.get("end") is not None:
+                    end_t = float(clip["end"])
+                else:
+                    end_t = start_t + float(clip.get("duration", 4.0))
+
+                if end_t <= start_t:
+                    end_t = start_t + max(0.5, float(clip.get("duration", 2.0)))
+
+                clip_speed = clip.get("speed") or clip.get("playbackSpeed")
+                if clip_speed is not None:
+                    segment_speeds[idx] = float(clip_speed)
+
+                f.write(f"file '{clean_src}'\n")
+                f.write(f"inpoint {start_t}\n")
+                f.write(f"outpoint {end_t}\n")
+
+        return self._cut_segments(
+            concat_txt_path=concat_txt_path,
+            temp_dir=temp_dir,
+            smart_punch_in=smart_punch_in,
+            playback_speed=playback_speed,
+            segment_speeds=segment_speeds if segment_speeds else None,
+        )
+
     def _cut_segments(
         self,
         concat_txt_path: str,
@@ -717,6 +896,33 @@ class VideoRenderer:
                 f.write(f"file '{os.path.abspath(seg_file).replace(chr(92), '/')}'\n")
 
         return segment_files, actual_durations, merge_concat
+
+    def _execute_ffmpeg_with_concat(
+        self,
+        concat_txt_path: str,
+        target_format: str = "16:9",
+        face_data: Optional[List[Dict[str, Any]]] = None,
+        ass_path: Optional[str] = None,
+        output_path: str = "out.mp4",
+        color_grading: Optional[Dict[str, Any]] = None,
+    ):
+        """Geriye dönük uyumluluk için segment kesimi ve concat birleştirmesini tek adımda yürütür."""
+        temp_dir = os.path.dirname(os.path.abspath(concat_txt_path)) or "/app/temp"
+        segment_files, actual_durations, merge_concat = self._cut_segments(
+            concat_txt_path=concat_txt_path,
+            temp_dir=temp_dir,
+        )
+        trimmed_duration = sum(actual_durations) if actual_durations else 0.0
+        self._concat_segments(
+            merge_concat=merge_concat,
+            segment_files=segment_files,
+            target_format=target_format,
+            face_data=face_data,
+            ass_path=ass_path,
+            output_path=output_path,
+            trimmed_duration=trimmed_duration,
+            color_grading=color_grading,
+        )
 
     def _concat_segments(
         self,

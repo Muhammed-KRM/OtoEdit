@@ -50,12 +50,19 @@ public class EdlManager : IEdlService
         }
 
         var edl = await _context.EditDecisionLists
-            .AsNoTracking()
             .FirstOrDefaultAsync(e => e.ProjectId == projectId, cancellationToken);
 
         if (edl == null)
         {
             throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
+        }
+
+        // Eğer eski/şişkin EDL JSON'da (örn. > 650 KB) 17 basamaklı yüz binlerce audioPeaks float varsa kalıcı olarak sıkıştır
+        if (edl.EdlJson.Length > 650_000 && TryCompactEdlJson(edl.EdlJson, out var compactedJson))
+        {
+            edl.EdlJson = compactedJson;
+            await _context.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Şişkin EDL JSON otomatik sıkıştırıldı: ProjectId={ProjectId}, YeniBoyut={Len} byte", projectId, compactedJson.Length);
         }
 
         using var doc = JsonDocument.Parse(edl.EdlJson);
@@ -116,11 +123,19 @@ public class EdlManager : IEdlService
             throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
         }
 
-        // --- MEMENTO PATTERN: Mevcut durumu snapshot olarak kaydet ---
-        await SaveSnapshotAsync(projectId, edl, "EDL Patch Öncesi", "system", cancellationToken);
+        if (edl.EdlJson.Length > 650_000 && TryCompactEdlJson(edl.EdlJson, out var preCompacted))
+        {
+            edl.EdlJson = preCompacted;
+        }
 
-        // Mevcut EDL JSON'u JsonNode olarak parse et
-        var rootNode = JsonNode.Parse(edl.EdlJson) as JsonObject ?? new JsonObject();
+        // audioPeaks dizisi salt-okunur (statik) olduğundan JsonNode.Parse ve EdlSnapshots'a dahil etme (Zero-LOH Optimization)
+        var jsonWithoutPeaks = StripAudioPeaksRaw(edl.EdlJson, out var rawAudioPeaksArray);
+
+        // --- MEMENTO PATTERN: Mevcut durumu (audioPeaks hariç hafifletilmiş olarak) snapshot olarak kaydet ---
+        await SaveSnapshotAsync(projectId, edl, "EDL Patch Öncesi", "system", cancellationToken, jsonWithoutPeaks);
+
+        // Mevcut EDL JSON'u (audioPeaks olmadan) JsonNode olarak parse et
+        var rootNode = JsonNode.Parse(jsonWithoutPeaks) as JsonObject ?? new JsonObject();
 
         // Gelen patch alanlarını akıllıca merge et (cuts, overlays, settings vb.)
         using var patchDoc = JsonDocument.Parse(patch.GetRawText());
@@ -228,7 +243,8 @@ public class EdlManager : IEdlService
             }
         }
 
-        edl.EdlJson = rootNode.ToJsonString(JsonOptions);
+        var updatedWithoutPeaks = rootNode.ToJsonString(JsonOptions);
+        edl.EdlJson = ReattachAudioPeaksRaw(updatedWithoutPeaks, rawAudioPeaksArray);
         edl.Versiyon += 1;
         edl.GuncellemeTarihi = DateTime.UtcNow;
 
@@ -262,19 +278,22 @@ public class EdlManager : IEdlService
         if (lastSystemSnapshot == null)
             throw new InvalidOperationException("Geri alınacak bir işlem bulunamadı.");
 
-        // Mevcut durumu Redo (system_undo) olarak kaydet
+        var currentWithoutPeaks = StripAudioPeaksRaw(edl.EdlJson, out var currentRawPeaks);
+
+        // Mevcut durumu Redo (system_undo) olarak kaydet (audioPeaks hariç)
         var redoSnapshot = new EdlSnapshot
         {
             ProjectId = projectId,
             Versiyon = edl.Versiyon,
-            EdlJson = edl.EdlJson,
+            EdlJson = currentWithoutPeaks,
             Aciklama = "Undo Öncesi (Redo için)",
             Kaynak = "system_undo"
         };
         _context.EdlSnapshots.Add(redoSnapshot);
 
-        // EDL'i önceki state'e geri döndür
-        edl.EdlJson = lastSystemSnapshot.EdlJson;
+        // EDL'i önceki state'e geri döndür ve mevcut audioPeaks'i koru
+        var restoredWithoutPeaks = StripAudioPeaksRaw(lastSystemSnapshot.EdlJson, out var snapshotPeaks);
+        edl.EdlJson = ReattachAudioPeaksRaw(restoredWithoutPeaks, currentRawPeaks ?? snapshotPeaks);
         edl.Versiyon += 1; // Frontend'in değişikliği algılaması için arttırıyoruz
         edl.GuncellemeTarihi = DateTime.UtcNow;
 
@@ -311,19 +330,22 @@ public class EdlManager : IEdlService
         if (redoSnapshot == null)
             throw new InvalidOperationException("İleri alınacak bir işlem bulunamadı.");
 
-        // Mevcut durumu 'system' stack'ine geri ekle (Undo için)
+        var currentWithoutPeaks = StripAudioPeaksRaw(edl.EdlJson, out var currentRawPeaks);
+
+        // Mevcut durumu 'system' stack'ine geri ekle (Undo için, audioPeaks hariç)
         var undoSnapshot = new EdlSnapshot
         {
             ProjectId = projectId,
             Versiyon = edl.Versiyon,
-            EdlJson = edl.EdlJson,
+            EdlJson = currentWithoutPeaks,
             Aciklama = "Redo Öncesi (Undo için)",
             Kaynak = "system"
         };
         _context.EdlSnapshots.Add(undoSnapshot);
 
-        // EDL'i ileri state'e döndür
-        edl.EdlJson = redoSnapshot.EdlJson;
+        // EDL'i ileri state'e döndür ve mevcut audioPeaks'i koru
+        var restoredWithoutPeaks = StripAudioPeaksRaw(redoSnapshot.EdlJson, out var snapshotPeaks);
+        edl.EdlJson = ReattachAudioPeaksRaw(restoredWithoutPeaks, currentRawPeaks ?? snapshotPeaks);
         edl.Versiyon += 1;
         edl.GuncellemeTarihi = DateTime.UtcNow;
 
@@ -343,7 +365,13 @@ public class EdlManager : IEdlService
         };
     }
 
-    private async Task SaveSnapshotAsync(Guid projectId, EditDecisionList edl, string aciklama, string kaynak, CancellationToken cancellationToken)
+    private async Task SaveSnapshotAsync(
+        Guid projectId,
+        EditDecisionList edl,
+        string aciklama,
+        string kaynak,
+        CancellationToken cancellationToken,
+        string? preStrippedJson = null)
     {
         // Normal bir işlem yapılıyorsa (kaynak == system), ileri alma (redo) geçmişini temizle
         if (kaynak == "system")
@@ -354,11 +382,13 @@ public class EdlManager : IEdlService
             _context.EdlSnapshots.RemoveRange(redoSnapshots);
         }
 
+        var snapshotJson = preStrippedJson ?? StripAudioPeaksRaw(edl.EdlJson, out _);
+
         var snapshot = new EdlSnapshot
         {
             ProjectId = projectId,
             Versiyon = edl.Versiyon,
-            EdlJson = edl.EdlJson,
+            EdlJson = snapshotJson,
             Aciklama = aciklama,
             Kaynak = kaynak
         };
@@ -385,6 +415,10 @@ public class EdlManager : IEdlService
             .FirstOrDefaultAsync(e => e.ProjectId == projectId, cancellationToken);
 
         var jsonString = edlJson.RootElement.GetRawText();
+        if (jsonString.Length > 650_000 && TryCompactEdlJson(jsonString, out var compactedNewJson))
+        {
+            jsonString = compactedNewJson;
+        }
 
         if (existing != null)
         {
@@ -575,8 +609,8 @@ public class EdlManager : IEdlService
             double duration = numWindows * 0.010;
             if (duration <= 0.1) duration = Math.Max(1.0, fallbackDuration);
 
-            int peaksPerSec = duration <= 1200.0 ? 80 : (duration <= 3600.0 ? 50 : 40);
-            int targetPeaks = Math.Max(500, (int)Math.Round(duration * peaksPerSec));
+            int peaksPerSec = duration <= 600.0 ? 40 : (duration <= 1800.0 ? 20 : 10);
+            int targetPeaks = Math.Clamp((int)Math.Round(duration * peaksPerSec), 500, 24000);
 
             var rawPeaks = new float[targetPeaks];
             for (int i = 0; i < targetPeaks; i++)
@@ -640,6 +674,140 @@ public class EdlManager : IEdlService
         {
             _logger.LogWarning(ex, "FFmpeg ile yüksek çözünürlüklü dalga formu çıkarılamadı: {Url}", mediaUrl);
             return new List<double>();
+        }
+    }
+
+    /// <summary>
+    /// JsonNode.Parse öncesinde devasa audioPeaks dizisini raw string seviyesinde ayırır;
+    /// böylece 168.000+ adet JsonNode heap allocation ve EdlSnapshots tablosunda 2 MB kopya oluşması engellenir.
+    /// </summary>
+    private static string StripAudioPeaksRaw(string edlJson, out string? audioPeaksRawArray)
+    {
+        audioPeaksRawArray = null;
+        if (string.IsNullOrEmpty(edlJson)) return edlJson;
+
+        int keyIdx = edlJson.IndexOf("\"audioPeaks\"", StringComparison.Ordinal);
+        if (keyIdx < 0) return edlJson;
+
+        int bracketStart = edlJson.IndexOf('[', keyIdx + 12);
+        if (bracketStart < 0) return edlJson;
+
+        int bracketEnd = edlJson.IndexOf(']', bracketStart + 1);
+        if (bracketEnd < 0) return edlJson;
+
+        audioPeaksRawArray = edlJson.Substring(bracketStart, bracketEnd - bracketStart + 1);
+        return string.Concat(edlJson.AsSpan(0, bracketStart), "[]", edlJson.AsSpan(bracketEnd + 1));
+    }
+
+    private static string ReattachAudioPeaksRaw(string strippedEdlJson, string? audioPeaksRawArray)
+    {
+        if (string.IsNullOrEmpty(audioPeaksRawArray) || audioPeaksRawArray == "[]")
+            return strippedEdlJson;
+
+        int keyIdx = strippedEdlJson.IndexOf("\"audioPeaks\":[]", StringComparison.Ordinal);
+        if (keyIdx >= 0)
+        {
+            return string.Concat(
+                strippedEdlJson.AsSpan(0, keyIdx + 13),
+                audioPeaksRawArray,
+                strippedEdlJson.AsSpan(keyIdx + 15)
+            );
+        }
+
+        int keyIdx2 = strippedEdlJson.IndexOf("\"audioPeaks\"", StringComparison.Ordinal);
+        if (keyIdx2 >= 0)
+        {
+            int bStart = strippedEdlJson.IndexOf('[', keyIdx2 + 12);
+            int bEnd = bStart >= 0 ? strippedEdlJson.IndexOf(']', bStart + 1) : -1;
+            if (bStart >= 0 && bEnd >= bStart)
+            {
+                return string.Concat(
+                    strippedEdlJson.AsSpan(0, bStart),
+                    audioPeaksRawArray,
+                    strippedEdlJson.AsSpan(bEnd + 1)
+                );
+            }
+        }
+
+        if (strippedEdlJson.EndsWith('}'))
+        {
+            return string.Concat(
+                strippedEdlJson.AsSpan(0, strippedEdlJson.Length - 1),
+                ",\"audioPeaks\":",
+                audioPeaksRawArray,
+                "}"
+            );
+        }
+
+        return strippedEdlJson;
+    }
+
+    /// <summary>
+    /// 850 KB üzeri şişmiş EDL JSON kayıtlarındaki 18 basamaklı ve 168.000+ elemanlı audioPeaks dizisini
+    /// maksimum 24.000 nokta ve 3 ondalık basamağa indirgeyerek boyutu ~2.0 MB'tan ~110 KB'a düşürür.
+    /// </summary>
+    private static bool TryCompactEdlJson(string edlJson, out string compactedJson)
+    {
+        compactedJson = edlJson;
+        if (string.IsNullOrEmpty(edlJson) || edlJson.Length < 450_000)
+            return false;
+
+        int keyIdx = edlJson.IndexOf("\"audioPeaks\"", StringComparison.Ordinal);
+        if (keyIdx < 0) return false;
+
+        int bracketStart = edlJson.IndexOf('[', keyIdx + 12);
+        if (bracketStart < 0) return false;
+
+        int bracketEnd = edlJson.IndexOf(']', bracketStart + 1);
+        if (bracketEnd < 0) return false;
+
+        int arrayLen = bracketEnd - bracketStart + 1;
+        if (arrayLen < 220_000) return false;
+
+        try
+        {
+            var rawSlice = edlJson.Substring(bracketStart, arrayLen);
+            var peaks = JsonSerializer.Deserialize<double[]>(rawSlice);
+            if (peaks == null || peaks.Length == 0) return false;
+
+            const int maxPeaks = 24000;
+            double[] target;
+            if (peaks.Length > maxPeaks)
+            {
+                target = new double[maxPeaks];
+                for (int i = 0; i < maxPeaks; i++)
+                {
+                    int s = (int)((long)i * peaks.Length / maxPeaks);
+                    int e = (int)((long)(i + 1) * peaks.Length / maxPeaks);
+                    if (e <= s) e = s + 1;
+                    double maxV = 0;
+                    for (int k = s; k < e && k < peaks.Length; k++)
+                    {
+                        if (peaks[k] > maxV) maxV = peaks[k];
+                    }
+                    target[i] = Math.Round(maxV, 3);
+                }
+            }
+            else
+            {
+                target = new double[peaks.Length];
+                for (int i = 0; i < peaks.Length; i++)
+                {
+                    target[i] = Math.Round(peaks[i], 3);
+                }
+            }
+
+            var compactArrayJson = JsonSerializer.Serialize(target);
+            compactedJson = string.Concat(
+                edlJson.AsSpan(0, bracketStart),
+                compactArrayJson,
+                edlJson.AsSpan(bracketEnd + 1)
+            );
+            return compactedJson.Length < edlJson.Length;
+        }
+        catch
+        {
+            return false;
         }
     }
 }

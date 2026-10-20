@@ -66,9 +66,28 @@ export interface EdlSfxClip {
   action?: 'add' | 'update' | 'remove';
 }
 
+export interface VideoClipItem {
+  id: string;
+  start: number;
+  end: number;
+  visStart?: number;
+  visEnd?: number;
+  duration?: number;
+  order?: number;
+  isCut?: boolean;
+  reason?: string;
+  cutReason?: string;
+  source?: string;
+  sourceUrl?: string;
+  title?: string;
+  label?: string;
+  speed?: number;
+  action?: 'add' | 'update' | 'remove';
+}
+
 export interface OverlayItem {
   id: string;
-  type: 'text' | 'image';
+  type: 'text' | 'image' | 'video' | 'sticker' | 'gif';
   content?: string;
   source?: string;
   originalSource?: string;
@@ -255,6 +274,7 @@ export interface EdlSettings {
   bgmVolume?: number;
   bgmAutoDuck?: boolean;
   colorGrading?: ColorGradingConfig;
+  videoClips?: VideoClipItem[];
 }
 
 export interface EdlTemplate {
@@ -281,6 +301,7 @@ export interface EdlContent {
   overlays?: OverlayItem[];
   transitions?: EdlTransition[];
   sfxClips?: EdlSfxClip[];
+  videoClips?: VideoClipItem[];
   transcript?: TranscriptData;
   repurposing?: {
     clips?: ViralClipItem[];
@@ -296,6 +317,7 @@ export interface EdlPatchDto {
   overlays?: (OverlayItem & { action?: 'add' | 'update' | 'remove' })[];
   transitions?: (EdlTransition & { action?: 'add' | 'update' | 'remove' })[];
   sfxClips?: (EdlSfxClip & { action?: 'add' | 'update' | 'remove' })[];
+  videoClips?: (VideoClipItem & { action?: 'add' | 'update' | 'remove' })[];
   suggestions?: (SuggestionItem & { action?: 'add' | 'update' | 'remove' })[];
   settings?: Partial<EdlSettings>;
 }

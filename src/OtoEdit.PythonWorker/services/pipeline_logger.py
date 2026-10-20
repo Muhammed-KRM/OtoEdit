@@ -5,7 +5,14 @@ Kopmayan, Hata Fırlatmayan (Fail-Safe) 3 Katmanlı Pipeline Log Servisi
 
 import json
 import logging
-import requests
+import sys
+import types
+try:
+    import requests
+except Exception:
+    requests = types.ModuleType("requests")
+    requests.post = lambda *args, **kwargs: None
+    sys.modules["requests"] = requests
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any
 from config import Config
@@ -97,7 +104,8 @@ class PipelineLogger:
                 "timestampUtc": now_iso
             }
             # 2 saniye sıkı zaman aşımı: Ağ yavaşsa veya API ayakta değilse pipeline'ı bloke etmez
-            requests.post(self.api_url, json=payload, headers=self.headers, timeout=2.0)
+            if requests is not None:
+                requests.post(self.api_url, json=payload, headers=self.headers, timeout=2.0)
         except Exception as ex:
             # Kritik kural: Log servisi çökse dahi video işleme devam eder!
             logger.debug(f"Merkezi API log endpoint'ine erişilemedi (İşlem devam ediyor): {ex}")

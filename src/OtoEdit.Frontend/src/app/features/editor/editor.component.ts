@@ -13,7 +13,7 @@ import { SignalrService } from '../../core/services/signalr.service';
 import { ProjectDetailDto } from '../../core/models/project.model';
 import { DiagnosticsService } from '../../core/services/diagnostics.service';
 import { VideoDetailDto } from '../../core/models/video.model';
-import { CutItem, EdlContent, EdlDto, EdlPatchDto, OverlayItem, OverlayKeyframe, EdlTransition, EdlSfxClip, SubtitleStyleConfig, BackgroundMusicConfig, ColorGradingConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
+import { CutItem, EdlContent, EdlDto, EdlPatchDto, OverlayItem, OverlayKeyframe, EdlTransition, EdlSfxClip, VideoClipItem, SubtitleStyleConfig, BackgroundMusicConfig, ColorGradingConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
 import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
 import { ProjectAssetDto } from '../../core/models/asset.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
@@ -55,7 +55,17 @@ export interface ContextMenuState {
           </div>
         </div>
 
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2.5">
+          <!-- Tek Tıkla Otomatik Kurgula & Zenginleştir Butonu (FAZ D) -->
+          <button
+            type="button"
+            (click)="applyAutoDirectorCompose()"
+            class="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500/20 to-indigo-500/25 hover:from-amber-500 hover:to-indigo-500 text-amber-300 hover:text-slate-950 border border-amber-400/40 text-xs font-extrabold flex items-center gap-1.5 transition-all cursor-pointer shadow-sm"
+            title="Videoya otomatik Hook Başlığı, Vurgu Yazıları, Hareketli Stickerlar, Sahne Geçişleri ve SFX ekler">
+            <span>✨</span>
+            <span class="text-[11px]">Otomatik Kurgula & Zenginleştir</span>
+          </button>
+
           <!-- Kısayol İpuçları Butonu -->
           <div class="relative group">
             <button type="button" class="px-2.5 py-1 rounded-lg bg-dark-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs flex items-center gap-1.5 transition-colors">
@@ -180,21 +190,33 @@ export interface ContextMenuState {
                   </div>
 
                   <!-- Hover Kontrolleri -->
-                  <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
+                  <div class="absolute inset-0 bg-dark-950/90 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
                     <button 
-                      *ngIf="selectedOverlay()?.type === 'image'"
+                      *ngIf="selectedOverlay()?.type === 'image' && asset.mimeTuru.startsWith('image/')"
                       (click)="$event.stopPropagation(); assignAssetToSelectedOverlay(asset)"
-                      class="px-2 py-0.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded w-full">
+                      class="px-2 py-0.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded w-full cursor-pointer">
                       🎯 Seçiliye Ata
                     </button>
                     <button 
+                      *ngIf="asset.mimeTuru.startsWith('video/')"
+                      (click)="$event.stopPropagation(); appendAssetVideoToMainTrack(asset)"
+                      class="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[9px] rounded w-full cursor-pointer">
+                      🎬 Ana Videoya (V1) Ekle
+                    </button>
+                    <button 
+                      *ngIf="asset.mimeTuru.startsWith('audio/')"
+                      (click)="$event.stopPropagation(); addAssetAudioToSfxTrack(asset)"
+                      class="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[9px] rounded w-full cursor-pointer">
+                      🔊 SFX (A2) Ekle
+                    </button>
+                    <button 
                       (click)="$event.stopPropagation(); addAssetOverlay(asset)"
-                      class="px-2 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[9px] rounded w-full">
-                      + Katman Ekle
+                      class="px-2 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[9px] rounded w-full cursor-pointer">
+                      + {{ asset.mimeTuru.startsWith('video/') ? 'PiP Katman (T1)' : 'Katman Ekle' }}
                     </button>
                     <button 
                       (click)="$event.stopPropagation(); deleteAsset(asset.id)"
-                      class="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-[8px] rounded w-full">
+                      class="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-[8px] rounded w-full cursor-pointer">
                       Sil
                     </button>
                   </div>
@@ -205,22 +227,51 @@ export interface ContextMenuState {
               </div>
             </div>
 
-            <!-- FAZ 5: Çıkartmalar (Stickers), Hareketli GIF & 3D Emoji Stüdyosu -->
+            <!-- FAZ 5 & FAZ B: 50+ Yerleşik Çıkartma, Hareketli Noto Emoji & 200.000+ Canlı Iconify Sticker Arama -->
             <div class="pt-2 border-t border-slate-800/80 space-y-2">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">✨ Çıkartmalar, Emoji & GIF</span>
-                <span class="text-[9px] text-slate-400 font-mono">Tek Tıkla Ekle</span>
+                <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">✨ Çıkartma, Hareketli Emoji & İkon ({{ filteredStickers().length }})</span>
+                <span class="text-[9px] text-emerald-400 font-mono font-bold">200.000+ Online</span>
+              </div>
+
+              <!-- 200.000+ Canlı Iconify Sticker & Vektör Arama Kutusu -->
+              <div class="flex gap-1">
+                <input
+                  type="text"
+                  [ngModel]="stickerSearchQuery()"
+                  (ngModelChange)="onStickerSearchInput($event)"
+                  placeholder="🔍 200.000+ çıkartma ara (fire, arrow, tiktok, star)..."
+                  class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white placeholder-slate-500 focus:border-amber-400 outline-none" />
+                <button
+                  *ngIf="stickerSearchQuery()"
+                  type="button"
+                  (click)="onStickerSearchInput('')"
+                  class="px-2 py-1 bg-dark-800 text-slate-400 hover:text-white rounded-lg text-[10px] cursor-pointer">
+                  ✕
+                </button>
+              </div>
+
+              <!-- Kategori Çipleri -->
+              <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
+                <button type="button" (click)="selectedStickerCategory.set('all')" [ngClass]="selectedStickerCategory() === 'all' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">Tümü ({{ studio.stickerLibrary.length }})</button>
+                <button type="button" (click)="selectedStickerCategory.set('animated')" [ngClass]="selectedStickerCategory() === 'animated' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🔥 Hareketli GIF</button>
+                <button type="button" (click)="selectedStickerCategory.set('emoji')" [ngClass]="selectedStickerCategory() === 'emoji' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">😀 3D Emoji</button>
+                <button type="button" (click)="selectedStickerCategory.set('social')" [ngClass]="selectedStickerCategory() === 'social' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">📱 Sosyal</button>
+                <button type="button" (click)="selectedStickerCategory.set('badge')" [ngClass]="selectedStickerCategory() === 'badge' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🏷️ Rozet</button>
+                <button type="button" (click)="selectedStickerCategory.set('arrow')" [ngClass]="selectedStickerCategory() === 'arrow' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">➡️ Oklar</button>
+                <button type="button" (click)="selectedStickerCategory.set('fx')" [ngClass]="selectedStickerCategory() === 'fx' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💥 Efekt</button>
               </div>
 
               <!-- Çıkartma & Emoji Izgarası -->
-              <div class="grid grid-cols-3 gap-1.5 max-h-40 overflow-y-auto pr-1">
+              <div class="grid grid-cols-3 gap-1.5 max-h-48 overflow-y-auto pr-1">
                 <button
                   type="button"
-                  *ngFor="let stk of studioEngine.stickerLibrary"
+                  *ngFor="let stk of filteredStickers()"
                   (click)="addStickerOverlay(stk)"
-                  class="p-2 rounded-lg bg-dark-900 border border-slate-800 hover:border-amber-400/70 hover:bg-dark-800 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer group"
+                  class="p-2 rounded-lg bg-dark-900 border border-slate-800 hover:border-amber-400/70 hover:bg-dark-800 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer group relative"
                   [title]="stk.name + ' Ekle'">
-                  <img [src]="stk.dataUrl" [alt]="stk.name" class="h-7 object-contain group-hover:scale-110 transition-transform" />
+                  <span *ngIf="stk.isAnimated" class="absolute top-1 right-1 px-1 rounded bg-rose-500/80 text-[7px] font-bold text-white">GIF</span>
+                  <img [src]="stk.dataUrl" [alt]="stk.name" loading="lazy" class="h-7 object-contain group-hover:scale-110 transition-transform" />
                   <span class="text-[8px] text-slate-300 truncate w-full text-center font-medium">{{ stk.name }}</span>
                 </button>
               </div>
@@ -294,19 +345,27 @@ export interface ContextMenuState {
               </div>
             </div>
 
-            <!-- SFX Kategori Filtresi -->
+            <!-- SFX Kategori Filtresi (76 Stüdyo SFX + Özel Ses Yükleme) -->
             <div class="space-y-1.5">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider">🔊 Ses Efektleri Kütüphanesi ({{ filteredSfxLibrary().length }})</span>
-                <button type="button" (click)="isBgmSelectorOpen.set(true)" class="text-[9px] text-violet-300 hover:underline cursor-pointer font-semibold">🎵 BGM Müzik</button>
+                <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider">🔊 Ses Efektleri ({{ filteredSfxLibrary().length }} / {{ studio.sfxLibrary.length }})</span>
+                <div class="flex items-center gap-2">
+                  <button type="button" (click)="triggerAssetUpload()" class="text-[9px] text-amber-300 hover:underline cursor-pointer font-semibold">📤 Özel Ses Yükle</button>
+                  <button type="button" (click)="isBgmSelectorOpen.set(true)" class="text-[9px] text-violet-300 hover:underline cursor-pointer font-semibold">🎵 BGM</button>
+                </div>
               </div>
               <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
-                <button type="button" (click)="selectedSfxCategory.set('all')" [ngClass]="selectedSfxCategory() === 'all' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">Tümü</button>
-                <button type="button" (click)="selectedSfxCategory.set('whoosh')" [ngClass]="selectedSfxCategory() === 'whoosh' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">💨 Geçiş</button>
-                <button type="button" (click)="selectedSfxCategory.set('pop')" [ngClass]="selectedSfxCategory() === 'pop' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">🫧 Pop</button>
-                <button type="button" (click)="selectedSfxCategory.set('cinematic')" [ngClass]="selectedSfxCategory() === 'cinematic' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">💣 Sinematik</button>
-                <button type="button" (click)="selectedSfxCategory.set('ui')" [ngClass]="selectedSfxCategory() === 'ui' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">🔔 Bildirim</button>
-                <button type="button" (click)="selectedSfxCategory.set('funny')" [ngClass]="selectedSfxCategory() === 'funny' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 cursor-pointer">💿 Mizah</button>
+                <button type="button" (click)="selectedSfxCategory.set('all')" [ngClass]="selectedSfxCategory() === 'all' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">Tümü ({{ studio.sfxLibrary.length }})</button>
+                <button type="button" (click)="selectedSfxCategory.set('whoosh')" [ngClass]="selectedSfxCategory() === 'whoosh' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💨 Geçiş</button>
+                <button type="button" (click)="selectedSfxCategory.set('pop')" [ngClass]="selectedSfxCategory() === 'pop' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🫧 Pop</button>
+                <button type="button" (click)="selectedSfxCategory.set('cinematic')" [ngClass]="selectedSfxCategory() === 'cinematic' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💣 Sinematik</button>
+                <button type="button" (click)="selectedSfxCategory.set('impact')" [ngClass]="selectedSfxCategory() === 'impact' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🥊 Darbe</button>
+                <button type="button" (click)="selectedSfxCategory.set('riser')" [ngClass]="selectedSfxCategory() === 'riser' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🚀 Riser</button>
+                <button type="button" (click)="selectedSfxCategory.set('ui')" [ngClass]="selectedSfxCategory() === 'ui' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🔔 Bildirim</button>
+                <button type="button" (click)="selectedSfxCategory.set('ambience')" [ngClass]="selectedSfxCategory() === 'ambience' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🌧️ Atmosfer</button>
+                <button type="button" (click)="selectedSfxCategory.set('musical')" [ngClass]="selectedSfxCategory() === 'musical' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🎸 Müzikal</button>
+                <button type="button" (click)="selectedSfxCategory.set('foley')" [ngClass]="selectedSfxCategory() === 'foley' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">👣 Foley</button>
+                <button type="button" (click)="selectedSfxCategory.set('funny')" [ngClass]="selectedSfxCategory() === 'funny' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💿 Mizah</button>
               </div>
             </div>
 
@@ -347,7 +406,7 @@ export interface ContextMenuState {
           <div *ngIf="activeTab() === 'chat'" class="flex-1 flex flex-col h-full overflow-hidden">
             <div #chatMessagesContainer class="flex-1 p-3 overflow-y-auto space-y-3">
 
-              <!-- FAZ 6: OTONOM VİDEO YÖNETMENİ (PROAKTİF AI ÖNERİLERİ) -->
+              <!-- FAZ D & FAZ 6: OTONOM VİDEO YÖNETMENİ & İHTİYAÇ ANINDA (ON-DEMAND) AI MOTORU -->
               <div class="p-3 rounded-xl bg-gradient-to-br from-indigo-950/70 via-dark-900 to-slate-950 border border-indigo-500/40 space-y-2.5 shadow-lg">
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-1.5">
@@ -360,6 +419,50 @@ export interface ContextMenuState {
                     class="px-2 py-0.5 rounded-md bg-brand-cyan/20 hover:bg-brand-cyan text-brand-cyan hover:text-slate-950 border border-brand-cyan/40 text-[9px] font-bold transition-colors cursor-pointer">
                     ✨ Sahneyi Analiz Et ({{ pendingSuggestions().length }})
                   </button>
+                </div>
+
+                <!-- Tek Tıkla Otomatik Kurgula & Zenginleştir Butonu -->
+                <button
+                  type="button"
+                  (click)="applyAutoDirectorCompose()"
+                  class="w-full py-2 px-3 rounded-lg bg-gradient-to-r from-amber-400 via-brand-cyan to-indigo-500 hover:brightness-110 text-slate-950 font-extrabold text-[10px] shadow-glow-sm flex items-center justify-center gap-1.5 cursor-pointer transition-all">
+                  <span>✨</span>
+                  <span>Videoyu Otomatik Kurgula (Yazı + Sticker + Geçiş + SFX)</span>
+                </button>
+
+                <!-- On-Demand AI (İhtiyaç Anında AI İşlemleri - Direkt Editöre Geçilen Videolar İçin) -->
+                <div class="pt-1 border-t border-slate-800/80 space-y-1">
+                  <span class="text-[9px] font-bold text-slate-400 uppercase block">⚡ İhtiyaç Anında AI İşlemleri (On-Demand)</span>
+                  <div class="grid grid-cols-3 gap-1">
+                    <button
+                      type="button"
+                      [disabled]="onDemandAiLoading()"
+                      (click)="triggerOnDemandAi({ autoSubtitles: true })"
+                      class="py-1 px-1.5 rounded bg-dark-950 hover:bg-indigo-500/20 border border-slate-800 hover:border-indigo-400/50 text-[9px] font-semibold text-slate-200 cursor-pointer disabled:opacity-50"
+                      title="Whisper AI ile konuşmaları metne dök ve altyazı oluştur">
+                      🎙️ Altyazı
+                    </button>
+                    <button
+                      type="button"
+                      [disabled]="onDemandAiLoading()"
+                      (click)="triggerOnDemandAi({ autoJumpcut: true, autoSubtitles: true })"
+                      class="py-1 px-1.5 rounded bg-dark-950 hover:bg-emerald-500/20 border border-slate-800 hover:border-emerald-400/50 text-[9px] font-semibold text-slate-200 cursor-pointer disabled:opacity-50"
+                      title="Sessizlikleri otomatik tespit et ve kes">
+                      ✂️ Oto-Kesim
+                    </button>
+                    <button
+                      type="button"
+                      [disabled]="onDemandAiLoading()"
+                      (click)="triggerOnDemandAi({ autoBroll: true, autoSubtitles: true, autoDirector: true })"
+                      class="py-1 px-1.5 rounded bg-dark-950 hover:bg-amber-500/20 border border-slate-800 hover:border-amber-400/50 text-[9px] font-semibold text-slate-200 cursor-pointer disabled:opacity-50"
+                      title="Konuşma içeriğine uygun stok B-Roll görselleri ve kurgu ekle">
+                      🖼️ AI B-Roll
+                    </button>
+                  </div>
+                  <div *ngIf="onDemandAiStatus()" class="text-[9px] text-brand-cyan font-mono flex items-center gap-1 pt-0.5">
+                    <span class="w-1.5 h-1.5 rounded-full bg-brand-cyan animate-ping"></span>
+                    <span>{{ onDemandAiStatus() }}</span>
+                  </div>
                 </div>
                 <p class="text-[10px] text-slate-300 leading-snug">
                   Videonuzun konuşma vurgularına ve kesim noktalarına göre hazırlanan profesyonel kurgu önerileri:
@@ -523,8 +626,15 @@ export interface ContextMenuState {
                 class="w-full bg-dark-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:border-brand-cyan outline-none" />
             </div>
 
-            <div *ngIf="!filteredTranscriptSegments()?.length" class="text-center py-10 text-slate-500 text-xs">
-              Transkript verisi bulunamadı veya eşleşen sonuç yok.
+            <div *ngIf="!filteredTranscriptSegments()?.length" class="text-center py-8 px-3 text-slate-400 text-xs space-y-2.5 bg-dark-900/50 rounded-xl border border-slate-800">
+              <p>Transkript verisi bulunamadı (Direkt Editöre Geç modu veya arama sonucu yok).</p>
+              <button
+                type="button"
+                [disabled]="onDemandAiLoading()"
+                (click)="triggerOnDemandAi({ autoSubtitles: true })"
+                class="px-3 py-1.5 rounded-lg bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[10px] cursor-pointer shadow-glow-sm disabled:opacity-50">
+                🎙️ Şimdi Yapay Zeka ile Altyazı Çıkar (Whisper STT)
+              </button>
             </div>
 
             <div 
@@ -583,7 +693,7 @@ export interface ContextMenuState {
             <!-- Gerçek Silüet Sticker Konturu için SVG Morpholojik Filtre Tanımları -->
             <svg width="0" height="0" class="absolute pointer-events-none overflow-hidden" aria-hidden="true">
               <defs>
-                <filter *ngFor="let ov of activeOverlays()" [attr.id]="'sticker-outline-' + ov.id" x="-30%" y="-30%" width="160%" height="160%">
+                <filter *ngFor="let ov of activeOverlays(); trackBy: trackByOverlayId" [attr.id]="'sticker-outline-' + ov.id" x="-30%" y="-30%" width="160%" height="160%">
                   <feMorphology in="SourceAlpha" operator="dilate" [attr.radius]="((ov.stickerBorderWidth || 6) * 0.45).toFixed(1)" result="dilated" />
                   <feFlood [attr.flood-color]="ov.stickerBorderColor || '#FFFFFF'" result="floodColor" />
                   <feComposite in="floodColor" in2="dilated" operator="in" result="outline" />
@@ -630,7 +740,7 @@ export interface ContextMenuState {
 
               <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi (Photoshop & CapCut Studio) -->
               <div 
-                *ngFor="let ov of activeOverlays()" 
+                *ngFor="let ov of activeOverlays(); trackBy: trackByOverlayId" 
                 (mousedown)="onCanvasDragStart($event, ov.id)"
                 (click)="$event.stopPropagation(); selectOverlay(ov.id)"
                 (contextmenu)="openOverlayContextMenu($event, ov)"
@@ -703,13 +813,26 @@ export interface ContextMenuState {
                   {{ ov.allCaps ? (ov.content || '').toUpperCase() : ov.content }}
                 </span>
 
-                <!-- 2. Görsel / B-Roll / Sticker / GIF Kaplaması (Photoshop Adjustments + Real Silhouette Sticker + Shape Mask) -->
+                <!-- 2. Görsel / B-Roll / Sticker / GIF / PiP Video Kaplaması -->
                 <div 
-                  *ngIf="ov.type === 'image'" 
+                  *ngIf="ov.type === 'image' || ov.type === 'sticker' || ov.type === 'gif' || ov.type === 'video'" 
                   class="relative group transition-transform duration-75"
                   [style.opacity]="(ov.opacity ?? 100) / 100">
+                  <video
+                    *ngIf="ov.type === 'video' && ov.source"
+                    [src]="ov.source"
+                    autoplay
+                    muted
+                    loop
+                    playsinline
+                    class="pointer-events-none object-contain rounded-lg border border-brand-cyan/40 shadow-xl"
+                    [style.width]="(200 * (ov.scale || 1.0) / 8.6) + 'cqi'"
+                    [style.filter]="getImageOverlayFilter(ov)"
+                    [style.clipPath]="getImageClipPath(ov)"
+                    style="height: auto; max-width: none;">
+                  </video>
                   <img 
-                    *ngIf="ov.source" 
+                    *ngIf="ov.type !== 'video' && ov.source" 
                     [src]="ov.source" 
                     [alt]="ov.content || 'Görsel'" 
                     class="pointer-events-none object-contain transition-all"
@@ -1655,15 +1778,13 @@ export interface ContextMenuState {
                 <div class="grid grid-cols-2 gap-2">
                   <select 
                     [ngModel]="subtitleFont()" 
-                    (ngModelChange)="subtitleFont.set($event); persistSubtitleStyle()" 
+                    (ngModelChange)="subtitleFont.set($event); studio.ensureFontLoaded($event); persistSubtitleStyle()" 
                     class="bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
-                    <option value="Montserrat, sans-serif">Montserrat</option>
-                    <option value="Poppins, sans-serif">Poppins</option>
-                    <option value="Bebas Neue, sans-serif">Bebas Neue</option>
-                    <option value="Anton, sans-serif">Anton</option>
-                    <option value="Cinzel, serif">Cinzel (Sinematik)</option>
-                    <option value="Outfit, sans-serif">Outfit</option>
-                    <option value="Inter, sans-serif">Inter</option>
+                    <optgroup *ngFor="let cat of studio.fontCategories" [label]="cat.label">
+                      <option *ngFor="let f of getFontsByCategory(cat.id)" [value]="f.family" [style.fontFamily]="f.family">
+                        {{ f.name }}
+                      </option>
+                    </optgroup>
                   </select>
                   <input 
                     type="range" 
@@ -1809,10 +1930,34 @@ export interface ContextMenuState {
                   {{ spd }}x
                 </button>
               </div>
-              <div class="pt-1 border-t border-slate-800/70">
+              <div class="pt-1 border-t border-slate-800/70 space-y-1.5">
+                <!-- FAZ E: V1 Klip Sıralama & Taşıma Kontrolleri -->
+                <div *ngIf="selectedHasKeep()" class="space-y-1">
+                  <span class="text-[9px] text-slate-400 uppercase font-bold block">🔀 Klip Sıralaması (V1 Sekansı)</span>
+                  <div class="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      (click)="moveSelectedClipOrder(-1)"
+                      class="py-1.5 px-2 rounded-lg bg-dark-900 hover:bg-brand-cyan/20 text-slate-200 hover:text-brand-cyan border border-slate-700 hover:border-brand-cyan/50 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors">
+                      <span>⬅️</span>
+                      <span>Sola Taşı</span>
+                    </button>
+                    <button
+                      type="button"
+                      (click)="moveSelectedClipOrder(1)"
+                      class="py-1.5 px-2 rounded-lg bg-dark-900 hover:bg-brand-cyan/20 text-slate-200 hover:text-brand-cyan border border-slate-700 hover:border-brand-cyan/50 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors">
+                      <span>Sağa Taşı</span>
+                      <span>➡️</span>
+                    </button>
+                  </div>
+                </div>
                 <button type="button" (click)="openTransitionModalForSelectedClip()" class="w-full py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[10px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
                   <span>⚡</span>
-                  <span>Sahne Geçiş Efekti Ekle / Düzenle</span>
+                  <span>Sahne Geçiş Efekti Ekle / Düzenle (45 Efekt)</span>
+                </button>
+                <button type="button" (click)="activeTab.set('media')" class="w-full py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
+                  <span>🎬</span>
+                  <span>+ Başka Video Klibi Ekle (V1 / PiP)</span>
                 </button>
               </div>
             </div>
@@ -1890,6 +2035,26 @@ export interface ContextMenuState {
             <button (click)="redo()" class="p-1 px-2.5 rounded bg-dark-800 text-slate-400 hover:text-white border border-slate-700 text-xs transition-colors cursor-pointer" title="İleri Al (Ctrl+Y)">
               ⟳ İleri
             </button>
+            <!-- FAZ E: Seçili Klibin Sırasını Sola / Sağa Taşıma Butonları -->
+            <ng-container *ngIf="selectedClipIds().length === 1 && selectedHasKeep()">
+              <div class="h-4 w-px bg-slate-700 mx-0.5"></div>
+              <button
+                type="button"
+                (click)="moveSelectedClipOrder(-1)"
+                class="px-2 py-1 rounded bg-dark-800 hover:bg-brand-cyan/20 text-slate-300 hover:text-brand-cyan border border-slate-700 hover:border-brand-cyan/50 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                title="Seçili Klibi Sola Taşı (Önceki Kliple Yer Değiştir)">
+                <span>⬅️</span>
+                <span class="text-[11px]">Sola Taşı</span>
+              </button>
+              <button
+                type="button"
+                (click)="moveSelectedClipOrder(1)"
+                class="px-2 py-1 rounded bg-dark-800 hover:bg-brand-cyan/20 text-slate-300 hover:text-brand-cyan border border-slate-700 hover:border-brand-cyan/50 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                title="Seçili Klibi Sağa Taşı (Sonraki Kliple Yer Değiştir)">
+                <span class="text-[11px]">Sağa Taşı</span>
+                <span>➡️</span>
+              </button>
+            </ng-container>
             <button 
               *ngIf="selectedClipIds().length > 1" 
               (click)="mergeSelectedClips()" 
@@ -2181,7 +2346,7 @@ export interface ContextMenuState {
                 <div class="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px)] bg-[size:50px_100%] opacity-15 pointer-events-none"></div>
                 
                 <div class="absolute left-0 right-0 top-0 bottom-0 overflow-hidden">
-                  <div *ngFor="let seg of visibleSubtitleSegments()"
+                  <div *ngFor="let seg of visibleSubtitleSegments(); trackBy: trackBySubtitleId"
                        (mousedown)="onSubtitleMouseDown($event, seg)"
                        (click)="$event.stopPropagation(); selectSubtitle(seg)"
                        (dblclick)="$event.stopPropagation(); startEditSubtitle(seg)"
@@ -2234,7 +2399,7 @@ export interface ContextMenuState {
 
                 <!-- Katman Öğeleri (Pill'ler) -->
                 <div 
-                  *ngFor="let ov of getOverlaysForTrack(trackNum)"
+                  *ngFor="let ov of getOverlaysForTrack(trackNum); trackBy: trackByOverlayId"
                   (mousedown)="!isTrackLocked(trackNum) && onOverlayDragStart($event, ov.id)"
                   (click)="$event.stopPropagation(); !isTrackLocked(trackNum) && selectOverlay(ov.id)"
                   (contextmenu)="openOverlayContextMenu($event, ov)"
@@ -2273,12 +2438,16 @@ export interface ContextMenuState {
                 </div>
               </div>
 
-              <!-- Video Klipleri Şeridi (V1 - Ana Video Kanalı, Gerçek Ses Dalgası & [⚡] Sahne Geçişleri) -->
+              <!-- Video Klipleri Şeridi (V1 - Ana Video Kanalı, Gerçek Ses Dalgası & [⚡] Sahne Geçişleri & Klip Sıralama) -->
               <div class="relative bg-dark-950 flex overflow-hidden border-b border-slate-800" [style.height.px]="audioTrackHeight()">
-                <!-- Klipler (O(1) Pre-Computed Layout) -->
-                <ng-container *ngFor="let clip of clips()">
+                <!-- Klipler (O(1) Pre-Computed Layout + TrackBy + Drag-and-Drop Reorder) -->
+                <ng-container *ngFor="let clip of clips(); trackBy: trackByClipId">
                   <div 
                     *ngIf="clip.isVisibleClip"
+                    [attr.draggable]="!clip.isCut"
+                    (dragstart)="onClipDragStart($event, clip)"
+                    (dragover)="onClipDragOver($event, clip)"
+                    (drop)="onClipDrop($event, clip)"
                     (mousedown)="onClipMouseDown($event, clip.id)"
                     (click)="selectClip(clip.id, $event)"
                     (dblclick)="toggleClip(clip, $event)"
@@ -2314,9 +2483,27 @@ export interface ContextMenuState {
                     <div class="relative flex items-center justify-between text-[9px] text-white/90 font-mono truncate pointer-events-none z-10">
                       <span class="truncate font-semibold flex items-center gap-1">
                         <span *ngIf="clip.isCut" class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
-                        <span>{{ clip.isCut ? (isRetakeClip(clip) ? '🔁 Retake' : '✕ Kesilen') : 'Klip' }}</span>
+                        <span>{{ clip.isCut ? (isRetakeClip(clip) ? '🔁 Retake' : '✕ Kesilen') : (clip.label || 'Klip') }}</span>
                       </span>
                       <span class="text-[8px] opacity-80">{{ clip.duration.toFixed(1) }}s</span>
+                    </div>
+
+                    <!-- FAZ E: Seçili veya Üzerine Gelinen Klipte Hızlı Sola/Sağa Taşıma Butonları -->
+                    <div *ngIf="!clip.isCut && selectedClipIds().includes(clip.id)" class="relative z-20 flex items-center justify-center gap-1 my-auto">
+                      <button
+                        type="button"
+                        (click)="$event.stopPropagation(); moveClipOrder(clip.id, -1)"
+                        class="px-1.5 py-0.5 rounded bg-dark-950/90 hover:bg-brand-cyan text-white hover:text-slate-950 border border-slate-600 text-[9px] font-bold cursor-pointer shadow"
+                        title="Bu klibi sola taşı">
+                        ⬅️
+                      </button>
+                      <button
+                        type="button"
+                        (click)="$event.stopPropagation(); moveClipOrder(clip.id, 1)"
+                        class="px-1.5 py-0.5 rounded bg-dark-950/90 hover:bg-brand-cyan text-white hover:text-slate-950 border border-slate-600 text-[9px] font-bold cursor-pointer shadow"
+                        title="Bu klibi sağa taşı">
+                        ➡️
+                      </button>
                     </div>
 
                     <!-- Kesilen Alan Rozeti -->
@@ -2335,7 +2522,7 @@ export interface ContextMenuState {
 
                 <!-- Sahne Geçiş İkonları ([⚡] Transition Buttons on Clip Boundaries) -->
                 <button
-                  *ngFor="let b of clipTransitionBoundaries()"
+                  *ngFor="let b of clipTransitionBoundaries(); trackBy: trackByBoundaryId"
                   type="button"
                   (click)="$event.stopPropagation(); openTransitionModal(b)"
                   [style.left.%]="b.leftPercent"
@@ -2438,7 +2625,7 @@ export interface ContextMenuState {
                 </div>
 
                 <div
-                  *ngFor="let sfx of sfxClips()"
+                  *ngFor="let sfx of sfxClips(); trackBy: trackBySfxId"
                   (click)="$event.stopPropagation(); previewSfxClip(sfx)"
                   [ngStyle]="getSfxClipStyle(sfx)"
                   class="absolute top-1 bottom-1 rounded-md bg-gradient-to-r from-amber-600/85 to-orange-600/85 border border-amber-300/70 px-2 flex items-center justify-between text-[10px] font-bold text-white shadow z-20 cursor-pointer group overflow-hidden min-w-[24px]"
@@ -2530,6 +2717,20 @@ export interface ContextMenuState {
             class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
             <span class="flex items-center gap-2"><span>✂</span> Bu Noktadan Böl</span>
             <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">B</kbd>
+          </button>
+          <button 
+            *ngIf="!menu.targetClip?.isCut"
+            (click)="moveClipOrder(menu.targetClip?.id, -1); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>⬅️</span> Klibi Sola Taşı</span>
+            <span class="text-[10px] text-slate-400 font-mono">Sıra -1</span>
+          </button>
+          <button 
+            *ngIf="!menu.targetClip?.isCut"
+            (click)="moveClipOrder(menu.targetClip?.id, 1); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>➡️</span> Klibi Sağa Taşı</span>
+            <span class="text-[10px] text-slate-400 font-mono">Sıra +1</span>
           </button>
           <button 
             *ngIf="!menu.targetClip?.isCut"
@@ -3242,10 +3443,20 @@ export interface ContextMenuState {
           </div>
 
           <div class="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-            <!-- 14 Geçiş Efekti Kartları -->
-            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+            <!-- Kategori Filtresi (45 FFmpeg xfade Geçiş Efekti) -->
+            <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] no-scrollbar">
+              <button type="button" (click)="selectedTransitionCategory.set('all')" [ngClass]="selectedTransitionCategory() === 'all' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">Tümü ({{ studio.transitionLibrary.length }})</button>
+              <button type="button" (click)="selectedTransitionCategory.set('basic')" [ngClass]="selectedTransitionCategory() === 'basic' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">✨ Temel & Dissolve</button>
+              <button type="button" (click)="selectedTransitionCategory.set('slide')" [ngClass]="selectedTransitionCategory() === 'slide' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💨 Kaydırma & Wipe</button>
+              <button type="button" (click)="selectedTransitionCategory.set('zoom')" [ngClass]="selectedTransitionCategory() === 'zoom' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🚀 Zoom & Squeeze</button>
+              <button type="button" (click)="selectedTransitionCategory.set('shape')" [ngClass]="selectedTransitionCategory() === 'shape' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">⭕ Geometrik & Maske</button>
+              <button type="button" (click)="selectedTransitionCategory.set('glitch')" [ngClass]="selectedTransitionCategory() === 'glitch' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">⚡ Glitch, Dilim & Rüzgar</button>
+            </div>
+
+            <!-- 45 Geçiş Efekti Kartları -->
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-1">
               <button
-                *ngFor="let tr of studio.transitionLibrary"
+                *ngFor="let tr of filteredTransitions()"
                 type="button"
                 (click)="selectedTransitionType.set(tr.type)"
                 [ngClass]="selectedTransitionType() === tr.type ? 'border-brand-cyan bg-brand-cyan/15 ring-1 ring-brand-cyan text-white' : 'border-slate-800 bg-dark-950/70 hover:border-slate-700 text-slate-300'"
@@ -3569,11 +3780,18 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly bgmDuckingAmount = signal<number>(0.15);
   readonly isBgmSelectorOpen = signal<boolean>(false);
 
-  // Profesyonel Stüdyo Sekme & Filtre Durumları (Faz 1-6)
+  // Profesyonel Stüdyo Sekme & Filtre Durumları (Faz 1-6 & Faz A-E)
   readonly textInspectorTab = signal<'style' | 'presets' | 'effects' | 'anim' | 'transform'>('style');
   readonly imageInspectorTab = signal<'ai' | 'adjust' | 'transform' | 'anim'>('ai');
   readonly selectedSfxCategory = signal<string>('all');
   readonly selectedStickerCategory = signal<string>('all');
+  readonly stickerSearchQuery = signal<string>('');
+  readonly onlineStickerResults = signal<StickerLibraryItem[]>([]);
+  private stickerSearchDebounce: any = null;
+  readonly selectedTransitionCategory = signal<string>('all');
+  readonly onDemandAiLoading = signal<boolean>(false);
+  readonly onDemandAiStatus = signal<string>('');
+  private draggedClipId: string | null = null;
   customGifUrl = '';
   readonly isRemovingBgNow = signal<boolean>(false);
   readonly bgRemovalProcessing = this.isRemovingBgNow;
@@ -3582,7 +3800,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly clipSpeedMap = signal<Record<string, number>>({});
   private triggeredSfxSet = new Set<string>();
 
-  // Sahne Geçişleri (Transitions) Durumu (Faz 4)
+  // Sahne Geçişleri (Transitions) Durumu (Faz 4 & Faz B)
   readonly showTransitionModal = signal<boolean>(false);
   readonly transitionModalOpen = this.showTransitionModal;
   readonly activeTransitionBoundary = signal<any | null>(null);
@@ -3592,6 +3810,12 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly selectedTransitionDuration = signal<number>(0.45);
   readonly editingTransitionDuration = this.selectedTransitionDuration;
 
+  readonly filteredTransitions = computed<TransitionLibraryItem[]>(() => {
+    const cat = this.selectedTransitionCategory();
+    if (cat === 'all') return this.studio.transitionLibrary;
+    return this.studio.transitionLibrary.filter(item => item.category === cat);
+  });
+
   readonly filteredSfxLibrary = computed<SfxLibraryItem[]>(() => {
     const cat = this.selectedSfxCategory();
     if (cat === 'all') return this.studio.sfxLibrary;
@@ -3599,9 +3823,25 @@ export class EditorComponent implements OnInit, OnDestroy {
   });
 
   readonly filteredStickers = computed<StickerLibraryItem[]>(() => {
+    const online = this.onlineStickerResults();
+    const q = this.stickerSearchQuery().trim().toLowerCase();
+    if (q.length >= 2 && online.length > 0) {
+      return online;
+    }
     const cat = this.selectedStickerCategory();
-    if (cat === 'all') return this.studio.stickerLibrary;
-    return this.studio.stickerLibrary.filter(item => item.category === cat);
+    let list = this.studio.stickerLibrary;
+    if (cat === 'animated') {
+      list = list.filter(item => item.isAnimated || item.category === 'animated');
+    } else if (cat !== 'all') {
+      list = list.filter(item => item.category === cat);
+    }
+    if (q) {
+      list = list.filter(item =>
+        item.name.toLowerCase().includes(q) ||
+        (item.tags || []).some(t => t.toLowerCase().includes(q))
+      );
+    }
+    return list;
   });
 
   readonly sfxClips = computed<EdlSfxClip[]>(() => {
@@ -3907,10 +4147,55 @@ export class EditorComponent implements OnInit, OnDestroy {
     return this.activeEdl()?.overlays?.find(o => o.id === id) || null;
   });
 
-  // Preview Logic
+  // Preview Logic & FAZ A Signal Isolation (Reference-Equality Isolated Signals)
   readonly previewEdl = signal<EdlContent | null>(null);
   readonly previewMessageId = signal<string | null>(null);
   readonly activeEdl = computed(() => this.previewEdl() || this.edl());
+
+  // FAZ A: Katman sürüklenirken veya metin düzenlenirken clips() ve visibleSubtitleSegments()'in
+  // gereksiz yere yeniden hesaplanmasını önleyen referans eşitlikli izole sinyaller:
+  readonly activeCuts = computed<CutItem[]>(() => this.activeEdl()?.cuts || [], {
+    equal: (a, b) => a === b
+  });
+  readonly activeVideoClips = computed<VideoClipItem[]>(
+    () => this.activeEdl()?.videoClips || this.activeEdl()?.settings?.videoClips || [],
+    { equal: (a, b) => a === b }
+  );
+  readonly activeTranscriptSegments = computed<TranscriptSegment[]>(
+    () => this.activeEdl()?.transcript?.segments || [],
+    { equal: (a, b) => a === b }
+  );
+  readonly allOverlaysSignal = computed<OverlayItem[]>(
+    () => this.activeEdl()?.overlays || [],
+    { equal: (a, b) => a === b }
+  );
+  readonly overlaysByTrackMap = computed<Map<number, OverlayItem[]>>(() => {
+    const map = new Map<number, OverlayItem[]>();
+    for (const ov of this.allOverlaysSignal()) {
+      const tId = Number(ov.trackId) || 1;
+      const list = map.get(tId);
+      if (list) list.push(ov);
+      else map.set(tId, [ov]);
+    }
+    return map;
+  });
+
+  // TrackBy fonksiyonları (DOM ve Canvas yeniden yaratımını sıfırlar - 120 FPS)
+  trackByClipId(_index: number, clip: any): string {
+    return clip.id;
+  }
+  trackBySubtitleId(_index: number, seg: any): string {
+    return `sub_${seg.start}_${seg.end}`;
+  }
+  trackByOverlayId(_index: number, ov: OverlayItem): string {
+    return ov.id;
+  }
+  trackByBoundaryId(_index: number, b: any): string {
+    return b.id;
+  }
+  trackBySfxId(_index: number, sfx: EdlSfxClip): string {
+    return sfx.id;
+  }
 
   // Canlı Taslak (Ghost Layer)
   readonly ghostPreview = computed(() => {
@@ -3939,65 +4224,101 @@ export class EditorComponent implements OnInit, OnDestroy {
     return { text: String(text), color: String(color), font: String(font), posX, posY };
   });
 
-  // O(1) Pre-Computed Clips hesaplaması (Zero-Lag Optimization)
+  // O(1) Pre-Computed Clips hesaplaması (FAZ A İzole Sinyal + FAZ E V1 Klip Sıralama & Çoklu Video Desteği)
   readonly clips = computed(() => {
     const total = Math.max(0.1, this.totalDuration());
-    const edl = this.activeEdl();
-    const cuts = edl?.cuts || [];
+    const cuts = this.activeCuts();
+    const customVideoClips = this.activeVideoClips();
     const splits = [...this.splitMarkers(), total].sort((a,b) => a-b);
     const rAi = this.rippleAi();
     const rMan = this.rippleManual();
     const rRet = this.rippleRetake();
     const rippleActive = rAi || rMan || rRet;
-    
-    let allPoints = new Set<number>();
-    allPoints.add(0);
-    allPoints.add(total);
-    for (const s of splits) allPoints.add(s);
-    for (const c of cuts) {
-      allPoints.add(c.start);
-      allPoints.add(c.end);
-    }
-    
-    const sortedPoints = Array.from(allPoints).sort((a,b) => a-b);
+
     const rawClips: any[] = [];
     let totalVisDur = 0;
-    
-    for (let i = 0; i < sortedPoints.length - 1; i++) {
-      const start = sortedPoints[i];
-      const end = sortedPoints[i+1];
-      if (end - start < 0.05) continue;
+
+    if (customVideoClips && customVideoClips.length > 0) {
+      // FAZ E: Kullanıcının sıraladığı veya dışarıdan V1'e eklediği klipler varsa bu sırayı baz al
+      for (let i = 0; i < customVideoClips.length; i++) {
+        const vc = customVideoClips[i];
+        const start = Number(vc.start) || 0;
+        const end = Number(vc.end) || (start + (Number(vc.duration) || 5));
+        const duration = Math.max(0.05, Number(vc.duration) || (end - start));
+        const isCut = Boolean(vc.isCut);
+        const isVisibleClip = !isCut || !rippleActive;
+        if (isVisibleClip) {
+          totalVisDur += duration;
+        }
+        rawClips.push({
+          id: vc.id || `vclip_${i}_${start}`,
+          start,
+          end,
+          duration,
+          isCut,
+          cutObj: isCut ? { id: vc.id, start, end, reason: 'Manuel kesim' } : undefined,
+          sourceUrl: vc.sourceUrl,
+          label: vc.label || (vc.sourceUrl ? '🎬 Ek Video' : 'Klip'),
+          order: i,
+          isVisibleClip,
+          visStart: 0,
+          visEnd: 0,
+          leftPercent: 0,
+          widthPercent: 0
+        });
+      }
+    } else {
+      let allPoints = new Set<number>();
+      allPoints.add(0);
+      allPoints.add(total);
+      for (const s of splits) allPoints.add(s);
+      for (const c of cuts) {
+        allPoints.add(c.start);
+        allPoints.add(c.end);
+      }
       
-      const mid = (start + end) / 2;
-      const cut = cuts.find(c => mid >= c.start && mid <= c.end);
-      const isCut = !!cut;
-      const reason = (cut?.reason || '').toLowerCase();
-      const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
-      const isManual = isCut && reason.includes('manuel');
+      const sortedPoints = Array.from(allPoints).sort((a,b) => a-b);
+      
+      for (let i = 0; i < sortedPoints.length - 1; i++) {
+        const start = sortedPoints[i];
+        const end = sortedPoints[i+1];
+        if (end - start < 0.05) continue;
+        
+        const mid = (start + end) / 2;
+        const cut = cuts.find(c => mid >= c.start && mid <= c.end);
+        const isCut = !!cut;
+        const reason = (cut?.reason || '').toLowerCase();
+        const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
+        const isManual = isCut && reason.includes('manuel');
 
-      let isVisibleClip = true;
-      if (isCut) {
-        if (isManual) isVisibleClip = !rMan;
-        else if (isRetake) isVisibleClip = !rRet;
-        else isVisibleClip = !rAi;
+        let isVisibleClip = true;
+        if (isCut) {
+          if (isManual) isVisibleClip = !rMan;
+          else if (isRetake) isVisibleClip = !rRet;
+          else isVisibleClip = !rAi;
+        }
+
+        const duration = end - start;
+        if (isVisibleClip) {
+          totalVisDur += duration;
+        }
+
+        rawClips.push({
+          id: `clip_${i}_${start}`,
+          start,
+          end,
+          duration,
+          isCut,
+          cutObj: cut,
+          label: 'Klip',
+          order: i,
+          isVisibleClip,
+          visStart: 0,
+          visEnd: 0,
+          leftPercent: 0,
+          widthPercent: 0
+        });
       }
-
-      const duration = end - start;
-      if (isVisibleClip) {
-        totalVisDur += duration;
-      }
-
-      rawClips.push({
-        id: `clip_${i}_${start}`,
-        start,
-        end,
-        duration,
-        isCut,
-        cutObj: cut,
-        isVisibleClip,
-        leftPercent: 0,
-        widthPercent: 0
-      });
     }
 
     const visDur = Math.max(0.1, totalVisDur);
@@ -4007,48 +4328,76 @@ export class EditorComponent implements OnInit, OnDestroy {
       if (!c.isCut) {
         c.keepIndex = keepIndex++;
       }
-      if (!rippleActive) {
+      c.visStart = accVis;
+      c.visEnd = c.isVisibleClip ? accVis + c.duration : accVis;
+      if (!rippleActive && (!customVideoClips || customVideoClips.length === 0)) {
         c.leftPercent = (c.start / total) * 100;
         c.widthPercent = (c.duration / total) * 100;
       } else {
         c.leftPercent = (accVis / visDur) * 100;
         c.widthPercent = c.isVisibleClip ? (c.duration / visDur) * 100 : 0;
-        if (c.isVisibleClip) {
-          accVis += c.duration;
-        }
+      }
+      if (c.isVisibleClip) {
+        accVis += c.duration;
       }
     }
     return rawClips;
   });
 
-  // O(1) Pre-Computed Altyazı Segmentleri (Zero-Lag Optimization)
+  // O(log M) Binary Search için start zamanına göre sıralı görünür klipler
+  readonly visibleClipsSortedByStart = computed(() => {
+    return this.clips().filter(c => c.isVisibleClip);
+  });
+
+  // O(N log M) Pre-Computed Altyazı Segmentleri (İzole Sinyal: Katman sürüklenirken ASLA tetiklenmez!)
   readonly visibleSubtitleSegments = computed(() => {
-    const segments = this.activeEdl()?.transcript?.segments || [];
+    const segments = this.activeTranscriptSegments();
+    if (!segments || segments.length === 0) return [];
     const total = Math.max(0.1, this.totalDuration());
     const rippleActive = this.isAnyRippleActive();
     const visDur = Math.max(0.1, this.visibleDuration());
-    const visibleClips = this.clips().filter(c => c.isVisibleClip);
+    const visClips = this.visibleClipsSortedByStart();
 
-    const filtered = !rippleActive
-      ? segments
-      : segments.filter(seg => visibleClips.some(c => (Math.min(seg.end, c.end) - Math.max(seg.start, c.start)) > 0.03));
+    if (!rippleActive) {
+      return segments.map(seg => ({
+        ...seg,
+        leftPercent: (seg.start / total) * 100,
+        widthPercent: Math.max(0.1, ((seg.end - seg.start) / total) * 100)
+      }));
+    }
 
-    return filtered.map(seg => {
-      if (!rippleActive) {
-        return {
-          ...seg,
-          leftPercent: (seg.start / total) * 100,
-          widthPercent: Math.max(0.1, ((seg.end - seg.start) / total) * 100)
-        };
+    const result: any[] = [];
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      // Binary search ile seg.end > c.start && seg.start < c.end kesişimini O(log M)'de bul
+      let lo = 0;
+      let hi = visClips.length - 1;
+      let matchedClip: any = null;
+      while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        const c = visClips[mid];
+        if (c.end <= seg.start) {
+          lo = mid + 1;
+        } else if (c.start >= seg.end) {
+          hi = mid - 1;
+        } else {
+          if (Math.min(seg.end, c.end) - Math.max(seg.start, c.start) > 0.03) {
+            matchedClip = c;
+          }
+          break;
+        }
       }
-      const startVis = this.getVisTimeFromRawTime(seg.start);
-      const endVis = this.getVisTimeFromRawTime(seg.end);
-      return {
+      if (!matchedClip) continue;
+
+      const startVis = matchedClip.visStart + Math.max(0, seg.start - matchedClip.start);
+      const endVis = matchedClip.visStart + Math.min(matchedClip.duration, seg.end - matchedClip.start);
+      result.push({
         ...seg,
         leftPercent: (startVis / visDur) * 100,
         widthPercent: Math.max(0.1, ((endVis - startVis) / visDur) * 100)
-      };
-    });
+      });
+    }
+    return result;
   });
 
   // V1 Klipleri Arasındaki Sahne Geçiş Noktaları ([⚡] Transition Boundaries)
@@ -5570,43 +5919,51 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   getRawTimeFromVisTime(visTime: number): number {
     if (!this.isAnyRippleActive()) {
-       return Math.max(0, Math.min(this.totalDuration(), visTime));
+      return Math.max(0, Math.min(this.totalDuration(), visTime));
     }
-    let accumulated = 0;
-    for (const c of this.clips()) {
-       if (this.isVisible(c)) {
-          if (accumulated + c.duration >= visTime) {
-             return c.start + (visTime - accumulated);
-          }
-          accumulated += c.duration;
-       }
+    const visClips = this.visibleClipsSortedByStart();
+    if (visClips.length === 0) return 0;
+
+    let lo = 0;
+    let hi = visClips.length - 1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const c = visClips[mid];
+      if (visTime < c.visStart) {
+        hi = mid - 1;
+      } else if (visTime > c.visEnd) {
+        lo = mid + 1;
+      } else {
+        return c.start + (visTime - c.visStart);
+      }
     }
     return this.totalDuration();
   }
 
   getVisTimeFromRawTime(rawTime: number): number {
     if (!this.isAnyRippleActive()) {
-       return Math.max(0, Math.min(this.totalDuration(), rawTime));
+      return Math.max(0, Math.min(this.totalDuration(), rawTime));
     }
-    let passed = 0;
-    for (const c of this.clips()) {
-       if (rawTime >= c.start && rawTime < c.end) {
-          if (this.isVisible(c)) {
-             passed += (rawTime - c.start);
-          }
-          break;
-       }
-       if (rawTime === c.end && c === this.clips()[this.clips().length - 1]) {
-          if (this.isVisible(c)) {
-             passed += (rawTime - c.start);
-          }
-          break;
-       }
-       if (this.isVisible(c)) {
-          passed += c.duration;
-       }
+    const visClips = this.visibleClipsSortedByStart();
+    if (visClips.length === 0) return 0;
+
+    let lo = 0;
+    let hi = visClips.length - 1;
+    let bestIdx = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      const c = visClips[mid];
+      if (rawTime >= c.start && rawTime <= c.end) {
+        return c.visStart + (rawTime - c.start);
+      }
+      if (c.start < rawTime) {
+        bestIdx = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
     }
-    return passed;
+    return bestIdx >= 0 ? visClips[bestIdx].visEnd : 0;
   }
 
   getTimeAtClientX(clientX: number): number {
@@ -5722,23 +6079,24 @@ export class EditorComponent implements OnInit, OnDestroy {
      event.stopPropagation();
      if (clip.isCut) {
         if (confirm('Bu kesimi iptal edip sahneyi geri getirmek istiyor musunuz?')) {
-           this.edlService.patchEdl(this.projectId, {
+           const patch: EdlPatchDto = {
              cuts: [{ id: clip.cutObj.id, start: 0, end: 0, action: 'remove' } as any]
-           }).subscribe(() => this.loadEdl());
+           };
+           this.applyOptimisticPatch(patch);
+           this.edlService.patchEdl(this.projectId, patch).subscribe();
         }
      } else {
         const newCut = { 
           id: `manual_cut_${Date.now()}`, 
           start: clip.start, 
           end: clip.end, 
-          reason: 'Manuel kesim' 
+          reason: 'Manuel kesim',
+          action: 'add' as const
         };
-        this.edlService.patchEdl(this.projectId, {
-          cuts: [{ ...newCut, action: 'add' } as any]
-        }).subscribe(() => {
-          this.selectedClipIds.set(this.selectedClipIds().filter(id => id !== clip.id));
-          this.loadEdl();
-        });
+        const patch: EdlPatchDto = { cuts: [newCut as any] };
+        this.selectedClipIds.set(this.selectedClipIds().filter(id => id !== clip.id));
+        this.applyOptimisticPatch(patch);
+        this.edlService.patchEdl(this.projectId, patch).subscribe();
      }
   }
 
@@ -5757,12 +6115,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       action: 'add'
     }));
 
-    this.edlService.patchEdl(this.projectId, {
-      cuts: newCuts as any
-    }).subscribe(() => {
-      this.selectedClipIds.set([]);
-      this.loadEdl();
-    });
+    const patch: EdlPatchDto = { cuts: newCuts as any };
+    this.selectedClipIds.set([]);
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   restoreSelectedCuts(): void {
@@ -5779,12 +6135,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       action: 'remove'
     }));
 
-    this.edlService.patchEdl(this.projectId, {
-      cuts: patchCuts as any
-    }).subscribe(() => {
-      this.selectedClipIds.set([]);
-      this.loadEdl();
-    });
+    const patch: EdlPatchDto = { cuts: patchCuts as any };
+    this.selectedClipIds.set([]);
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   mergeSelectedClips(): void {
@@ -5808,12 +6162,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     
     if (confirm(`Seçili aralıktaki ${cutsToRemove.length} kesim iptal edilerek klipler birleştirilecek. Onaylıyor musunuz?`)) {
        const patchCuts = cutsToRemove.map(c => ({ id: c.id, start: 0, end: 0, action: 'remove' }));
-       this.edlService.patchEdl(this.projectId, {
-          cuts: patchCuts as any
-       }).subscribe(() => {
-          this.selectedClipIds.set([]);
-          this.loadEdl();
-       });
+       const patch: EdlPatchDto = { cuts: patchCuts as any };
+       this.selectedClipIds.set([]);
+       this.applyOptimisticPatch(patch);
+       this.edlService.patchEdl(this.projectId, patch).subscribe();
     }
   }
 
@@ -5853,13 +6205,13 @@ export class EditorComponent implements OnInit, OnDestroy {
       end: cutEnd,
       reason: 'manual',
       source: 'user',
-      command: 'Ripple Delete Left'
+      command: 'Ripple Delete Left',
+      action: 'add' as const
     };
 
-    const newCuts = [...(edl.cuts || []), newCut];
-    this.edlService.patchEdl(this.projectId, { cuts: newCuts } as any).subscribe(() => {
-      this.loadEdl();
-    });
+    const patch: EdlPatchDto = { cuts: [newCut as any] };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   getOverlayTop(ov: OverlayItem): string {
@@ -6098,12 +6450,10 @@ export class EditorComponent implements OnInit, OnDestroy {
         this.inspectorData.source = asset.url;
         this.inspectorData.content = asset.dosyaAdi;
       }
-      this.edl.update(e => e ? { ...e } : null);
+      this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
       this.edlService.patchEdl(this.projectId, {
         overlays: [{ id: selId, source: asset.url, content: asset.dosyaAdi, action: 'update' } as any]
-      }).subscribe(() => {
-        this.loadEdl();
-      });
+      }).subscribe();
     }
   }
 
@@ -6118,12 +6468,10 @@ export class EditorComponent implements OnInit, OnDestroy {
         this.inspectorData.source = url;
         this.inspectorData.content = name;
       }
-      this.edl.update(e => e ? { ...e } : null);
+      this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
       this.edlService.patchEdl(this.projectId, {
         overlays: [{ id: selId, source: url, content: name, action: 'update' } as any]
-      }).subscribe(() => {
-        this.loadEdl();
-      });
+      }).subscribe();
     }
   }
   
@@ -6223,19 +6571,15 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     // Anında (0ms) yerel EDL'e ekle ve sağdaki Stüdyo Denetçisini aç
     this.edl.update(curr => curr ? { ...curr, overlays: [...(curr.overlays || []), newOverlay] } : null);
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.currentTime = start;
+      this.currentTime.set(start);
+    }
     this.selectOverlay(newOvId);
 
     this.edlService.patchEdl(this.projectId, {
       overlays: [newOverlay]
     }).subscribe({
-      next: () => {
-        this.loadEdl();
-        if (this.videoRef?.nativeElement) {
-          this.videoRef.nativeElement.currentTime = start;
-          this.currentTime.set(start);
-        }
-        this.selectOverlay(newOvId);
-      },
       error: (err) => console.error('Metin eklenemedi:', err)
     });
   }
@@ -6294,19 +6638,15 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     // Anında (0ms) yerel EDL'e ekle ve sağdaki Görsel/Photoshop Denetçisini aç
     this.edl.update(curr => curr ? { ...curr, overlays: [...(curr.overlays || []), newOverlay] } : null);
+    if (this.videoRef?.nativeElement) {
+      this.videoRef.nativeElement.currentTime = start;
+      this.currentTime.set(start);
+    }
     this.selectOverlay(newOvId);
 
     this.edlService.patchEdl(this.projectId, {
       overlays: [newOverlay]
     }).subscribe({
-      next: () => {
-        this.loadEdl();
-        if (this.videoRef?.nativeElement) {
-          this.videoRef.nativeElement.currentTime = start;
-          this.currentTime.set(start);
-        }
-        this.selectOverlay(newOvId);
-      },
       error: (err) => console.error('Görsel eklenemedi:', err)
     });
   }
@@ -6417,6 +6757,9 @@ export class EditorComponent implements OnInit, OnDestroy {
       ov.color = this.inspectorData.color;
       ov.fontSize = Number(this.inspectorData.fontSize) || 48;
       ov.font = this.inspectorData.font;
+      if (ov.font) {
+        this.studio.ensureFontLoaded(ov.font);
+      }
       ov.fontWeight = this.inspectorData.fontWeight || '900';
       ov.lineHeight = Number(this.inspectorData.lineHeight) || 1.2;
       ov.textAlign = this.inspectorData.textAlign || 'center';
@@ -6497,7 +6840,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      const selId = this.selectedOverlayId();
      if (!selId || !this.inspectorData) return;
      
-     this.edlService.patchEdl(this.projectId, {
+     const patch: EdlPatchDto = {
         overlays: [{
           ...this.inspectorData,
           id: selId,
@@ -6511,10 +6854,9 @@ export class EditorComponent implements OnInit, OnDestroy {
           trackId: Number(this.inspectorData.trackId) || 1,
           action: 'update'
         } as any]
-     }).subscribe({
-        next: () => {
-           this.loadEdl();
-        },
+     };
+     this.applyOptimisticPatch(patch);
+     this.edlService.patchEdl(this.projectId, patch).subscribe({
         error: (err) => console.error('Katman kaydedilemedi:', err)
      });
   }
@@ -6849,19 +7191,20 @@ export class EditorComponent implements OnInit, OnDestroy {
       action: 'add'
     };
 
-    // Anında sesli geri bildirim ver
+    // Anında sesli geri bildirim ver ve anında (0ms) yerel EDL'e ekle
     this.studioEngine.playSynthesizedSfx(sfx.id, 0.85);
-
-    this.edlService.patchEdl(this.projectId, {
-      sfxClips: [newClip]
-    }).subscribe(() => this.loadEdl());
+    const patch: EdlPatchDto = { sfxClips: [newClip] };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   removeSfxClip(sfxId: string, event?: MouseEvent): void {
     event?.stopPropagation();
-    this.edlService.patchEdl(this.projectId, {
+    const patch: EdlPatchDto = {
       sfxClips: [{ id: sfxId, name: '', start: 0, duration: 0, action: 'remove' }]
-    }).subscribe(() => this.loadEdl());
+    };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   getSfxClipStyle(sfx: EdlSfxClip): any {
@@ -6884,15 +7227,17 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   toggleNormalizeAudio(enabled: boolean): void {
-    this.edlService.patchEdl(this.projectId, {
-      settings: { normalizeAudio: enabled }
-    }).subscribe(() => this.loadEdl());
+    this.normalizeAudio.set(enabled);
+    const patch: EdlPatchDto = { settings: { normalizeAudio: enabled } };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   toggleSmartPunchIn(enabled: boolean): void {
-    this.edlService.patchEdl(this.projectId, {
-      settings: { smartPunchIn: enabled }
-    }).subscribe(() => this.loadEdl());
+    this.smartPunchIn.set(enabled);
+    const patch: EdlPatchDto = { settings: { smartPunchIn: enabled } };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   // --- FAZ 4: SAHNE GEÇİŞ EFEKTLERİ (XFADE TRANSITIONS) METOTLARI ---
@@ -6934,12 +7279,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       duration: this.editingTransitionDuration(),
       action: existing ? 'update' : 'add'
     };
-    this.edlService.patchEdl(this.projectId, {
-      transitions: [trObj]
-    }).subscribe(() => {
-      this.transitionModalOpen.set(false);
-      this.loadEdl();
-    });
+    const patch: EdlPatchDto = { transitions: [trObj] };
+    this.transitionModalOpen.set(false);
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   applyTransitionToAllCuts(): void {
@@ -6958,10 +7301,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       });
     }
     if (patches.length > 0) {
-      this.edlService.patchEdl(this.projectId, { transitions: patches }).subscribe(() => {
-        this.transitionModalOpen.set(false);
-        this.loadEdl();
-      });
+      const patch: EdlPatchDto = { transitions: patches };
+      this.transitionModalOpen.set(false);
+      this.applyOptimisticPatch(patch);
+      this.edlService.patchEdl(this.projectId, patch).subscribe();
     }
   }
 
@@ -6971,12 +7314,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.transitionModalOpen.set(false);
       return;
     }
-    this.edlService.patchEdl(this.projectId, {
-      transitions: [{ ...existing, action: 'remove' }]
-    }).subscribe(() => {
-      this.transitionModalOpen.set(false);
-      this.loadEdl();
-    });
+    const patch: EdlPatchDto = { transitions: [{ ...existing, action: 'remove' }] };
+    this.transitionModalOpen.set(false);
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   setSelectedClipSpeed(speed: number): void {
@@ -7035,9 +7376,11 @@ export class EditorComponent implements OnInit, OnDestroy {
     const generated = this.studioEngine.generateProactiveSuggestions(edl, this.totalDuration());
     if (generated.length === 0) return;
 
-    this.edlService.patchEdl(this.projectId, {
+    const patch: EdlPatchDto = {
       suggestions: generated.map((s: SuggestionItem) => ({ ...s, action: 'add' as const }))
-    }).subscribe(() => this.loadEdl());
+    };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   previewSuggestion(sug: SuggestionItem): void {
@@ -7136,19 +7479,24 @@ export class EditorComponent implements OnInit, OnDestroy {
       };
     }
 
-    this.edlService.patchEdl(this.projectId, patch).subscribe(() => this.loadEdl());
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   rejectSuggestion(sug: SuggestionItem): void {
-    this.edlService.patchEdl(this.projectId, {
+    const patch: EdlPatchDto = {
       suggestions: [{ ...sug, status: 'rejected', action: 'update' }]
-    }).subscribe(() => this.loadEdl());
+    };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   removeOverlay(overlayId: string): void {
-    this.edlService.patchEdl(this.projectId, {
+    const patch: EdlPatchDto = {
       overlays: [{ id: overlayId, timestamp: 0, duration: 0, type: 'text', action: 'remove' }]
-    }).subscribe(() => this.loadEdl());
+    };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
   requestExport(): void {
@@ -7412,10 +7760,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (this.inspectorData && this.inspectorData.id === overlayId) {
        this.inspectorData.trackId = newTrack;
     }
-    
+    this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
     this.edlService.patchEdl(this.projectId, {
        overlays: [{ id: ov.id, trackId: newTrack, action: 'update' } as any]
-    }).subscribe(() => this.loadEdl());
+    }).subscribe();
   }
 
   sendOverlayBackward(overlayId: string): void {
@@ -7428,10 +7776,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (this.inspectorData && this.inspectorData.id === overlayId) {
        this.inspectorData.trackId = newTrack;
     }
-    
+    this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
     this.edlService.patchEdl(this.projectId, {
        overlays: [{ id: ov.id, trackId: newTrack, action: 'update' } as any]
-    }).subscribe(() => this.loadEdl());
+    }).subscribe();
   }
 
   setOverlayTrack(overlayId: string, trackId: number): void {
@@ -7443,15 +7791,14 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (this.inspectorData && this.inspectorData.id === overlayId) {
        this.inspectorData.trackId = trackId;
     }
-    
+    this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
     this.edlService.patchEdl(this.projectId, {
        overlays: [{ id: ov.id, trackId: trackId, action: 'update' } as any]
-    }).subscribe(() => this.loadEdl());
+    }).subscribe();
   }
 
   getOverlaysForTrack(trackNum: number): OverlayItem[] {
-    const overlays = this.activeEdl()?.overlays || [];
-    return overlays.filter(o => (Number(o.trackId) || 1) === trackNum);
+    return this.overlaysByTrackMap().get(trackNum) || [];
   }
 
   @HostListener('window:mousemove', ['$event'])
@@ -7653,7 +8000,7 @@ export class EditorComponent implements OnInit, OnDestroy {
              if (ov) {
                  this.edlService.patchEdl(this.projectId, {
                      overlays: [{ ...ov, action: 'update' } as any]
-                 }).subscribe(() => this.loadEdl());
+                 }).subscribe();
              }
          }
          return;
@@ -7668,7 +8015,7 @@ export class EditorComponent implements OnInit, OnDestroy {
             if (ov) {
                 this.edlService.patchEdl(this.projectId, {
                     overlays: [{ ...ov, action: 'update' } as any]
-                }).subscribe(() => this.loadEdl());
+                }).subscribe();
             }
          }
          return;
@@ -7681,11 +8028,10 @@ export class EditorComponent implements OnInit, OnDestroy {
 
          const edl = this.activeEdl();
          if (edl?.transcript) {
+            this.edl.update(e => e ? { ...e, transcript: { ...edl.transcript!, segments: [...(edl.transcript!.segments || [])] } } : null);
             this.edlService.patchEdl(this.projectId, {
                transcript: edl.transcript
-            } as any).subscribe(() => {
-               this.loadEdl();
-            });
+            } as any).subscribe();
          }
          return;
      }
@@ -7699,11 +8045,10 @@ export class EditorComponent implements OnInit, OnDestroy {
          if (ovId) {
             const ov = this.activeEdl()?.overlays?.find(o => o.id === ovId);
             if (ov) {
+               this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
                this.edlService.patchEdl(this.projectId, {
                   overlays: [{ ...ov, action: 'update' } as any]
-               }).subscribe(() => {
-                  this.loadEdl();
-               });
+               }).subscribe();
             }
          }
      }
@@ -7741,6 +8086,407 @@ export class EditorComponent implements OnInit, OnDestroy {
       next: () => console.log(`[SUBTITLE:TOGGLE] Altyazı ayarı kaydedildi: subtitlesEnabled=${nextVal}`),
       error: (err) => console.error('[SUBTITLE:TOGGLE] Altyazı ayarı kaydedilemedi:', err)
     });
+  }
+
+  // --- FAZ A/B/C/D/E: SIFIR GECİKMELİ OPTİMİSTİK EDL GÜNCELLEYİCİ & YENİ STÜDYO METOTLARI ---
+  applyOptimisticPatch(patch: EdlPatchDto): void {
+    this.edl.update(current => {
+      if (!current) return null;
+      const next: EdlContent = { ...current };
+
+      if (patch.cuts && patch.cuts.length > 0) {
+        let cuts = [...(next.cuts || [])];
+        for (const c of patch.cuts) {
+          if (c.action === 'remove') {
+            cuts = cuts.filter(x => x.id !== c.id);
+          } else if (c.action === 'add') {
+            cuts.push({ ...c } as any);
+          } else {
+            const idx = cuts.findIndex(x => x.id === c.id);
+            if (idx !== -1) cuts[idx] = { ...cuts[idx], ...c };
+            else cuts.push({ ...c } as any);
+          }
+        }
+        next.cuts = cuts;
+      }
+
+      if (patch.overlays && patch.overlays.length > 0) {
+        let overlays = [...(next.overlays || [])];
+        for (const o of patch.overlays) {
+          if (o.action === 'remove') {
+            overlays = overlays.filter(x => x.id !== o.id);
+          } else if (o.action === 'add') {
+            overlays.push({ ...o } as any);
+          } else {
+            const idx = overlays.findIndex(x => x.id === o.id);
+            if (idx !== -1) overlays[idx] = { ...overlays[idx], ...o };
+            else overlays.push({ ...o } as any);
+          }
+        }
+        next.overlays = overlays;
+      }
+
+      if (patch.transitions && patch.transitions.length > 0) {
+        let transitions = [...(next.transitions || [])];
+        for (const tr of patch.transitions) {
+          if (tr.action === 'remove') {
+            transitions = transitions.filter(x => x.id !== tr.id);
+          } else if (tr.action === 'add') {
+            transitions.push({ ...tr });
+          } else {
+            const idx = transitions.findIndex(x => x.id === tr.id);
+            if (idx !== -1) transitions[idx] = { ...transitions[idx], ...tr };
+            else transitions.push({ ...tr });
+          }
+        }
+        next.transitions = transitions;
+      }
+
+      if (patch.sfxClips && patch.sfxClips.length > 0) {
+        let sfxClips = [...(next.sfxClips || [])];
+        for (const sfx of patch.sfxClips) {
+          if (sfx.action === 'remove') {
+            sfxClips = sfxClips.filter(x => x.id !== sfx.id);
+          } else if (sfx.action === 'add') {
+            sfxClips.push({ ...sfx });
+          } else {
+            const idx = sfxClips.findIndex(x => x.id === sfx.id);
+            if (idx !== -1) sfxClips[idx] = { ...sfxClips[idx], ...sfx };
+            else sfxClips.push({ ...sfx });
+          }
+        }
+        next.sfxClips = sfxClips;
+      }
+
+      if (patch.suggestions && patch.suggestions.length > 0) {
+        let suggestions = [...(next.suggestions || [])];
+        for (const sug of patch.suggestions) {
+          if (sug.action === 'remove') {
+            suggestions = suggestions.filter(x => x.id !== sug.id);
+          } else if (sug.action === 'add') {
+            if (!suggestions.some(x => x.id === sug.id)) {
+              suggestions.push({ ...sug });
+            }
+          } else {
+            const idx = suggestions.findIndex(x => x.id === sug.id);
+            if (idx !== -1) suggestions[idx] = { ...suggestions[idx], ...sug };
+            else suggestions.push({ ...sug });
+          }
+        }
+        next.suggestions = suggestions;
+      }
+
+      if (patch.videoClips) {
+        next.videoClips = [...patch.videoClips];
+        next.settings = { ...(next.settings || {}), videoClips: [...patch.videoClips] };
+      }
+
+      if (patch.settings) {
+        next.settings = { ...(next.settings || {}), ...patch.settings };
+      }
+
+      return next;
+    });
+  }
+
+  onStickerSearchInput(query: string): void {
+    this.stickerSearchQuery.set(query);
+    if (this.stickerSearchDebounce) {
+      clearTimeout(this.stickerSearchDebounce);
+    }
+    const q = (query || '').trim();
+    if (q.length < 2) {
+      this.onlineStickerResults.set([]);
+      return;
+    }
+    this.stickerSearchDebounce = setTimeout(async () => {
+      try {
+        const items = await this.studio.searchIconifyStickers(q);
+        this.onlineStickerResults.set(items);
+      } catch {
+        this.onlineStickerResults.set([]);
+      }
+    }, 280);
+  }
+
+  addAssetAudioToSfxTrack(asset: ProjectAssetDto): void {
+    const start = parseFloat(this.currentTime().toFixed(2));
+    const newClip: EdlSfxClip = {
+      id: `sfx_asset_${Date.now()}`,
+      name: asset.dosyaAdi || 'Özel Ses',
+      title: asset.dosyaAdi || 'Özel Ses',
+      category: 'custom',
+      presetId: 'whoosh-fast',
+      sourceUrl: asset.url,
+      start,
+      duration: 2.5,
+      volume: 0.9,
+      action: 'add'
+    };
+    const patch: EdlPatchDto = { sfxClips: [newClip] };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
+  }
+
+  applyAutoDirectorCompose(): void {
+    const edl = this.activeEdl();
+    if (!edl) return;
+
+    this.onDemandAiLoading.set(true);
+    this.onDemandAiStatus.set('✨ Otomatik Kurgu Hazırlanıyor...');
+    const composed = this.studio.composeAutoDirectorTimeline(edl, this.totalDuration());
+
+    for (const ov of composed.overlays) {
+      if (ov.font) {
+        this.studio.ensureFontLoaded(ov.font);
+      }
+    }
+
+    const patch: EdlPatchDto = {
+      overlays: composed.overlays.map(o => ({ ...o, action: 'add' as const })),
+      transitions: composed.transitions.map(t => ({ ...t, action: 'add' as const })),
+      sfxClips: composed.sfxClips.map(s => ({ ...s, action: 'add' as const }))
+    };
+
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe({
+      next: () => {
+        this.onDemandAiLoading.set(false);
+        this.onDemandAiStatus.set('');
+        this.studio.playSynthesizedSfx('magic-sparkle', 0.8);
+      },
+      error: (err) => {
+        console.error('Otomatik kurgu hatası:', err);
+        this.onDemandAiLoading.set(false);
+        this.onDemandAiStatus.set('');
+      }
+    });
+  }
+
+  triggerOnDemandAi(
+    modeOrOpts:
+      | 'subtitles'
+      | 'jumpcut'
+      | 'retake'
+      | 'broll'
+      | 'autodirector'
+      | {
+          autoSubtitles?: boolean;
+          autoJumpcut?: boolean;
+          autoRetake?: boolean;
+          autoBroll?: boolean;
+          autoDirector?: boolean;
+        }
+  ): void {
+    if (!this.projectId || this.onDemandAiLoading()) return;
+
+    const opts =
+      typeof modeOrOpts === 'string'
+        ? {
+            autoJumpcut: modeOrOpts === 'jumpcut',
+            autoRetake: modeOrOpts === 'retake',
+            autoBroll: modeOrOpts === 'broll',
+            autoSubtitles:
+              modeOrOpts === 'subtitles' ||
+              modeOrOpts === 'retake' ||
+              modeOrOpts === 'broll' ||
+              modeOrOpts === 'autodirector',
+            autoDirector: modeOrOpts === 'autodirector'
+          }
+        : modeOrOpts;
+
+    if (opts.autoDirector && !opts.autoBroll && !opts.autoJumpcut && !opts.autoRetake) {
+      const hasTranscript = (this.activeEdl()?.transcript?.segments?.length || 0) > 0;
+      if (hasTranscript) {
+        this.applyAutoDirectorCompose();
+        return;
+      }
+    }
+
+    let statusText = 'AI Analizi Çalışıyor...';
+    if (opts.autoJumpcut) statusText = '✂️ Akıllı Sessizlik Kesimi (Jump-Cut) Analiz Ediliyor...';
+    else if (opts.autoBroll) statusText = '🖼️ Otomatik B-Roll & Yönetmen Kurgusu Hazırlanıyor...';
+    else if (opts.autoSubtitles) statusText = '💬 Otodeşifre (Whisper STT) Altyazı Üretiliyor...';
+
+    this.onDemandAiLoading.set(true);
+    this.onDemandAiStatus.set(statusText);
+
+    const curSettings = this.activeEdl()?.settings || {};
+    this.videoService
+      .reanalyzeProject(this.projectId, {
+        autoJumpcut: Boolean(opts.autoJumpcut),
+        autoRetake: Boolean(opts.autoRetake),
+        autoBroll: Boolean(opts.autoBroll),
+        autoSubtitles: Boolean(opts.autoSubtitles ?? true),
+        audioEnhancementEnabled: Boolean(curSettings.audioEnhancement),
+        gestureCommandsEnabled: false,
+        autoDirectorEnabled: Boolean(opts.autoDirector)
+      })
+      .subscribe({
+        next: () => {
+          const pollId = setInterval(() => {
+            this.edlService.getEdl(this.projectId).subscribe({
+              next: (res) => {
+                const hasNewSegments = (res.edl?.transcript?.segments?.length || 0) > 0;
+                const hasNewCuts = (res.edl?.cuts?.length || 0) > (this.activeCuts().length || 0);
+                const hasNewOverlays = (res.edl?.overlays?.length || 0) > (this.allOverlaysSignal().length || 0);
+                if (
+                  (opts.autoSubtitles && !opts.autoJumpcut && !opts.autoBroll && hasNewSegments) ||
+                  (opts.autoJumpcut && (hasNewCuts || hasNewSegments)) ||
+                  (opts.autoBroll && (hasNewOverlays || hasNewSegments)) ||
+                  (opts.autoDirector && (hasNewOverlays || hasNewSegments))
+                ) {
+                  clearInterval(pollId);
+                  this.onDemandAiLoading.set(false);
+                  this.onDemandAiStatus.set('');
+                  this.loadEdl();
+                  if (opts.autoDirector) {
+                    setTimeout(() => this.applyAutoDirectorCompose(), 250);
+                  }
+                }
+              }
+            });
+          }, 3500);
+          setTimeout(() => {
+            clearInterval(pollId);
+            if (this.onDemandAiLoading()) {
+              this.onDemandAiLoading.set(false);
+              this.onDemandAiStatus.set('');
+              this.loadEdl();
+            }
+          }, 45000);
+        },
+        error: (err) => {
+          console.error('On-Demand AI başlatılamadı:', err);
+          this.onDemandAiLoading.set(false);
+          this.onDemandAiStatus.set('');
+          alert('AI analizi başlatılamadı: ' + (err.error?.detail || err.message));
+        }
+      });
+  }
+
+  // --- FAZ E: V1 KLİP SIRALAMA (REORDERING) & ÇOKLU VİDEO KLİP EKLEME ---
+  private buildCurrentVideoClipsSnapshot(): VideoClipItem[] {
+    const allClips = this.clips();
+    return allClips.map((c, idx) => ({
+      id: c.id,
+      title: c.title || `Sahne ${idx + 1}`,
+      label: c.label || c.title || `Sahne ${idx + 1}`,
+      sourceUrl: c.sourceUrl,
+      start: c.start,
+      end: c.end,
+      duration: c.duration,
+      order: idx,
+      isCut: Boolean(c.isCut),
+      cutReason: c.cutObj?.reason,
+      speed: this.clipSpeedMap()[c.id] || 1.0
+    }));
+  }
+
+  moveSelectedClipOrder(direction: -1 | 1): void {
+    const selIds = this.selectedClipIds();
+    if (!selIds.length) return;
+    this.moveClipOrder(selIds[0], direction);
+  }
+
+  moveClipOrder(clipId: string, direction: -1 | 1, event?: Event): void {
+    event?.stopPropagation();
+    const list = this.buildCurrentVideoClipsSnapshot();
+    const fromIdx = list.findIndex(c => c.id === clipId);
+    if (fromIdx === -1) return;
+
+    let toIdx = fromIdx + direction;
+    while (toIdx >= 0 && toIdx < list.length && list[toIdx].isCut) {
+      toIdx += direction;
+    }
+    if (toIdx < 0 || toIdx >= list.length) return;
+
+    const temp = list[fromIdx];
+    list[fromIdx] = list[toIdx];
+    list[toIdx] = temp;
+    list.forEach((item, i) => (item.order = i));
+
+    const patch: EdlPatchDto = {
+      videoClips: list,
+      settings: { videoClips: list }
+    };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
+    this.closeContextMenu();
+  }
+
+  onClipDragStart(event: DragEvent, clip: any): void {
+    if (clip.isCut) {
+      event.preventDefault();
+      return;
+    }
+    this.draggedClipId = clip.id;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', clip.id);
+    }
+  }
+
+  onClipDragOver(event: DragEvent, clip: any): void {
+    const draggingId = this.draggedClipId;
+    if (!draggingId || draggingId === clip.id || clip.isCut) return;
+    event.preventDefault();
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+  }
+
+  onClipDrop(event: DragEvent, targetClip: any): void {
+    event.preventDefault();
+    event.stopPropagation();
+    const draggingId = this.draggedClipId || event.dataTransfer?.getData('text/plain');
+    this.draggedClipId = null;
+
+    if (!draggingId || draggingId === targetClip.id || targetClip.isCut) return;
+
+    const list = this.buildCurrentVideoClipsSnapshot();
+    const fromIdx = list.findIndex(c => c.id === draggingId);
+    const toIdx = list.findIndex(c => c.id === targetClip.id);
+    if (fromIdx === -1 || toIdx === -1) return;
+
+    const [moved] = list.splice(fromIdx, 1);
+    list.splice(toIdx, 0, moved);
+    list.forEach((item, i) => (item.order = i));
+
+    const patch: EdlPatchDto = {
+      videoClips: list,
+      settings: { videoClips: list }
+    };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
+  }
+
+  appendAssetVideoToMainTrack(asset: ProjectAssetDto): void {
+    const list = this.buildCurrentVideoClipsSnapshot();
+    const lastEnd = list.reduce((maxE, c) => Math.max(maxE, c.end), this.totalDuration() || 10);
+    const clipDuration = 6.0;
+    const newClip: VideoClipItem = {
+      id: `vclip_${Date.now()}`,
+      title: asset.dosyaAdi || 'Ek Video Klip',
+      label: asset.dosyaAdi || '🎬 Ek Video Klip',
+      sourceUrl: asset.url,
+      start: 0,
+      end: clipDuration,
+      duration: clipDuration,
+      order: list.length,
+      isCut: false,
+      speed: 1.0
+    };
+    const updatedList = [...list, newClip];
+    this.totalDuration.set(lastEnd + clipDuration);
+
+    const patch: EdlPatchDto = {
+      videoClips: updatedList,
+      settings: { videoClips: updatedList }
+    };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
+    this.selectedClipIds.set([newClip.id]);
   }
 
   private formatVttTimestamp(seconds: number): string {

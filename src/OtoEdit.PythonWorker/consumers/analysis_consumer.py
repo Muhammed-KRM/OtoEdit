@@ -108,12 +108,15 @@ class AnalysisConsumer:
         auto_jumpcut = bool(msg.get("autoJumpcutEnabled", True))
         auto_retake = bool(msg.get("autoRetakeEnabled", True))
         auto_broll = bool(msg.get("autoBrollEnabled", True))
-        auto_subtitles = bool(msg.get("autoSubtitlesEnabled", False))
+        auto_subtitles = bool(msg.get("autoSubtitlesEnabled", True))
+        auto_director = bool(msg.get("autoDirectorEnabled", True))
+        direct_to_editor = bool(msg.get("directToEditor", False))
 
         logger.info(
             f"🎬 VideoUploadedEvent alındı: VideoId={video_id}, ProjectId={project_id}, "
             f"Format={video_format}, JumpCut={auto_jumpcut}, Retake={auto_retake}, "
-            f"BRoll={auto_broll}, Subs={auto_subtitles}"
+            f"BRoll={auto_broll}, Subs={auto_subtitles}, AutoDirector={auto_director}, "
+            f"DirectToEditor={direct_to_editor}"
         )
 
         # 💓 RabbitMQ Arka Plan Nabız Koruyucusu (Uzun analizlerde soket kopmasını önler)
@@ -128,12 +131,17 @@ class AnalysisConsumer:
             )
             local_video_path = self.minio.download_video(project_id, video_id, object_key=dosya_yolu)
 
-            # 🚀 REDIS IDEMPOTENCY KONTROLÜ (SHA-256 İle Mükerrer Analizi Önleme)
+            # 🚀 REDIS IDEMPOTENCY KONTROLÜ (SHA-256 + Pipeline Bayrakları İle Bileşik Anahtar)
             video_hash = self.cache.compute_video_hash(local_video_path)
+            cache_key = (
+                f"{video_hash}:fmt={video_format}:jc={int(auto_jumpcut)}:rt={int(auto_retake)}"
+                f":br={int(auto_broll)}:sub={int(auto_subtitles)}:au={int(audio_enhancement)}"
+                f":gs={int(gesture_enabled)}:ad={int(auto_director)}"
+            )
             if Config.ENABLE_ANALYSIS_CACHE:
-                cached_edl = self.cache.get_cached_edl(video_hash)
+                cached_edl = self.cache.get_cached_edl(cache_key)
                 if cached_edl:
-                    logger.info(f"⚡ Mükerrer dosya tespit edildi! Redis önbelleğinden anında sonuç dönülüyor (VideoId={video_id})")
+                    logger.info(f"⚡ Mükerrer dosya/ayar kombinasyonu tespit edildi! Redis önbelleğinden anında sonuç dönülüyor (VideoId={video_id})")
                     self.publisher.publish_analysis_completed(project_id, video_id, cached_edl)
                     self.pipeline_logger.log_progress(
                         project_id, video_id, PipelineStage.TAMAMLANDI, 100,
@@ -144,6 +152,52 @@ class AnalysisConsumer:
                     return
             else:
                 logger.info(f"ℹ️ Redis analiz önbelleği devre dışı (ENABLE_ANALYSIS_CACHE=False). Sıfırdan taze analiz yürütülüyor...")
+
+            # ⚡ DIRECT-TO-EDITOR HIZLI GEÇİŞ YOLU (Fast Path)
+            if direct_to_editor or not any([
+                auto_jumpcut, auto_retake, auto_broll, auto_subtitles, audio_enhancement, gesture_enabled
+            ]):
+                logger.info(f"⚡ Direct-to-Editor Hızlı Geçiş (Fast Path) aktif! STT ve ağır analizler atlanıyor (VideoId={video_id})")
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.SES_IYILESTIRME, 40,
+                    message="Hızlı Editör Modu: Ses dalga formu (Waveform) çıkarılıyor..."
+                )
+                analysis = self.audio_analyzer.analyze(local_video_path)
+                from models.transcript_model import TranscriptResult
+                from models.edl_model import RepurposingData
+                minimal_transcript = TranscriptResult(
+                    full_text="",
+                    duration=float(getattr(analysis, "duration", 0.0)),
+                    segments=[],
+                    words=[],
+                )
+                edl_dict = self.edl_builder.build(
+                    project_id=project_id,
+                    video_id=video_id,
+                    transcript=minimal_transcript,
+                    silence_cuts=[],
+                    commands=[],
+                    face_data=[],
+                    repurposing_data=RepurposingData(clips=[]),
+                    suggestions=[],
+                    video_format=video_format,
+                    extra_cuts=[],
+                    extra_overlays=[],
+                    audio_peaks=analysis.peaks,
+                    video_duration=getattr(analysis, "duration", None),
+                    subtitles_enabled=False,
+                    auto_director=False,
+                )
+                if Config.ENABLE_ANALYSIS_CACHE:
+                    self.cache.set_cached_edl(cache_key, edl_dict)
+                self.publisher.publish_analysis_completed(project_id, video_id, edl_dict)
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.TAMAMLANDI, 100,
+                    status="Completed",
+                    message="Video doğrudan editöre hazırlandı!"
+                )
+                ch.basic_ack(delivery_tag=method.delivery_tag)
+                return
 
             # 2. Aşama 0: Ses İyileştirme (Opsiyonel)
             clean_audio_path = local_video_path
@@ -352,12 +406,14 @@ class AnalysisConsumer:
                 extra_cuts=retake_cuts,
                 extra_overlays=broll_overlays,
                 audio_peaks=audio_peaks,
-                video_duration=getattr(analysis, "duration", None)
+                video_duration=getattr(analysis, "duration", None),
+                subtitles_enabled=auto_subtitles,
+                auto_director=auto_director,
             )
 
             # 💾 REDIS ÖNBELLEĞE KAYDET
             if Config.ENABLE_ANALYSIS_CACHE:
-                self.cache.set_cached_edl(video_hash, edl_dict)
+                self.cache.set_cached_edl(cache_key, edl_dict)
 
             # 10. Tamamlandı Bildirimi ve EDL'yi .NET API'ye Gönder
             self.publisher.publish_analysis_completed(project_id, video_id, edl_dict)

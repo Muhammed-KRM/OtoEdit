@@ -161,16 +161,10 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
               </div>
             </div>
 
-            <!-- Toggles -->
-            <div class="pt-2 space-y-3">
-              <label class="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" [(ngModel)]="newProject.gestureCommandsEnabled" name="gesture" class="w-4 h-4 rounded text-brand-blue bg-dark-800 border-slate-700 focus:ring-brand-blue">
-                <span class="text-sm text-slate-300">El Hareketi Komutlarını Aktif Et (Thumbs Down = Cut)</span>
-              </label>
-              <label class="flex items-center gap-3 cursor-pointer">
-                <input type="checkbox" [(ngModel)]="newProject.audioEnhancementEnabled" name="audio" class="w-4 h-4 rounded text-brand-blue bg-dark-800 border-slate-700 focus:ring-brand-blue">
-                <span class="text-sm text-slate-300">Otomatik Ses İyileştirme (Gürültü ve Yankı Temizleme)</span>
-              </label>
+            <!-- Bilgi Notu -->
+            <div class="p-3.5 rounded-xl bg-brand-blue/10 border border-brand-blue/30 text-xs text-slate-300 leading-relaxed">
+              <span class="font-bold text-brand-cyan">✨ Birleştirilmiş Akıllı Kurgu Seçenekleri:</span>
+              Videonuzu yüklerken <b>Direkt Editöre Geç (0sn)</b>, <b>Kesilmiş Videoyu Kurgula & Zenginleştir</b> veya <b>Tam Otonom Yönetmen</b> modlarından birini tek tıkla seçebilirsiniz.
             </div>
           </div>
 

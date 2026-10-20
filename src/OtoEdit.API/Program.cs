@@ -51,8 +51,12 @@ builder.Services.AddControllers()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-// 3. SignalR Canlı Bildirim
+// 3. SignalR Canlı Bildirim ve Gzip/Brotli Response Compression
 builder.Services.AddSignalR();
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+});
 
 // 4. Kestrel Request Body Limitleri (Azami 50GB)
 builder.WebHost.ConfigureKestrel(serverOptions =>
@@ -115,6 +119,7 @@ PipelineNotificationManager.SendSignalRMessageAsync = async (projectId, method, 
 };
 
 // 9. Middleware Pipeline Sıralaması
+app.UseResponseCompression();
 app.UseMiddleware<ExceptionHandlingMiddleware>();
 app.UseMiddleware<RequestResponseLoggingMiddleware>();
 

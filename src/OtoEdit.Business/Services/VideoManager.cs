@@ -22,6 +22,7 @@ public class VideoManager : IVideoService
     private readonly IPublishEndpoint _publishEndpoint;
     private readonly ILogService _logService;
     private readonly ILogger<VideoManager> _logger;
+    private readonly IEdlService? _edlService;
 
     private static readonly string[] AllowedExtensions = { ".mp4", ".mkv", ".avi", ".mov", ".webm" };
     private const long MaxFileSize = 53687091200L; // 50GB
@@ -32,7 +33,8 @@ public class VideoManager : IVideoService
         IFileStorageService fileStorageService,
         IPublishEndpoint publishEndpoint,
         ILogService logService,
-        ILogger<VideoManager> logger)
+        ILogger<VideoManager> logger,
+        IEdlService? edlService = null)
     {
         _videoRepository = videoRepository;
         _projectRepository = projectRepository;
@@ -40,6 +42,7 @@ public class VideoManager : IVideoService
         _publishEndpoint = publishEndpoint;
         _logService = logService;
         _logger = logger;
+        _edlService = edlService;
     }
 
     public async Task<VideoListDto> UploadVideoAsync(
@@ -48,8 +51,12 @@ public class VideoManager : IVideoService
         bool autoJumpcut = true,
         bool autoRetake = true,
         bool autoBroll = true,
-        bool autoSubtitles = false,
-        CancellationToken cancellationToken = default)
+        bool autoSubtitles = true,
+        CancellationToken cancellationToken = default,
+        bool? audioEnhancementEnabled = null,
+        bool? gestureCommandsEnabled = null,
+        bool autoDirectorEnabled = false,
+        bool directToEditor = false)
     {
         var project = await _projectRepository.GetByIdAsync(projectId);
         if (project == null)
@@ -97,8 +104,30 @@ public class VideoManager : IVideoService
         await _videoRepository.AddAsync(video);
         await _videoRepository.SaveChangesAsync();
 
-        // 3. Proje durumunu güncelle
-        await _projectRepository.UpdateStatusAsync(projectId, ProjectDurumu.AnalizEdiliyor);
+        bool effectiveAudioEnhancement = audioEnhancementEnabled ?? project.AudioEnhancementEnabled;
+        bool effectiveGesture = gestureCommandsEnabled ?? project.GestureCommandsEnabled;
+        bool isDirectMode = directToEditor || (!autoJumpcut && !autoRetake && !autoBroll && !autoSubtitles && !effectiveAudioEnhancement && !effectiveGesture && !autoDirectorEnabled);
+
+        if (isDirectMode && _edlService != null)
+        {
+            string formatStr = project.VideoFormati switch
+            {
+                VideoFormati.Dikey_9_16 => "9:16",
+                VideoFormati.Kare_1_1 => "1:1",
+                _ => "16:9"
+            };
+            string initialEdlJson = $"{{\"version\":\"1.0\",\"projectId\":\"{projectId}\",\"videoId\":\"{video.Id}\",\"duration\":0,\"cuts\":[],\"transcript\":[],\"overlays\":[],\"transitions\":[],\"sfxClips\":[],\"videoClips\":[],\"audioPeaks\":[],\"settings\":{{\"format\":\"{formatStr}\",\"subtitlesEnabled\":false,\"audioCleaned\":false,\"templateId\":\"default\"}}}}";
+            using var initialDoc = System.Text.Json.JsonDocument.Parse(initialEdlJson);
+            await _edlService.CreateOrUpdateAsync(projectId, initialDoc, cancellationToken);
+            video.IslemDurumu = VideoIslemDurumu.AnalizTamamlandi;
+            await _videoRepository.SaveChangesAsync();
+            await _projectRepository.UpdateStatusAsync(projectId, ProjectDurumu.AnalizTamamlandi);
+        }
+        else
+        {
+            // 3. Proje durumunu güncelle
+            await _projectRepository.UpdateStatusAsync(projectId, ProjectDurumu.AnalizEdiliyor);
+        }
 
         // 4. RabbitMQ üzerinden Python Worker'a event publish et
         await _publishEndpoint.Publish(new VideoUploadedEvent
@@ -107,12 +136,14 @@ public class VideoManager : IVideoService
             ProjectId = projectId,
             DosyaYolu = objectKey,
             VideoFormati = (int)project.VideoFormati,
-            GestureCommandsEnabled = project.GestureCommandsEnabled,
-            AudioEnhancementEnabled = project.AudioEnhancementEnabled,
+            GestureCommandsEnabled = effectiveGesture,
+            AudioEnhancementEnabled = effectiveAudioEnhancement,
             AutoJumpcutEnabled = autoJumpcut,
             AutoRetakeEnabled = autoRetake,
             AutoBrollEnabled = autoBroll,
-            AutoSubtitlesEnabled = autoSubtitles
+            AutoSubtitlesEnabled = autoSubtitles,
+            AutoDirectorEnabled = autoDirectorEnabled,
+            DirectToEditor = isDirectMode
         }, cancellationToken);
 
         _logger.LogInformation("VideoUploadedEvent publish edildi: VideoId={VideoId}, ProjectId={ProjectId}", video.Id, projectId);
@@ -204,5 +235,40 @@ public class VideoManager : IVideoService
         }
         
         return presignedUrl;
+    }
+
+    public async Task TriggerAnalysisAsync(
+        Guid projectId,
+        bool autoJumpcut = false,
+        bool autoRetake = false,
+        bool autoBroll = false,
+        bool autoSubtitles = true,
+        bool audioEnhancement = false,
+        bool gestureCommands = false,
+        bool autoDirector = false,
+        CancellationToken cancellationToken = default)
+    {
+        var project = await _projectRepository.GetByIdAsync(projectId)
+            ?? throw new NotFoundException("Proje bulunamadı", projectId);
+        var video = await _videoRepository.GetByProjectIdAsync(projectId, asNoTracking: false)
+            ?? throw new NotFoundException("Projeye ait video bulunamadı", projectId);
+
+        await _projectRepository.UpdateStatusAsync(projectId, ProjectDurumu.AnalizEdiliyor);
+
+        await _publishEndpoint.Publish(new VideoUploadedEvent
+        {
+            VideoId = video.Id,
+            ProjectId = projectId,
+            DosyaYolu = video.DosyaYolu,
+            VideoFormati = (int)project.VideoFormati,
+            GestureCommandsEnabled = gestureCommands,
+            AudioEnhancementEnabled = audioEnhancement,
+            AutoJumpcutEnabled = autoJumpcut,
+            AutoRetakeEnabled = autoRetake,
+            AutoBrollEnabled = autoBroll,
+            AutoSubtitlesEnabled = autoSubtitles,
+            AutoDirectorEnabled = autoDirector,
+            DirectToEditor = false
+        }, cancellationToken);
     }
 }

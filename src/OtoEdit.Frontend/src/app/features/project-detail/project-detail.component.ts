@@ -33,11 +33,11 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
         </div>
 
         <div class="flex items-center gap-3">
-          <!-- Editöre Git Butonu (Analiz tamamlandıysa veya EDL varsa aktif) -->
+          <!-- Editöre Git Butonu (Analiz tamamlandıysa veya video yüklüyse her zaman erişilebilir) -->
           <button 
             *ngIf="canGoToEditor()"
             (click)="goToEditor()"
-            class="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-sm shadow-glow-sm hover:shadow-glow-md transition-all active:scale-95 animate-pulse-subtle">
+            class="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-sm shadow-glow-sm hover:shadow-glow-md transition-all active:scale-95">
             <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
             </svg>
@@ -48,11 +48,19 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
 
       <!-- Live Analysis Progress (SignalR) -->
       <div *ngIf="isAnalyzing()" class="mb-8 p-6 rounded-2xl glass-panel border border-brand-cyan/30 shadow-glow-sm animate-fade-in">
-        <h3 class="text-base font-bold text-white mb-2 flex items-center gap-2">
-          <span class="w-2.5 h-2.5 rounded-full bg-brand-cyan animate-ping"></span>
-          Yapay Zeka Video Analiz Hattı Çalışıyor
-        </h3>
-        <p class="text-xs text-slate-400 mb-4">Whisper transkripsiyon, jump-cut sessizlik tespiti, el hareketleri ve yüz takibi yürütülüyor...</p>
+        <div class="flex items-center justify-between gap-4 mb-2">
+          <h3 class="text-base font-bold text-white flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-brand-cyan animate-ping"></span>
+            Yapay Zeka Video Analiz Hattı Çalışıyor
+          </h3>
+          <button
+            type="button"
+            (click)="goToEditor()"
+            class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-brand-cyan border border-brand-cyan/30 font-semibold transition-all">
+            Beklemeden Editöre Geç →
+          </button>
+        </div>
+        <p class="text-xs text-slate-400 mb-4">Seçtiğiniz akıllı kurgu adımları yürütülüyor...</p>
         
         <app-progress-bar 
           [percentage]="analysisPercentage()" 
@@ -61,14 +69,177 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        <!-- Sol Panel: Video Yükleme Alanı -->
+        <!-- Sol Panel: Hızlı Modlar, Pipeline Tikleri & Video Yükleme Alanı -->
         <div class="lg:col-span-2 space-y-6">
+          <!-- 1. HIZLI KURGU SENARYOSU (4 PRESET MODU) + BİRLEŞTİRİLMİŞ TİKLER -->
+          <div class="glass-panel rounded-2xl p-6 border border-slate-800 space-y-4">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                  <span class="w-2 h-2 rounded-full bg-brand-cyan shadow-glow-sm"></span>
+                  1. Kurgu Senaryosu & Yapay Zeka Görevlerini Seçin
+                </h3>
+                <p class="text-xs text-slate-400 mt-0.5">Videoyu yüklemeden önce hazır bir senaryo seçin veya aşağıdaki kutucukları özelleştirin:</p>
+              </div>
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  (click)="applyPresetMode('direct')"
+                  class="text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 font-semibold transition-all">
+                  ⚡ Tüm Tikleri Kaldır (Direkt Editör)
+                </button>
+                <button
+                  type="button"
+                  (click)="applyPresetMode('full')"
+                  class="text-[11px] px-2.5 py-1 rounded-lg bg-brand-blue/15 hover:bg-brand-blue/25 text-brand-cyan border border-brand-blue/30 font-semibold transition-all">
+                  🎬 Tümünü Seç
+                </button>
+              </div>
+            </div>
+
+            <!-- 4 Hazır Senaryo Kartı -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              <!-- Mod 1: Direkt Editöre Geç (0 Saniye) -->
+              <button
+                type="button"
+                (click)="applyPresetMode('direct')"
+                [ngClass]="activePresetMode() === 'direct' ? 'border-emerald-500 bg-emerald-500/15 shadow-glow-sm' : 'border-slate-700/70 bg-dark-800/70 hover:border-slate-600'"
+                class="p-3.5 rounded-xl border text-left transition-all flex items-start gap-3">
+                <span class="text-xl leading-none mt-0.5">⚡</span>
+                <div>
+                  <div class="text-xs font-extrabold text-white flex items-center gap-1.5">
+                    Direkt Editöre Geç
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">0sn Bekleme</span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Hiçbir otomatik kesim yapmadan videoyu anında Timeline'da açar.</div>
+                </div>
+              </button>
+
+              <!-- Mod 2: Kesilmiş Videoyu Kurgula & Zenginleştir -->
+              <button
+                type="button"
+                (click)="applyPresetMode('enrich')"
+                [ngClass]="activePresetMode() === 'enrich' ? 'border-amber-500 bg-amber-500/15 shadow-glow-sm' : 'border-slate-700/70 bg-dark-800/70 hover:border-slate-600'"
+                class="p-3.5 rounded-xl border text-left transition-all flex items-start gap-3">
+                <span class="text-xl leading-none mt-0.5">✨</span>
+                <div>
+                  <div class="text-xs font-extrabold text-white flex items-center gap-1.5">
+                    Kesilmiş Videoyu Kurgula
+                    <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">Oto-Zenginleştir</span>
+                  </div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Videoyu kesmez; otomatik Başlık, Vurgu Yazısı, Emoji, Geçiş, SFX ve B-Roll ekler!</div>
+                </div>
+              </button>
+
+              <!-- Mod 3: Sadece Otomatik Kes & Altyazı -->
+              <button
+                type="button"
+                (click)="applyPresetMode('cut_sub')"
+                [ngClass]="activePresetMode() === 'cut_sub' ? 'border-brand-blue bg-brand-blue/15 shadow-glow-sm' : 'border-slate-700/70 bg-dark-800/70 hover:border-slate-600'"
+                class="p-3.5 rounded-xl border text-left transition-all flex items-start gap-3">
+                <span class="text-xl leading-none mt-0.5">✂️</span>
+                <div>
+                  <div class="text-xs font-extrabold text-white">Sadece Kes & Altyazı Ekle</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Sessizlikleri/tekrarları temizler ve dinamik kelime altyazısı oluşturur.</div>
+                </div>
+              </button>
+
+              <!-- Mod 4: Tam Otonom Yönetmen -->
+              <button
+                type="button"
+                (click)="applyPresetMode('full')"
+                [ngClass]="activePresetMode() === 'full' ? 'border-purple-500 bg-purple-500/15 shadow-glow-sm' : 'border-slate-700/70 bg-dark-800/70 hover:border-slate-600'"
+                class="p-3.5 rounded-xl border text-left transition-all flex items-start gap-3">
+                <span class="text-xl leading-none mt-0.5">🎬</span>
+                <div>
+                  <div class="text-xs font-extrabold text-white">Tam Otonom Yönetmen (Tümü)</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5">Jump-cut, Retake, Altyazı, B-Roll, Otonom Kurgu ve Ses temizliğini birlikte yapar.</div>
+                </div>
+              </button>
+            </div>
+
+            <!-- Direkt Editör Modu Bilgi Bandı -->
+            <div *ngIf="isDirectEditorMode()" class="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-200 flex items-center gap-3">
+              <span class="text-lg">🚀</span>
+              <div>
+                <b>Direkt Editör Modu Aktif:</b> Hiçbir kutucuk seçili olmadığı için video yüklendiği anda <b>hiçbir işlem beklenmeden 0 saniyede</b> doğrudan Editör ekranına geçilecektir. İhtiyaç duyduğunuz AI özelliklerini (Altyazı, Otonom Kurgu, Kesim) daha sonra editör içinden tek tıkla çalıştırabilirsiniz.
+              </div>
+            </div>
+
+            <!-- 7 Birleştirilmiş Pipeline Kutucuğu -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-2 border-t border-slate-800/80">
+              <!-- 1. Jump-Cut -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoJumpcut" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">✂️ Otomatik Jump-Cut</div>
+                  <div class="text-[11px] text-slate-400">Sessiz duraksamaları ve nefes boşluklarını keser</div>
+                </div>
+              </label>
+
+              <!-- 2. Akıllı Retake -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoRetake" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">🔁 Akıllı Hatalı Tekrar (Retake)</div>
+                  <div class="text-[11px] text-slate-400">Takılmaları ve tekrar edilen cümleleri temizler</div>
+                </div>
+              </label>
+
+              <!-- 3. Dinamik Altyazı -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoSubtitles" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">💬 Dinamik Kelime Altyazısı</div>
+                  <div class="text-[11px] text-slate-400">Whisper AI ile kelime bazlı senkron altyazı üretir</div>
+                </div>
+              </label>
+
+              <!-- 4. Otonom Yönetmen Kurgusu (AutoDirectorComposer) -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-amber-500/40 cursor-pointer hover:border-amber-400 transition-all">
+                <input type="checkbox" [(ngModel)]="autoDirectorEnabled" class="mt-0.5 w-4 h-4 rounded text-amber-500 bg-dark-900 border-slate-600 focus:ring-amber-500" />
+                <div>
+                  <div class="text-xs font-bold text-amber-300">✨ Otonom Yönetmen Kurgusu</div>
+                  <div class="text-[11px] text-slate-400">Viral başlık, vurgu yazıları, hareketli emoji, geçiş ve SFX ekler</div>
+                </div>
+              </label>
+
+              <!-- 5. Oto B-Roll -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="autoBroll" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">🖼️ Oto Görsel / B-Roll Yerleştir</div>
+                  <div class="text-[11px] text-slate-400">Önemli cümlelere telifsiz stok görsel/video ekler</div>
+                </div>
+              </label>
+
+              <!-- 6. Ses İyileştirme -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
+                <input type="checkbox" [(ngModel)]="audioEnhancementEnabled" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">🎙️ Stüdyo Ses İyileştirme</div>
+                  <div class="text-[11px] text-slate-400">Dip gürültüsünü temizler ve ses seviyesini dengeler</div>
+                </div>
+              </label>
+
+              <!-- 7. El Hareketi Komutları -->
+              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all sm:col-span-2">
+                <input type="checkbox" [(ngModel)]="gestureCommandsEnabled" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
+                <div>
+                  <div class="text-xs font-bold text-white">✋ El Hareketi Komutları (MediaPipe Gesture)</div>
+                  <div class="text-[11px] text-slate-400">Kameraya başparmak aşağı (Thumbs Down) yaptığınız hatalı kısımları otomatik keser</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- 2. KAYNAK VİDEO YÜKLEME ALANI -->
           <div class="glass-panel rounded-2xl p-6 border border-slate-800">
             <h2 class="text-lg font-bold text-white mb-4 flex items-center gap-2">
               <svg class="w-5 h-5 text-brand-cyan" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
               </svg>
-              Kaynak Video
+              2. Kaynak Videoyu Yükleyin
             </h2>
 
             <!-- Video Yüklü Değilse Drag & Drop -->
@@ -78,9 +249,9 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
               (dragleave)="onDragLeave($event)"
               (drop)="onFileDrop($event)"
               [ngClass]="isDragging ? 'border-brand-blue bg-brand-blue/10 scale-[1.01]' : 'border-slate-700 hover:border-slate-500 bg-dark-800/40'"
-              class="border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-200">
+              class="border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all duration-200">
               
-              <input type="file" #fileInput (change)="onFileSelected($event)" accept="video/mp4,video/quicktime,video/x-matroska" class="hidden" />
+              <input type="file" #fileInput (change)="onFileSelected($event)" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" class="hidden" />
               
               <div class="w-16 h-16 rounded-2xl bg-brand-indigo/10 border border-brand-indigo/30 flex items-center justify-center mx-auto mb-4 text-brand-cyan">
                 <svg class="w-8 h-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -89,25 +260,27 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
                 </svg>
               </div>
 
-              <h3 class="text-base font-bold text-white mb-1">Ham Videoyu Buraya Sürükleyin</h3>
-              <p class="text-xs text-slate-400 mb-4">MP4, MOV veya MKV (Azami 50 GB)</p>
+              <h3 class="text-base font-bold text-white mb-1">
+                {{ isDirectEditorMode() ? 'Videoyu Sürükleyin → Anında Editörde Açılacak (0sn)' : 'Videoyu Buraya Sürükleyin veya Seçin' }}
+              </h3>
+              <p class="text-xs text-slate-400 mb-4">MP4, MOV, WEBM veya MKV (Azami 50 GB)</p>
               
               <button 
                 type="button"
                 (click)="fileInput.click()"
                 class="px-5 py-2.5 rounded-xl bg-brand-blue hover:bg-blue-600 text-white font-medium text-xs transition-all shadow-glow-sm">
-                Dosya Seç
+                Video Dosyası Seç
               </button>
             </div>
 
             <!-- Uploading State -->
             <div *ngIf="uploading()" class="p-8 rounded-2xl bg-dark-800/60 border border-slate-700 text-center">
-              <h4 class="text-sm font-semibold text-white mb-2">Video MinIO Bulut Depolamaya Yükleniyor...</h4>
+              <h4 class="text-sm font-semibold text-white mb-2">Video Yükleniyor...</h4>
               <app-progress-bar [percentage]="uploadPercentage()" label="Yükleme İlerlemesi"></app-progress-bar>
             </div>
 
             <!-- Video Yüklü İse Bilgi Kartı -->
-            <div *ngIf="project()?.hasVideo && !uploading()" class="p-5 rounded-xl bg-dark-800 border border-slate-700/80 flex items-center justify-between">
+            <div *ngIf="project()?.hasVideo && !uploading()" class="p-5 rounded-xl bg-dark-800 border border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
               <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
                   <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -115,64 +288,27 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
                   </svg>
                 </div>
                 <div>
-                  <h4 class="text-sm font-bold text-white">Video Başarıyla Yüklendi</h4>
-                  <p class="text-xs text-slate-400">Analiz tamamlandı ve EDL karar listesi oluşturuldu.</p>
+                  <h4 class="text-sm font-bold text-white">Video Yüklendi ve Kurguya Hazır</h4>
+                  <p class="text-xs text-slate-400">İsterseniz doğrudan editöre geçebilir veya seçili kutucuklarla yeniden analiz başlatabilirsiniz.</p>
                 </div>
               </div>
 
-              <button 
-                (click)="reUpload(fileInput)" 
-                class="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-700 transition-colors">
-                Videoyu Değiştir
-              </button>
-              <input type="file" #fileInput (change)="onFileSelected($event)" accept="video/mp4,video/quicktime,video/x-matroska" class="hidden" />
-            </div>
-          </div>
-
-          <!-- Akıllı Yönetmen Pipeline Tercihleri -->
-          <div class="glass-panel rounded-2xl p-6 border border-slate-800 space-y-4">
-            <h3 class="text-sm font-bold text-white uppercase tracking-wider flex items-center gap-2">
-              <span class="w-2 h-2 rounded-full bg-brand-cyan shadow-glow-sm"></span>
-              Akıllı Yönetmen Pipeline Tercihleri
-            </h3>
-            <p class="text-xs text-slate-400">Yapay zekanın video analizinde otomatik icra edeceği görevler:</p>
-
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-              <!-- Jump-Cut -->
-              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
-                <input type="checkbox" [(ngModel)]="autoJumpcut" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
-                <div>
-                  <div class="text-xs font-bold text-white">Otomatik Jump-Cut</div>
-                  <div class="text-[11px] text-slate-400">Sessiz duraksamaları ve nefes boşluklarını keser</div>
-                </div>
-              </label>
-
-              <!-- Akıllı Retake -->
-              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
-                <input type="checkbox" [(ngModel)]="autoRetake" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
-                <div>
-                  <div class="text-xs font-bold text-white">Akıllı Hatalı Tekrar (Retake)</div>
-                  <div class="text-[11px] text-slate-400">Ses patlaması & takılmaları puanlayıp temizler</div>
-                </div>
-              </label>
-
-              <!-- Oto B-Roll -->
-              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
-                <input type="checkbox" [(ngModel)]="autoBroll" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
-                <div>
-                  <div class="text-xs font-bold text-white">Oto Görsel / B-Roll Yerleştir</div>
-                  <div class="text-[11px] text-slate-400">Vurgulara Pexels telifsiz stok görsel ekler</div>
-                </div>
-              </label>
-
-              <!-- Altyazı -->
-              <label class="flex items-start gap-3 p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 cursor-pointer hover:border-brand-blue/50 transition-all">
-                <input type="checkbox" [(ngModel)]="autoSubtitles" class="mt-0.5 w-4 h-4 rounded text-brand-blue bg-dark-900 border-slate-600 focus:ring-brand-blue" />
-                <div>
-                  <div class="text-xs font-bold text-white">Dinamik Kelime Altyazısı</div>
-                  <div class="text-[11px] text-slate-400">TikTok/Reels tarzı kelime parlamalı altyazı</div>
-                </div>
-              </label>
+              <div class="flex items-center gap-2">
+                <button
+                  *ngIf="!isDirectEditorMode()"
+                  type="button"
+                  (click)="triggerReanalyzeWithSelectedFlags()"
+                  class="text-xs text-amber-300 hover:text-white px-3 py-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/25 transition-colors font-semibold">
+                  ✨ Seçili Tiklerle Yeniden Kurgula
+                </button>
+                <button 
+                  type="button"
+                  (click)="reUpload(fileInput)" 
+                  class="text-xs text-slate-400 hover:text-white px-3 py-1.5 rounded-lg border border-slate-700 hover:bg-slate-700 transition-colors">
+                  Videoyu Değiştir
+                </button>
+              </div>
+              <input type="file" #fileInput (change)="onFileSelected($event)" accept="video/mp4,video/quicktime,video/x-matroska,video/webm" class="hidden" />
             </div>
           </div>
 
@@ -234,16 +370,45 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
             </div>
           </div>
 
-          <!-- Ayarlar Özeti -->
-          <div class="glass-panel rounded-2xl p-6 border border-slate-800 text-xs space-y-3">
-            <h3 class="font-bold text-white uppercase tracking-wider text-[11px]">Pipeline Özellikleri</h3>
+          <!-- Aktif Seçim Özeti -->
+          <div class="glass-panel rounded-2xl p-6 border border-slate-800 text-xs space-y-2.5">
+            <h3 class="font-bold text-white uppercase tracking-wider text-[11px] mb-2">Seçili Kurgu Özeti</h3>
             <div class="flex justify-between items-center text-slate-300">
-              <span>El Hareketi Komutları:</span>
-              <span class="font-semibold text-emerald-400">{{ project()?.gestureCommandsEnabled ? 'Aktif' : 'Pasif' }}</span>
+              <span>Senaryo Modu:</span>
+              <span class="font-bold text-brand-cyan">
+                {{ activePresetMode() === 'direct' ? '⚡ Direkt Editör (0sn)' :
+                   activePresetMode() === 'enrich' ? '✨ Kesilmiş Videoyu Kurgula' :
+                   activePresetMode() === 'cut_sub' ? '✂️ Kes & Altyazı' :
+                   activePresetMode() === 'full' ? '🎬 Tam Otonom Yönetmen' : '⚙️ Özel Seçim' }}
+              </span>
             </div>
             <div class="flex justify-between items-center text-slate-300">
-              <span>Ses İyileştirme (Denoise):</span>
-              <span class="font-semibold text-emerald-400">{{ project()?.audioEnhancementEnabled ? 'Aktif' : 'Pasif' }}</span>
+              <span>Otomatik Jump-Cut:</span>
+              <span [ngClass]="autoJumpcut ? 'text-emerald-400 font-semibold' : 'text-slate-500'">{{ autoJumpcut ? 'Aktif' : 'Kapalı' }}</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-300">
+              <span>Hatalı Tekrar (Retake):</span>
+              <span [ngClass]="autoRetake ? 'text-emerald-400 font-semibold' : 'text-slate-500'">{{ autoRetake ? 'Aktif' : 'Kapalı' }}</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-300">
+              <span>Dinamik Altyazı:</span>
+              <span [ngClass]="autoSubtitles ? 'text-emerald-400 font-semibold' : 'text-slate-500'">{{ autoSubtitles ? 'Aktif' : 'Kapalı' }}</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-300">
+              <span>Otonom Yönetmen (Yazı/Emoji/SFX):</span>
+              <span [ngClass]="autoDirectorEnabled ? 'text-amber-400 font-semibold' : 'text-slate-500'">{{ autoDirectorEnabled ? 'Aktif' : 'Kapalı' }}</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-300">
+              <span>Stok Görsel (B-Roll):</span>
+              <span [ngClass]="autoBroll ? 'text-emerald-400 font-semibold' : 'text-slate-500'">{{ autoBroll ? 'Aktif' : 'Kapalı' }}</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-300">
+              <span>Ses İyileştirme:</span>
+              <span [ngClass]="audioEnhancementEnabled ? 'text-emerald-400 font-semibold' : 'text-slate-500'">{{ audioEnhancementEnabled ? 'Aktif' : 'Kapalı' }}</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-300">
+              <span>El Hareketi Komutu:</span>
+              <span [ngClass]="gestureCommandsEnabled ? 'text-emerald-400 font-semibold' : 'text-slate-500'">{{ gestureCommandsEnabled ? 'Aktif' : 'Kapalı' }}</span>
             </div>
           </div>
         </div>
@@ -268,11 +433,14 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   readonly isAnalyzing = signal<boolean>(false);
   readonly VideoFormati = VideoFormati;
 
-  // Akıllı Yönetmen Tercihleri
+  // Birleştirilmiş 7 Akıllı Yönetmen Tercihi
   autoJumpcut = true;
   autoRetake = true;
   autoBroll = true;
-  autoSubtitles = false;
+  autoSubtitles = true;
+  autoDirectorEnabled = true;
+  audioEnhancementEnabled = false;
+  gestureCommandsEnabled = false;
 
   isDragging = false;
   private sub = new Subscription();
@@ -292,6 +460,61 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       this.signalr.leaveProjectGroup(id);
     }
     this.sub.unsubscribe();
+  }
+
+  isDirectEditorMode(): boolean {
+    return !this.autoJumpcut &&
+           !this.autoRetake &&
+           !this.autoBroll &&
+           !this.autoSubtitles &&
+           !this.autoDirectorEnabled &&
+           !this.audioEnhancementEnabled &&
+           !this.gestureCommandsEnabled;
+  }
+
+  activePresetMode(): 'direct' | 'enrich' | 'cut_sub' | 'full' | 'custom' {
+    if (this.isDirectEditorMode()) return 'direct';
+    if (!this.autoJumpcut && !this.autoRetake && this.autoSubtitles && this.autoDirectorEnabled && this.autoBroll) return 'enrich';
+    if (this.autoJumpcut && this.autoRetake && this.autoSubtitles && !this.autoBroll && !this.autoDirectorEnabled) return 'cut_sub';
+    if (this.autoJumpcut && this.autoRetake && this.autoSubtitles && this.autoBroll && this.autoDirectorEnabled) return 'full';
+    return 'custom';
+  }
+
+  applyPresetMode(mode: 'direct' | 'enrich' | 'cut_sub' | 'full'): void {
+    if (mode === 'direct') {
+      this.autoJumpcut = false;
+      this.autoRetake = false;
+      this.autoBroll = false;
+      this.autoSubtitles = false;
+      this.autoDirectorEnabled = false;
+      this.audioEnhancementEnabled = false;
+      this.gestureCommandsEnabled = false;
+    } else if (mode === 'enrich') {
+      // Kesilmiş hazır videoyu bozmadan (kesmeden) üstüne yazı, hareketli emoji, geçiş, SFX ve B-Roll ekler
+      this.autoJumpcut = false;
+      this.autoRetake = false;
+      this.autoSubtitles = true;
+      this.autoDirectorEnabled = true;
+      this.autoBroll = true;
+      this.audioEnhancementEnabled = false;
+      this.gestureCommandsEnabled = false;
+    } else if (mode === 'cut_sub') {
+      this.autoJumpcut = true;
+      this.autoRetake = true;
+      this.autoSubtitles = true;
+      this.autoDirectorEnabled = false;
+      this.autoBroll = false;
+      this.audioEnhancementEnabled = true;
+      this.gestureCommandsEnabled = false;
+    } else if (mode === 'full') {
+      this.autoJumpcut = true;
+      this.autoRetake = true;
+      this.autoSubtitles = true;
+      this.autoDirectorEnabled = true;
+      this.autoBroll = true;
+      this.audioEnhancementEnabled = true;
+      this.gestureCommandsEnabled = true;
+    }
   }
 
   private loadProject(id: string): void {
@@ -316,10 +539,9 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private setupSignalR(projectId: string): void {
     this.signalr.joinProjectGroup(projectId);
 
-    // Canlı Analiz İlerlemesi
     this.sub.add(
       this.signalr.analysisCompleted$
-        .pipe(filter(e => e.projectId === projectId))
+        .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
         .subscribe(() => {
           this.isAnalyzing.set(false);
           this.analysisPercentage.set(100);
@@ -327,7 +549,6 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         })
     );
 
-    // Canlı Analiz Aşamaları ve Yüzdesi (SignalR)
     this.sub.add(
       this.signalr.analysisProgress$
         .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
@@ -344,7 +565,6 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         })
     );
 
-    // Pipeline Hata Bildirimi
     this.sub.add(
       this.signalr.pipelineError$
         .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
@@ -358,7 +578,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   canGoToEditor(): boolean {
     const p = this.project();
     if (!p) return false;
-    return p.hasEdl || p.durum === ProjectDurumu.AnalizTamamlandi || p.durum === ProjectDurumu.RenderEdiliyor || p.durum === ProjectDurumu.Tamamlandi;
+    return p.hasEdl || p.hasVideo || p.durum === ProjectDurumu.AnalizTamamlandi || p.durum === ProjectDurumu.RenderEdiliyor || p.durum === ProjectDurumu.Tamamlandi;
   }
 
   goToEditor(): void {
@@ -397,10 +617,34 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     input.click();
   }
 
+  triggerReanalyzeWithSelectedFlags(): void {
+    const p = this.project();
+    if (!p) return;
+    this.isAnalyzing.set(true);
+    this.analysisPercentage.set(5);
+    this.analysisStageMessage.set('Seçili AI kurgu adımları başlatılıyor...');
+    this.videoService.reanalyzeProject(p.id, {
+      autoJumpcut: this.autoJumpcut,
+      autoRetake: this.autoRetake,
+      autoBroll: this.autoBroll,
+      autoSubtitles: this.autoSubtitles,
+      audioEnhancementEnabled: this.audioEnhancementEnabled,
+      gestureCommandsEnabled: this.gestureCommandsEnabled,
+      autoDirectorEnabled: this.autoDirectorEnabled
+    }).subscribe({
+      next: () => {},
+      error: (err) => {
+        this.isAnalyzing.set(false);
+        alert('Yeniden analiz başlatılamadı: ' + (err.error?.detail || err.message));
+      }
+    });
+  }
+
   private uploadFile(file: File): void {
     const p = this.project();
     if (!p) return;
 
+    const directMode = this.isDirectEditorMode();
     this.uploading.set(true);
     this.uploadPercentage.set(0);
 
@@ -408,13 +652,22 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       autoJumpcut: this.autoJumpcut,
       autoRetake: this.autoRetake,
       autoBroll: this.autoBroll,
-      autoSubtitles: this.autoSubtitles
+      autoSubtitles: this.autoSubtitles,
+      audioEnhancementEnabled: this.audioEnhancementEnabled,
+      gestureCommandsEnabled: this.gestureCommandsEnabled,
+      autoDirectorEnabled: this.autoDirectorEnabled,
+      directToEditor: directMode
     }).subscribe({
       next: (event) => {
         if (event.type === HttpEventType.UploadProgress && event.total) {
           this.uploadPercentage.set(Math.round((100 * event.loaded) / event.total));
         } else if (event.type === HttpEventType.Response) {
           this.uploading.set(false);
+          if (directMode) {
+            // Hiçbir kutucuk seçili değilse 0 saniye bekleme ile doğrudan Editöre geç!
+            this.router.navigate(['/project', p.id, 'editor']);
+            return;
+          }
           this.isAnalyzing.set(true);
           this.loadProject(p.id);
         }

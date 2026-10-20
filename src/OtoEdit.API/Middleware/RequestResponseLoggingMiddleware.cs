@@ -22,7 +22,9 @@ public class RequestResponseLoggingMiddleware
 
     public async Task InvokeAsync(HttpContext context, ILogService logService)
     {
-        // Multipart dosya yüklemelerini ve websocket isteklerini log gövdesine almayız
+        var pathVal = context.Request.Path.Value ?? string.Empty;
+
+        // Multipart dosya yüklemelerini, websocket isteklerini ve yüksek frekanslı/büyük EDL & medya akışlarını MemoryStream'e tamponlama
         if (context.Request.Path.StartsWithSegments("/pipeline-hub") ||
             (context.Request.ContentType?.Contains("multipart/form-data") ?? false))
         {
@@ -30,16 +32,62 @@ public class RequestResponseLoggingMiddleware
             return;
         }
 
+        bool skipBodyBuffering = pathVal.EndsWith("/edl", StringComparison.OrdinalIgnoreCase) ||
+                                 pathVal.EndsWith("/waveform", StringComparison.OrdinalIgnoreCase) ||
+                                 pathVal.Contains("/stream", StringComparison.OrdinalIgnoreCase) ||
+                                 pathVal.Contains("/download", StringComparison.OrdinalIgnoreCase);
+
+        if (skipBodyBuffering)
+        {
+            var fastSw = Stopwatch.StartNew();
+            try
+            {
+                await _next(context);
+            }
+            finally
+            {
+                fastSw.Stop();
+                try
+                {
+                    var fastLog = new EndpointLog
+                    {
+                        TraceId = context.TraceIdentifier,
+                        Method = context.Request.Method,
+                        Path = pathVal,
+                        Query = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : null,
+                        RequestBody = null,
+                        ResponseBody = "[SKIPPED_LARGE_STREAM]",
+                        StatusCode = context.Response.StatusCode,
+                        IpAddress = context.Connection.RemoteIpAddress?.ToString(),
+                        UserAgent = context.Request.Headers.UserAgent.ToString(),
+                        DurationMs = (int)fastSw.ElapsedMilliseconds,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    await logService.LogEndpointAsync(fastLog);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "EndpointLog DB kaydı sırasında hata oluştu.");
+                }
+            }
+            return;
+        }
+
         var stopwatch = Stopwatch.StartNew();
 
-        // Request body oku
-        context.Request.EnableBuffering();
+        // Request body oku (Sadece 64 KB altındaki istek gövdelerini log için oku)
         string? requestBody = null;
-        if (context.Request.ContentLength > 0 && context.Request.Body.CanRead)
+        if (context.Request.ContentLength is > 0 and <= 65536 && context.Request.Body.CanRead)
         {
+            context.Request.EnableBuffering();
             using var reader = new StreamReader(context.Request.Body, Encoding.UTF8, leaveOpen: true);
-            requestBody = await reader.ReadToEndAsync();
+            var rawReq = await reader.ReadToEndAsync();
             context.Request.Body.Position = 0;
+            if (!string.IsNullOrEmpty(rawReq))
+            {
+                var slicedReq = rawReq.Length > 4000 ? rawReq[..4000] : rawReq;
+                requestBody = slicedReq.Replace("\0", string.Empty);
+            }
         }
 
         // Response body yakalamak için geçici stream
@@ -57,9 +105,19 @@ public class RequestResponseLoggingMiddleware
 
             responseBodyStream.Seek(0, SeekOrigin.Begin);
             string? responseBody = null;
-            using (var reader = new StreamReader(responseBodyStream, Encoding.UTF8, leaveOpen: true))
+            if (responseBodyStream.Length <= 65536)
             {
-                responseBody = await reader.ReadToEndAsync();
+                using var reader = new StreamReader(responseBodyStream, Encoding.UTF8, leaveOpen: true);
+                var rawRes = await reader.ReadToEndAsync();
+                if (!string.IsNullOrEmpty(rawRes))
+                {
+                    var slicedRes = rawRes.Length > 4000 ? rawRes[..4000] : rawRes;
+                    responseBody = slicedRes.Replace("\0", string.Empty);
+                }
+            }
+            else
+            {
+                responseBody = $"[LARGE_RESPONSE:{responseBodyStream.Length}_BYTES]";
             }
             responseBodyStream.Seek(0, SeekOrigin.Begin);
             await responseBodyStream.CopyToAsync(originalBodyStream);
@@ -73,8 +131,8 @@ public class RequestResponseLoggingMiddleware
                     Method = context.Request.Method,
                     Path = context.Request.Path,
                     Query = context.Request.QueryString.HasValue ? context.Request.QueryString.Value : null,
-                    RequestBody = requestBody != null ? (requestBody.Replace("\0", string.Empty).Length > 4000 ? requestBody.Replace("\0", string.Empty)[..4000] : requestBody.Replace("\0", string.Empty)) : null,
-                    ResponseBody = responseBody != null ? (responseBody.Replace("\0", string.Empty).Length > 4000 ? responseBody.Replace("\0", string.Empty)[..4000] : responseBody.Replace("\0", string.Empty)) : null,
+                    RequestBody = requestBody,
+                    ResponseBody = responseBody,
                     StatusCode = context.Response.StatusCode,
                     IpAddress = context.Connection.RemoteIpAddress?.ToString(),
                     UserAgent = context.Request.Headers.UserAgent.ToString(),

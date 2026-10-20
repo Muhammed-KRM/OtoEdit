@@ -35,7 +35,11 @@ public class VideosController : ControllerBase
             dto.AutoRetake,
             dto.AutoBroll,
             dto.AutoSubtitles,
-            cancellationToken);
+            cancellationToken,
+            dto.AudioEnhancementEnabled,
+            dto.GestureCommandsEnabled,
+            dto.AutoDirectorEnabled,
+            dto.DirectToEditor);
         return StatusCode(StatusCodes.Status201Created, result);
     }
 
@@ -73,4 +77,37 @@ public class VideosController : ControllerBase
         var url = await _videoService.GetVideoUrlAsync(videoId, cancellationToken);
         return Redirect(url);
     }
+
+    /// <summary>
+    /// Mevcut bir projede seçilen AI analiz adımlarını (Altyazı, Jumpcut, B-Roll, Otonom Yönetmen vb.) isteğe bağlı (On-Demand) tetikler.
+    /// </summary>
+    [HttpPost("api/projects/{projectId:guid}/reanalyze")]
+    public async Task<IActionResult> ReanalyzeProject(
+        Guid projectId,
+        [FromBody] ReanalyzeRequestDto dto,
+        CancellationToken cancellationToken)
+    {
+        await _videoService.TriggerAnalysisAsync(
+            projectId,
+            dto.AutoJumpcut,
+            dto.AutoRetake,
+            dto.AutoBroll,
+            dto.AutoSubtitles,
+            dto.AudioEnhancementEnabled,
+            dto.GestureCommandsEnabled,
+            dto.AutoDirectorEnabled,
+            cancellationToken);
+        return Accepted(new { projectId, status = "AnalizBaslatildi" });
+    }
+}
+
+public class ReanalyzeRequestDto
+{
+    public bool AutoJumpcut { get; set; }
+    public bool AutoRetake { get; set; }
+    public bool AutoBroll { get; set; }
+    public bool AutoSubtitles { get; set; } = true;
+    public bool AudioEnhancementEnabled { get; set; }
+    public bool GestureCommandsEnabled { get; set; }
+    public bool AutoDirectorEnabled { get; set; }
 }

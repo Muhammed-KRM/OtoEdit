@@ -205,7 +205,7 @@ class AudioAnalyzer:
         # Gürültü kapısı altındaki tam sessizlikleri 0.0 olarak koru
         perceptual = np.where(raw_peaks <= gate, 0.0, perceptual)
 
-        return np.round(perceptual, 3).tolist()
+        return [round(float(p), 3) for p in perceptual]
 
     def analyze(
         self,

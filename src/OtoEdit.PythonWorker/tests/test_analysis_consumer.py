@@ -118,7 +118,52 @@ def test_consumer_full_parallel_pipeline_execution(mock_consumer):
     mock_consumer.auto_broll_engine.generate_broll_overlays.assert_called_once()
     mock_consumer.edl_builder.build.assert_called_once()
 
-    # Cached for future requests
-    mock_consumer.cache.set_cached_edl.assert_called_once_with("fresh_hash_456", {"status": "ok", "tracks": []})
+    # Cached for future requests with composite cache key
+    expected_cache_key = "fresh_hash_456:fmt=1:jc=1:rt=1:br=1:sub=1:au=1:gs=1:ad=1"
+    mock_consumer.cache.set_cached_edl.assert_called_once_with(expected_cache_key, {"status": "ok", "tracks": []})
     mock_consumer.publisher.publish_analysis_completed.assert_called_once()
     mock_ch.basic_ack.assert_called_once_with(delivery_tag=202)
+
+
+def test_consumer_direct_to_editor_fast_path(mock_consumer):
+    """Verify directToEditor=True skips STT, Retake, Silence, Face, Gesture, Repurposing, and B-Roll."""
+    mock_ch = MagicMock()
+    mock_method = MagicMock()
+    mock_method.delivery_tag = 303
+
+    payload = {
+        "videoId": "vid-fast",
+        "projectId": "proj-fast",
+        "videoFormati": 0,
+        "dosyaYolu": "videos/proj-fast/vid-fast.mp4",
+        "directToEditor": True,
+    }
+    body = json.dumps(payload).encode("utf-8")
+
+    mock_consumer.minio.download_video.return_value = "/tmp/fast.mp4"
+    mock_consumer.cache.compute_video_hash.return_value = "fast_hash_789"
+    mock_consumer.cache.get_cached_edl.return_value = None
+
+    mock_analysis = MagicMock()
+    mock_analysis.duration = 42.5
+    mock_analysis.peaks = [0.12, 0.45, 0.78]
+    mock_consumer.audio_analyzer.analyze.return_value = mock_analysis
+    mock_consumer.edl_builder.build.return_value = {"projectId": "proj-fast", "duration": 42.5}
+
+    with patch("consumers.analysis_consumer.RabbitHeartbeatKeeper"), \
+         patch("consumers.analysis_consumer.Config.ENABLE_ANALYSIS_CACHE", True):
+        mock_consumer._on_message(mock_ch, mock_method, None, body)
+
+    mock_consumer.audio_analyzer.analyze.assert_called_once_with("/tmp/fast.mp4")
+    mock_consumer.transcriber.transcribe.assert_not_called()
+    mock_consumer.retake_detector.detect_retakes.assert_not_called()
+    mock_consumer.silence_detector.detect_v2.assert_not_called()
+    mock_consumer.face_tracker.track.assert_not_called()
+    mock_consumer.command_engine.detect.assert_not_called()
+    mock_consumer.auto_broll_engine.generate_broll_overlays.assert_not_called()
+
+    build_kwargs = mock_consumer.edl_builder.build.call_args.kwargs
+    assert build_kwargs["subtitles_enabled"] is False
+    assert build_kwargs["auto_director"] is False
+    mock_consumer.publisher.publish_analysis_completed.assert_called_once()
+    mock_ch.basic_ack.assert_called_once_with(delivery_tag=303)

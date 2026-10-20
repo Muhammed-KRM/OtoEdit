@@ -15,5 +15,7 @@ public record VideoUploadedEvent
     public bool AutoJumpcutEnabled { get; init; } = true;
     public bool AutoRetakeEnabled { get; init; } = true;
     public bool AutoBrollEnabled { get; init; } = true;
-    public bool AutoSubtitlesEnabled { get; init; } = false;
+    public bool AutoSubtitlesEnabled { get; init; } = true;
+    public bool AutoDirectorEnabled { get; init; } = false;
+    public bool DirectToEditor { get; init; } = false;
 }

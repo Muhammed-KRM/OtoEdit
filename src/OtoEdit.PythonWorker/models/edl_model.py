@@ -8,10 +8,28 @@ try:
 except Exception:
     class BaseModel:
         def __init__(self, **kwargs):
+            for cls_base in reversed(self.__class__.__mro__):
+                if cls_base is object or cls_base is BaseModel:
+                    continue
+                for k, v in cls_base.__dict__.items():
+                    if not k.startswith("_") and not callable(v):
+                        setattr(self, k, v() if callable(v) else ( list(v) if isinstance(v, list) else (dict(v) if isinstance(v, dict) else v) ))
             for k, v in kwargs.items():
                 setattr(self, k, v)
+        def __getitem__(self, item):
+            return getattr(self, item)
+        def get(self, item, default=None):
+            return getattr(self, item, default)
         def model_dump(self):
-            return self.__dict__
+            out = {}
+            for k, v in self.__dict__.items():
+                if hasattr(v, "model_dump"):
+                    out[k] = v.model_dump()
+                elif isinstance(v, list):
+                    out[k] = [x.model_dump() if hasattr(x, "model_dump") else x for x in v]
+                else:
+                    out[k] = v
+            return out
     def Field(default_factory=None, **kwargs):
         return default_factory() if default_factory else None
 
@@ -27,9 +45,10 @@ class CutItem(BaseModel):
 
 class OverlayItem(BaseModel):
     id: str
-    type: str  # "text", "image"
+    type: str  # "text", "image", "sticker", "video", "gif"
     content: Optional[str] = None  # Metin veya resim açıklaması
     source: Optional[str] = None   # Resim URL'si veya MinIO yolu
+    sourceUrl: Optional[str] = None
     font: Optional[str] = "Montserrat-Bold"
     fontSize: Optional[int] = 48
     color: Optional[str] = "#FFFFFF"
@@ -45,6 +64,7 @@ class OverlayItem(BaseModel):
     positionY: Optional[float] = None
     scale: Optional[float] = 1.0
     track_id: Optional[int] = 1
+    trackId: Optional[int] = 1
     # Tipografi & Rozet (Pillow / ASS)
     strokeColor: Optional[str] = None
     strokeWidth: Optional[float] = 0.0
@@ -188,6 +208,7 @@ class EdlDocument(BaseModel):
     overlays: List[OverlayItem] = Field(default_factory=list)
     transitions: List[Dict[str, Any]] = Field(default_factory=list)
     sfxClips: List[Dict[str, Any]] = Field(default_factory=list)
+    videoClips: List[Dict[str, Any]] = Field(default_factory=list)
     suggestions: List[SuggestionItem] = Field(default_factory=list)
     proactiveSuggestions: List[Dict[str, Any]] = Field(default_factory=list)
     repurposing: RepurposingData = Field(default_factory=RepurposingData)

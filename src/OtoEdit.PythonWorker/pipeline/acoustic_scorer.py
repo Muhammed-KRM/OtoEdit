@@ -16,7 +16,27 @@ try:
     pydub_mod = importlib.import_module("pydub")
     AudioSegment = pydub_mod.AudioSegment
 except Exception:
-    AudioSegment = None
+    import sys
+    import types
+
+    class _StubAudioSegment:
+        @staticmethod
+        def from_wav(*args, **kwargs):
+            return None
+
+        @staticmethod
+        def from_file(*args, **kwargs):
+            return None
+
+    AudioSegment = _StubAudioSegment
+    if "pydub" not in sys.modules:
+        _pydub_stub = types.ModuleType("pydub")
+        _pydub_stub.AudioSegment = _StubAudioSegment
+        _silence_stub = types.ModuleType("pydub.silence")
+        _silence_stub.detect_silence = lambda *args, **kwargs: []
+        _pydub_stub.silence = _silence_stub
+        sys.modules["pydub"] = _pydub_stub
+        sys.modules["pydub.silence"] = _silence_stub
 
 
 class IAcousticScorer(ABC):

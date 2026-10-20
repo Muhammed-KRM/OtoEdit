@@ -5,6 +5,7 @@ from models.edl_model import (
     RepurposingData, SuggestionItem
 )
 from models.transcript_model import TranscriptResult
+from pipeline.auto_director_composer import AutoDirectorComposer
 from pipeline.proactive_director import ProactiveDirector
 from utils.constants import VideoFormat
 from utils.logger import get_logger
@@ -50,19 +51,34 @@ class EdlBuilder:
         extra_cuts: Optional[List[CutItem]] = None,
         extra_overlays: Optional[List[OverlayItem]] = None,
         audio_peaks: Optional[List[float]] = None,
-        video_duration: Optional[float] = None
+        video_duration: Optional[float] = None,
+        subtitles_enabled: bool = True,
+        auto_director: bool = False,
+        transitions: Optional[List[Dict[str, Any]]] = None,
+        sfx_clips: Optional[List[Dict[str, Any]]] = None,
+        video_clips: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         """Tüm analiz çıktılarını tek bir EDL JSON sözlüğüne derler."""
         logger.info(f"EDL dokümanı inşa ediliyor: ProjectId={project_id}, VideoId={video_id}")
+
+        rounded_audio_peaks = (
+            [round(float(p), 3) for p in audio_peaks]
+            if audio_peaks is not None
+            else None
+        )
 
         target_format_str = VideoFormat.TO_STRING.get(video_format, "16:9")
         cuts: List[CutItem] = list(silence_cuts)
         if extra_cuts:
             cuts.extend(extra_cuts)
 
-        overlays: List[OverlayItem] = []
+        overlays: List[Any] = []
         if extra_overlays:
             overlays.extend(extra_overlays)
+
+        merged_transitions: List[Dict[str, Any]] = list(transitions or [])
+        merged_sfx_clips: List[Dict[str, Any]] = list(sfx_clips or [])
+        merged_video_clips: List[Dict[str, Any]] = list(video_clips or [])
 
         # 1. Çoklu-modal komutları EDL'ye dönüştür
         for idx, cmd in enumerate(commands, start=1):
@@ -145,6 +161,28 @@ class EdlBuilder:
             float(transcript.duration) if (transcript and float(getattr(transcript, "duration", 0.0)) > 1.0) else 0.0
         )
 
+        # 3.5 AutoDirectorComposer: Otonom Yönetmen katmanlarını (hook, highlight, emoji sticker, geçiş, SFX) ekle
+        if auto_director or extra_overlays:
+            try:
+                composed = AutoDirectorComposer.compose(
+                    transcript=transcript_dict,
+                    cuts=sorted_cuts,
+                    existing_overlays=overlays,
+                    video_duration=effective_duration,
+                    target_format=target_format_str,
+                )
+                for ad_ov in composed.get("overlays", []):
+                    if isinstance(ad_ov, OverlayItem):
+                        overlays.append(ad_ov)
+                    elif isinstance(ad_ov, dict):
+                        overlays.append(OverlayItem(**ad_ov))
+                for ad_tr in composed.get("transitions", []):
+                    merged_transitions.append(dict(ad_tr))
+                for ad_sfx in composed.get("sfxClips", []):
+                    merged_sfx_clips.append(dict(ad_sfx))
+            except Exception as ad_err:
+                logger.warning(f"AutoDirectorComposer uyarısı: {ad_err}")
+
         # 4. Otonom Yönetmen (ProactiveDirector) önerilerini üret
         proactive_sugs = []
         try:
@@ -153,8 +191,9 @@ class EdlBuilder:
                 "transcript": transcript_dict,
                 "cuts": sorted_cuts,
                 "overlays": overlays,
-                "audioPeaks": audio_peaks,
-                "settings": {"targetFormat": target_format_str},
+                "transitions": merged_transitions,
+                "audioPeaks": rounded_audio_peaks,
+                "settings": {"targetFormat": target_format_str, "subtitlesEnabled": bool(subtitles_enabled)},
             })
         except Exception as pd_err:
             logger.warning(f"ProactiveDirector öneri üretimi uyarısı: {pd_err}")
@@ -167,15 +206,19 @@ class EdlBuilder:
             settings=EdlSettings(
                 targetFormat=target_format_str,
                 faceTrackingEnabled=(target_format_str in ("9:16", "1:1")),
-                gestureCommandsEnabled=len(commands) > 0
+                gestureCommandsEnabled=len(commands) > 0,
+                subtitlesEnabled=bool(subtitles_enabled),
             ),
             transcript=transcript_dict,
             cuts=sorted_cuts,
             overlays=overlays,
+            transitions=merged_transitions,
+            sfxClips=merged_sfx_clips,
+            videoClips=merged_video_clips,
             suggestions=suggestions,
             proactiveSuggestions=proactive_sugs,
             repurposing=repurposing_data,
-            audioPeaks=audio_peaks
+            audioPeaks=rounded_audio_peaks
         )
 
         logger.info(f"EDL dokümanı başarıyla inşa edildi: {len(sorted_cuts)} kesim, {len(overlays)} overlay, {len(suggestions)} öneri. Süre={effective_duration:.2f}s")

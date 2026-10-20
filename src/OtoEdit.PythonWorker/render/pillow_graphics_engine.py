@@ -12,6 +12,7 @@ import json
 import shutil
 import hashlib
 import tempfile
+import urllib.request
 from typing import Optional, Tuple, Dict, Any, List
 import cv2
 import numpy as np
@@ -75,31 +76,17 @@ FONT_PATHS: Dict[str, str] = {
     "DejaVuSans": "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 }
 
-# Yerel assets/fonts eşleştirmeleri
+# Yerel assets/fonts eşleştirmeleri (Yalnızca fiziksel olarak mevcut 7 yerel font ailesi)
 _LOCAL_ASSET_MAP: Dict[str, str] = {
     "montserrat": "Montserrat.ttf",
     "poppins": "Poppins-Bold.ttf",
     "poppins-regular": "Poppins-Regular.ttf",
+    "bebas neue": "BebasNeue.ttf",
     "bebas": "BebasNeue.ttf",
     "anton": "Anton.ttf",
     "cinzel": "Cinzel.ttf",
     "outfit": "Outfit.ttf",
     "inter": "Inter.ttf",
-    "playfair": "Cinzel.ttf",
-    "merriweather": "Cinzel.ttf",
-    "lora": "Cinzel.ttf",
-    "cormorant": "Cinzel.ttf",
-    "abril": "Cinzel.ttf",
-    "bangers": "Anton.ttf",
-    "impact": "Anton.ttf",
-    "oswald": "BebasNeue.ttf",
-    "titan": "Anton.ttf",
-    "russo": "Anton.ttf",
-    "black ops": "Anton.ttf",
-    "rubik": "Montserrat.ttf",
-    "orbitron": "Outfit.ttf",
-    "space grotesk": "Outfit.ttf",
-    "syne": "Montserrat.ttf",
 }
 
 
@@ -150,10 +137,119 @@ class PillowGraphicsEngine:
 
     _FONT_CACHE: Dict[Tuple[str, int], ImageFont.FreeTypeFont] = {}
     _MEM_BADGE_CACHE: Dict[str, bytes] = {}
+    _FAILED_FONT_SLUGS: set = set()
+    _NETWORK_UNREACHABLE: bool = False
+
+    @classmethod
+    def _ensure_google_font_ttf(cls, font_family: str) -> Optional[str]:
+        """
+        İstenen Google Font ailesinin .ttf dosyasını yerel assets/fonts/ veya /tmp/otoedit_fonts/
+        içinde arar; yoksa Google Webfonts Helper API veya Google Fonts GitHub deposundan
+        (3.5s zaman aşımı ile) indirip önbelleğe kaydeder. Çevrimdışıysa None döner.
+        """
+        if not font_family:
+            return None
+
+        clean_family = font_family.split(",")[0].strip().replace("'", "").replace('"', "")
+        base_family = re.sub(
+            r"-(Bold|Regular|Black|ExtraBold|SemiBold|Medium|Light|Italic)$",
+            "",
+            clean_family,
+            flags=re.IGNORECASE,
+        ).strip()
+        slug = re.sub(r"[^a-z0-9]+", "-", base_family.lower()).strip("-")
+        if not slug:
+            return None
+
+        slug_no_dash = slug.replace("-", "")
+        family_no_spaces = re.sub(r"[^A-Za-z0-9]", "", base_family)
+
+        tmp_font_dir = os.path.join(tempfile.gettempdir(), "otoedit_fonts")
+        search_dirs = [_ASSETS_FONT_DIR, tmp_font_dir, "/tmp/otoedit_fonts"]
+
+        # 1. Yerel diskte mevcut mu kontrol et
+        for d in search_dirs:
+            if not d or not os.path.isdir(d):
+                continue
+            for fname in (f"{slug}.ttf", f"{family_no_spaces}.ttf", f"{family_no_spaces}-Bold.ttf", f"{family_no_spaces}-Regular.ttf"):
+                candidate = os.path.join(d, fname)
+                if os.path.isfile(candidate) and os.path.getsize(candidate) > 1024:
+                    return candidate
+
+        if slug in cls._FAILED_FONT_SLUGS or cls._NETWORK_UNREACHABLE:
+            return None
+
+        target_dir = _ASSETS_FONT_DIR if os.path.isdir(_ASSETS_FONT_DIR) else tmp_font_dir
+        try:
+            os.makedirs(target_dir, exist_ok=True)
+        except Exception:
+            target_dir = tmp_font_dir
+            os.makedirs(target_dir, exist_ok=True)
+
+        target_path = os.path.join(target_dir, f"{slug}.ttf")
+
+        # 2. Google Fonts GitHub Raw URL'lerinden doğrudan .ttf indirmeyi dene
+        raw_urls = [
+            f"https://raw.githubusercontent.com/google/fonts/main/ofl/{slug_no_dash}/{family_no_spaces}-Bold.ttf",
+            f"https://raw.githubusercontent.com/google/fonts/main/ofl/{slug_no_dash}/{family_no_spaces}-Regular.ttf",
+            f"https://raw.githubusercontent.com/google/fonts/main/apache/{slug_no_dash}/{family_no_spaces}-Bold.ttf",
+            f"https://raw.githubusercontent.com/google/fonts/main/apache/{slug_no_dash}/{family_no_spaces}-Regular.ttf",
+        ]
+        for url in raw_urls:
+            try:
+                req = urllib.request.Request(url, headers={"User-Agent": "OtoEdit-FontLoader/1.0"})
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    data = resp.read()
+                    if data and len(data) > 1024 and data[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
+                        with open(target_path, "wb") as f_out:
+                            f_out.write(data)
+                        logger.info(f"⬇️ Google Font otomatik indirildi (GitHub): {clean_family} -> {target_path}")
+                        return target_path
+            except urllib.error.HTTPError:
+                continue
+            except urllib.error.URLError:
+                cls._NETWORK_UNREACHABLE = True
+                break
+            except Exception:
+                continue
+
+        # 3. Google Webfonts Helper API yedek kontrolü
+        if not cls._NETWORK_UNREACHABLE:
+            gwfh_url = f"https://gwfh.mranftl.com/api/fonts/{slug}?subsets=latin,latin-ext"
+            try:
+                req = urllib.request.Request(gwfh_url, headers={"User-Agent": "OtoEdit-FontLoader/1.0"})
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    meta = json.loads(resp.read().decode("utf-8"))
+                    variants = meta.get("variants") or []
+                    ttf_url = None
+                    for pref in ("700", "regular", "800", "600"):
+                        for v in variants:
+                            if v.get("id") == pref and v.get("ttf"):
+                                ttf_url = v["ttf"]
+                                break
+                        if ttf_url:
+                            break
+                    if not ttf_url and variants:
+                        ttf_url = variants[0].get("ttf")
+                    if ttf_url:
+                        with urllib.request.urlopen(ttf_url, timeout=3.5) as ttf_resp:
+                            ttf_bytes = ttf_resp.read()
+                            if ttf_bytes and len(ttf_bytes) > 1024:
+                                with open(target_path, "wb") as f_out:
+                                    f_out.write(ttf_bytes)
+                                logger.info(f"⬇️ Google Font otomatik indirildi (GWFH): {clean_family} -> {target_path}")
+                                return target_path
+            except urllib.error.URLError:
+                cls._NETWORK_UNREACHABLE = True
+            except Exception as ex:
+                logger.debug(f"Google Font indirilemedi ({clean_family}): {ex}")
+
+        cls._FAILED_FONT_SLUGS.add(slug)
+        return None
 
     @classmethod
     def get_font(cls, font_name: Optional[str] = "Inter", font_size: int = 48) -> ImageFont.FreeTypeFont:
-        """Sistemdeki veya yerel assets klasöründeki TTF fontlarını bulur ve önbellekli yükler."""
+        """Sistemdeki, yerel assets klasöründeki veya Google Fonts'tan indirilen TTF fontlarını yükler."""
         clean_name = (font_name or "Inter").split(",")[0].strip().replace("'", "").replace('"', "")
         cache_key = (clean_name.lower(), int(font_size))
         if cache_key in cls._FONT_CACHE:
@@ -171,27 +267,46 @@ class PillowGraphicsEngine:
             if lower_name in k.lower() or k.lower() in lower_name:
                 candidates.append(p)
 
-        # 3. Yerel assets/fonts dizini kontrolü
+        # 3. Yerel assets/fonts dizini kontrolü (7 gerçek yerel font)
         if os.path.isdir(_ASSETS_FONT_DIR):
             direct_local = os.path.join(_ASSETS_FONT_DIR, f"{clean_name.replace(' ', '')}.ttf")
             candidates.append(direct_local)
             for key_sub, filename in _LOCAL_ASSET_MAP.items():
                 if key_sub in lower_name:
                     candidates.append(os.path.join(_ASSETS_FONT_DIR, filename))
-            # Genel yerel fallback'ler
-            candidates.append(os.path.join(_ASSETS_FONT_DIR, "Montserrat.ttf"))
-            candidates.append(os.path.join(_ASSETS_FONT_DIR, "Inter.ttf"))
 
-        # 4. Sistem (Linux / Windows) fallback'leri
-        candidates.extend([
+        # Önce doğrudan eşleşen yerel/sistem adaylarını dene
+        for path in candidates:
+            if path and os.path.isfile(path):
+                try:
+                    loaded = ImageFont.truetype(path, font_size)
+                    cls._FONT_CACHE[cache_key] = loaded
+                    return loaded
+                except Exception:
+                    continue
+
+        # 4. Yerel olarak bulunamadıysa Google Fonts'tan otomatik .ttf indirmeyi dene
+        downloaded_path = cls._ensure_google_font_ttf(clean_name)
+        if downloaded_path and os.path.isfile(downloaded_path):
+            try:
+                loaded = ImageFont.truetype(downloaded_path, font_size)
+                cls._FONT_CACHE[cache_key] = loaded
+                return loaded
+            except Exception:
+                pass
+
+        # 5. Genel yerel ve sistem (Linux / Windows) fallback'leri
+        fallback_candidates = [
+            os.path.join(_ASSETS_FONT_DIR, "Montserrat.ttf"),
+            os.path.join(_ASSETS_FONT_DIR, "Inter.ttf"),
             "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
             "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
             "C:/Windows/Fonts/arialbd.ttf",
             "C:/Windows/Fonts/segoeui.ttf",
             "C:/Windows/Fonts/arial.ttf",
-        ])
+        ]
 
-        for path in candidates:
+        for path in fallback_candidates:
             if path and os.path.isfile(path):
                 try:
                     loaded = ImageFont.truetype(path, font_size)

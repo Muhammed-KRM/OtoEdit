@@ -15,13 +15,17 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from render.pillow_graphics_engine import PillowGraphicsEngine, FONT_PATHS, hex_to_rgba
+from render.pillow_graphics_engine import PillowGraphicsEngine, FONT_PATHS, _LOCAL_ASSET_MAP, hex_to_rgba
 from services.bg_remover import BackgroundRemoverService
 from render.image_overlay import ImageOverlay
 from render.animation_effects import AnimationEffects
 from render.audio_mixer import AudioMixer
-from render.video_renderer import VideoRenderer
+from render.video_renderer import VideoRenderer, XFADE_TRANSITION_MAP
 from pipeline.proactive_director import ProactiveDirector
+from pipeline.auto_director_composer import AutoDirectorComposer
+from pipeline.edl_builder import EdlBuilder
+from models.edl_model import CutItem, RepurposingData
+from models.transcript_model import TranscriptResult, TranscriptSegment
 
 
 # ==============================================================================
@@ -533,3 +537,233 @@ def test_proactive_director_generates_rich_suggestions():
     assert "typography" in categories
     assert "audio" in categories
     assert "add_overlay" in actions
+
+
+# ==============================================================================
+# 7. AutoDirectorComposer, EdlBuilder Slimming, 45+ xfade & V1 Clip Reordering
+# ==============================================================================
+
+def test_auto_director_composer_generates_hook_highlights_stickers_transitions_and_sfx():
+    """Verify AutoDirectorComposer.compose generates hook text, highlight texts, Noto animated emoji stickers, transitions, and SFX."""
+    transcript = {
+        "fullText": "Bu videoda en önemli kurgu sırrını açıklıyorum. İkinci bölümde yapay zeka araçlarını inceliyoruz. Üçüncü adımda izleyici tutma oranını ikiye katlıyoruz.",
+        "duration": 65.0,
+        "segments": [
+            {"start": 0.4, "end": 4.2, "text": "Bu videoda en önemli kurgu sırrını açıklıyorum."},
+            {"start": 25.0, "end": 30.0, "text": "İkinci bölümde yapay zeka araçlarını inceliyoruz."},
+            {"start": 50.0, "end": 56.0, "text": "Üçüncü adımda izleyici tutma oranını ikiye katlıyoruz."},
+        ],
+    }
+    cuts = [
+        {"id": "c1", "start": 12.0, "end": 14.0, "reason": "silence"},
+        {"id": "c2", "start": 38.0, "end": 40.0, "reason": "silence"},
+    ]
+
+    composed = AutoDirectorComposer.compose(
+        transcript=transcript,
+        cuts=cuts,
+        existing_overlays=[],
+        video_duration=65.0,
+        target_format="9:16",
+    )
+
+    assert "overlays" in composed
+    assert "transitions" in composed
+    assert "sfxClips" in composed
+
+    overlays = composed["overlays"]
+    transitions = composed["transitions"]
+    sfx_clips = composed["sfxClips"]
+
+    # 1. Hook title at 0.3s on trackId=2
+    hook_overlays = [ov for ov in overlays if ov.get("id") == "ad_hook_title_1"]
+    assert len(hook_overlays) == 1
+    hook = hook_overlays[0]
+    assert hook["type"] == "text"
+    assert hook["trackId"] == 2
+    assert hook["font"] == "Montserrat"
+    assert hook["fontSize"] == 58
+    assert hook["color"] == "#FACC15"
+    assert hook["strokeColor"] == "#000000"
+    assert hook["strokeWidth"] == 4
+    assert hook["boxStyle"] == "none"
+    assert hook["animation"] == "pop-up"
+    assert abs(float(hook["timestamp"]) - 0.3) < 0.01
+
+    # 2. Key phrase highlight overlays on trackId=2
+    hl_overlays = [ov for ov in overlays if str(ov.get("id", "")).startswith("ad_highlight_text_")]
+    assert len(hl_overlays) >= 2
+    for hl in hl_overlays:
+        assert hl["type"] == "text"
+        assert hl["trackId"] == 2
+        assert hl["positionX"] == 50.0
+        assert hl["positionY"] == 22.0
+        assert hl["color"] in ("#22D3EE", "#4ADE80", "#FACC15")
+        assert hl["animation"] in ("bounce", "slide-up")
+
+    # 3. Animated Emoji / Sticker callouts on trackId=3
+    sticker_overlays = [ov for ov in overlays if ov.get("type") == "sticker"]
+    assert 2 <= len(sticker_overlays) <= 6
+    for st in sticker_overlays:
+        assert st["trackId"] == 3
+        assert st["positionX"] == 82.0
+        assert st["positionY"] == 24.0
+        assert st["scale"] == 0.85
+        assert st["animation"] == "pop-up"
+        assert "https://fonts.gstatic.com/s/e/notoemoji/latest/" in st["source"]
+        assert st["source"].endswith("/512.gif")
+
+    # 4. Transitions & SFX
+    assert len(transitions) >= 2
+    for tr in transitions:
+        assert tr["type"] in ("fade", "smoothleft", "zoomin")
+
+    assert len(sfx_clips) >= 3
+    sfx_presets = {s.get("presetId") for s in sfx_clips}
+    assert sfx_presets.issubset({"whoosh-fast", "pop-bubble", "ding-bright"})
+
+
+def test_edl_builder_rounding_subtitles_and_auto_director():
+    """Verify EdlBuilder rounds audioPeaks to 3 decimals, sets subtitlesEnabled, and wires AutoDirectorComposer."""
+    builder = EdlBuilder()
+    transcript = TranscriptResult(
+        full_text="Birinci cümle burada başlıyor. İkinci cümle yirmi beşinci saniyede geliyor.",
+        duration=35.0,
+        segments=[
+            TranscriptSegment(start=0.5, end=4.0, text="Birinci cümle burada başlıyor."),
+            TranscriptSegment(start=24.0, end=29.0, text="İkinci cümle yirmi beşinci saniyede geliyor."),
+        ],
+    )
+    raw_peaks = [0.012000000104308128, 0.8549999892711639, 0.3333333432674408]
+
+    edl = builder.build(
+        project_id="proj_slim_1",
+        video_id="vid_slim_1",
+        transcript=transcript,
+        silence_cuts=[CutItem(id="c1", start=8.0, end=10.0, reason="silence")],
+        commands=[],
+        face_data=[],
+        repurposing_data=RepurposingData(),
+        suggestions=[],
+        video_format=1,
+        audio_peaks=raw_peaks,
+        video_duration=35.0,
+        subtitles_enabled=False,
+        auto_director=True,
+        video_clips=[{"id": "vc_1", "start": 0.0, "end": 15.0}],
+    )
+
+    assert edl["settings"]["subtitlesEnabled"] is False
+    assert edl["audioPeaks"] == [0.012, 0.855, 0.333]
+    for p in edl["audioPeaks"]:
+        assert len(str(p).split(".")[-1]) <= 3
+
+    assert len(edl["overlays"]) >= 3
+    assert len(edl["transitions"]) >= 1
+    assert len(edl["sfxClips"]) >= 2
+    assert len(edl["videoClips"]) == 1
+
+
+def test_xfade_transition_map_has_all_45_plus_transitions():
+    """Verify XFADE_TRANSITION_MAP contains all 45+ standard FFmpeg xfade transitions."""
+    expected_transitions = [
+        "fade", "fadeblack", "fadewhite", "fadegrays", "distance",
+        "wipeleft", "wiperight", "wipeup", "wipedown", "wipetl", "wipetr", "wipebl", "wipebr",
+        "slideleft", "slideright", "slideup", "slidedown",
+        "smoothleft", "smoothright", "smoothup", "smoothdown",
+        "circlecrop", "rectcrop", "circleopen", "circleclose",
+        "vertopen", "vertclose", "horzopen", "horzclose",
+        "dissolve", "pixelize",
+        "diagtl", "diagtr", "diagbl", "diagbr",
+        "hlslice", "hrslice", "vuslice", "vdslice",
+        "hblur", "squeezeh", "squeezev", "zoomin",
+        "hlwind", "hrwind", "vuwind", "vdwind",
+        "coverleft", "coverright", "coverup", "coverdown",
+        "revealleft", "revealright", "revealup", "revealdown",
+    ]
+    assert len(expected_transitions) >= 45
+    for tr_name in expected_transitions:
+        assert tr_name in XFADE_TRANSITION_MAP, f"Missing xfade transition: {tr_name}"
+        assert XFADE_TRANSITION_MAP[tr_name] == tr_name
+
+
+def test_video_renderer_cut_ordered_video_clips(tmp_path):
+    """Verify VideoRenderer._cut_ordered_video_clips reorders V1 segments and skips cut clips."""
+    main_vid = str(tmp_path / "main_source.mp4")
+    ext_vid = str(tmp_path / "external_clip.mp4")
+    with open(main_vid, "wb") as f:
+        f.write(b"M" * 4096)
+    with open(ext_vid, "wb") as f:
+        f.write(b"E" * 4096)
+
+    renderer = VideoRenderer(minio_client=MagicMock())
+
+    # Reordered V1 clips: [10..15] first, then external clip [0..4], then [2..6], while [6..10] isCut=True
+    video_clips = [
+        {"id": "clip_b", "start": 10.0, "end": 15.0, "isCut": False},
+        {"id": "clip_cut", "start": 6.0, "end": 10.0, "isCut": True},
+        {"id": "clip_ext", "start": 0.0, "end": 4.0, "sourceUrl": ext_vid, "isCut": False},
+        {"id": "clip_a", "start": 2.0, "end": 6.0, "isCut": False},
+    ]
+
+    captured_segments = []
+
+    def fake_cut_segments(concat_txt_path, temp_dir, smart_punch_in=False, playback_speed=1.0, segment_speeds=None):
+        parsed = renderer._parse_concat_file(concat_txt_path)
+        captured_segments.extend(parsed)
+        seg_files = [os.path.join(temp_dir, f"seg_{i:04d}.mp4") for i in range(len(parsed))]
+        durs = [e - s for _, s, e in parsed]
+        return seg_files, durs, concat_txt_path
+
+    with patch.object(renderer, "_cut_segments", side_effect=fake_cut_segments):
+        seg_files, actual_durs, merge_concat = renderer._cut_ordered_video_clips(
+            video_clips=video_clips,
+            main_video_path=main_vid,
+            temp_dir=str(tmp_path),
+            smart_punch_in=True,
+            playback_speed=1.0,
+        )
+
+    assert len(captured_segments) == 3
+    assert captured_segments[0][1:] == (10.0, 15.0)
+    assert os.path.basename(captured_segments[1][0]) == "external_clip.mp4"
+    assert captured_segments[1][1:] == (0.0, 4.0)
+    assert captured_segments[2][1:] == (2.0, 6.0)
+    assert actual_durs == [5.0, 4.0, 4.0]
+
+
+def test_local_asset_map_has_no_fake_font_redirects_and_pip_video_overlay(tmp_path):
+    """Verify _LOCAL_ASSET_MAP only maps real local fonts and ImageOverlay supports video PiP overlays."""
+    for fake_key in ("playfair", "merriweather", "lora", "cormorant", "abril", "bangers", "oswald", "orbitron"):
+        assert fake_key not in _LOCAL_ASSET_MAP
+
+    pip_vid = str(tmp_path / "pip_sample.mp4")
+    with open(pip_vid, "wb") as f:
+        f.write(b"V" * 2048)
+
+    overlay_engine = ImageOverlay(minio_client=MagicMock())
+    mock_base_stream = MagicMock(name="base_v")
+
+    with patch("render.image_overlay.ffmpeg") as mock_ffmpeg:
+        mock_in = MagicMock(name="pip_in")
+        mock_in.filter.return_value = mock_in
+        mock_ffmpeg.input.return_value = mock_in
+        mock_ffmpeg.overlay.return_value = MagicMock(name="overlaid_v")
+
+        res = overlay_engine.apply_image_overlays(
+            base_stream=mock_base_stream,
+            overlays=[{
+                "id": "ov_vid_1",
+                "type": "video",
+                "source": pip_vid,
+                "timestamp": 1.5,
+                "duration": 3.5,
+                "scale": 0.5,
+                "trackId": 2,
+            }],
+            temp_dir=str(tmp_path),
+        )
+        assert res is not None
+        mock_ffmpeg.input.assert_called_once_with(pip_vid, ss=0, t=3.5)
+        mock_ffmpeg.overlay.assert_called_once()
+

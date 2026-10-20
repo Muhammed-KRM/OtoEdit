@@ -109,20 +109,25 @@ class ImageOverlay:
         v = base_stream
 
         # Katman hiyerarşisi (Z-Index): Küçük trackId altta, büyük trackId üstte render edilir
-        img_overlays = [ov for ov in (overlays or []) if ov.get("type") == "image"]
+        img_overlays = [
+            ov for ov in (overlays or [])
+            if ov.get("type") in ("image", "video", "sticker", "gif")
+        ]
         img_overlays.sort(key=lambda o: int(o.get("trackId") or o.get("track_id") or 1))
 
         for ov in img_overlays:
-            source = ov.get("source", "")
+            source = ov.get("source") or ov.get("sourceUrl") or ov.get("url") or ""
             local_path = self.resolve_image_path(source, temp_dir=temp_dir)
             if not local_path or not os.path.isfile(local_path):
-                logger.warning(f"Görsel bulunamadığı için atlandı: {source}")
+                logger.warning(f"Görsel/Video bulunamadığı için atlandı: {source}")
                 continue
 
-            is_animated = local_path.lower().endswith((".gif", ".webp", ".apng"))
+            lower_path = local_path.lower()
+            is_video = lower_path.endswith((".mp4", ".mov", ".webm", ".mkv"))
+            is_animated = lower_path.endswith((".gif", ".webp", ".apng"))
 
             # Statik görsellerde PIL / OpenCV ön işlemelerini (Pre-baked <10ms) uygula
-            if not is_animated:
+            if not is_animated and not is_video:
                 # 1. AI Arka Plan Kaldırma (Background Removal)
                 if ov.get("removeBg") or ov.get("remove_bg"):
                     try:
@@ -195,7 +200,9 @@ class ImageOverlay:
             loop_anim = ov.get("loopAnimation") or ov.get("loop_anim")
             keyframes = ov.get("keyframes")
 
-            if is_animated:
+            if is_video:
+                img_input = ffmpeg.input(local_path, ss=0, t=duration)
+            elif is_animated:
                 img_input = ffmpeg.input(local_path, ignore_loop=0)
             else:
                 img_input = ffmpeg.input(local_path)
