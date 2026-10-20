@@ -86,6 +86,41 @@ class AudioMixer:
             logger.error(f"AudioMixer hatası: {ex}, orijinal ses akışı korunuyor")
             return speech_audio_stream
 
+    @staticmethod
+    def _resolve_local_sfx_asset(clip: Dict[str, Any], raw_source: str) -> Optional[str]:
+        """
+        Yerel assets/sfx/ dizinindeki gerçek stüdyo SFX dosyalarını (.wav / .ogg)
+        presetId, synthPreset veya /assets/sfx/ yoluna göre öncelikli olarak çözer.
+        """
+        sfx_assets_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "sfx"))
+        if not os.path.isdir(sfx_assets_dir):
+            return None
+
+        preset_id = str(clip.get("presetId") or clip.get("synthPreset") or "").strip()
+        if not preset_id and raw_source.startswith("sfx://"):
+            preset_id = raw_source.replace("sfx://", "").strip("/")
+
+        if preset_id:
+            for ext in (".wav", ".ogg", ""):
+                cand = os.path.join(sfx_assets_dir, f"{preset_id}{ext}")
+                if os.path.isfile(cand):
+                    return cand
+
+        clean_src = raw_source.split("?")[0].replace("\\", "/")
+        if clean_src.startswith("/assets/sfx/") or clean_src.startswith("assets/sfx/"):
+            rel_name = clean_src.split("assets/sfx/", 1)[-1].lstrip("/")
+            if rel_name:
+                cand = os.path.join(sfx_assets_dir, rel_name)
+                if os.path.isfile(cand):
+                    return cand
+                base_no_ext = os.path.splitext(rel_name)[0]
+                for ext in (".wav", ".ogg"):
+                    cand_ext = os.path.join(sfx_assets_dir, f"{base_no_ext}{ext}")
+                    if os.path.isfile(cand_ext):
+                        return cand_ext
+
+        return None
+
     @classmethod
     def mix_sfx_clips(
         cls,
@@ -107,21 +142,25 @@ class AudioMixer:
                 if not isinstance(clip, dict):
                     continue
 
-                raw_source = clip.get("sourceUrl") or clip.get("source") or clip.get("url") or ""
-                if not raw_source:
-                    continue
+                raw_source = str(clip.get("sourceUrl") or clip.get("source") or clip.get("url") or "").strip()
 
-                local_path = None
-                if resolver_fn is not None:
-                    try:
-                        local_path = resolver_fn(raw_source, temp_dir=temp_dir)
-                    except TypeError:
-                        local_path = resolver_fn(raw_source)
-                elif os.path.isfile(raw_source):
-                    local_path = raw_source
+                # 1. Önce yerel assets/sfx/ dizinini kontrol et
+                local_path = cls._resolve_local_sfx_asset(clip, raw_source)
+
+                # 2. Yerel assets/sfx/ içinde bulunamadıysa mevcut resolver veya dosya kontrolüne geç
+                if not local_path:
+                    if not raw_source:
+                        continue
+                    if os.path.isfile(raw_source):
+                        local_path = raw_source
+                    elif resolver_fn is not None:
+                        try:
+                            local_path = resolver_fn(raw_source, temp_dir=temp_dir)
+                        except TypeError:
+                            local_path = resolver_fn(raw_source)
 
                 if not local_path or not os.path.isfile(local_path):
-                    logger.warning(f"SFX ses dosyası bulunamadı, atlanıyor: {raw_source}")
+                    logger.warning(f"SFX ses dosyası bulunamadı, atlanıyor: {raw_source or clip.get('presetId')}")
                     continue
 
                 start_sec = float(

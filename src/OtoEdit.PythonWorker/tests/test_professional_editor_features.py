@@ -708,7 +708,14 @@ def test_video_renderer_cut_ordered_video_clips(tmp_path):
 
     captured_segments = []
 
-    def fake_cut_segments(concat_txt_path, temp_dir, smart_punch_in=False, playback_speed=1.0, segment_speeds=None):
+    def fake_cut_segments(
+        concat_txt_path,
+        temp_dir,
+        smart_punch_in=False,
+        playback_speed=1.0,
+        segment_speeds=None,
+        segment_zooms=None,
+    ):
         parsed = renderer._parse_concat_file(concat_txt_path)
         captured_segments.extend(parsed)
         seg_files = [os.path.join(temp_dir, f"seg_{i:04d}.mp4") for i in range(len(parsed))]
@@ -766,4 +773,78 @@ def test_local_asset_map_has_no_fake_font_redirects_and_pip_video_overlay(tmp_pa
         assert res is not None
         mock_ffmpeg.input.assert_called_once_with(pip_vid, ss=0, t=3.5)
         mock_ffmpeg.overlay.assert_called_once()
+
+
+def test_split_keep_segments_at_transitions_and_no_ping_pong_zoom(tmp_path):
+    """Verify _split_keep_segments_at_transitions splits continuous clips at transition boundaries and odd clips do not auto-zoom."""
+    renderer = VideoRenderer(minio_client=MagicMock())
+
+    # 1. Split keep_segments at transition boundaries (boundaryTime, boundarySourceTime, timestamp)
+    initial_segments = [(0.0, 12.0), (15.0, 25.0)]
+    transitions = [
+        {"id": "tr_1", "type": "fade", "boundaryTime": 4.5, "duration": 0.5},
+        {"id": "tr_2", "type": "zoomin", "boundarySourceTime": 8.0, "duration": 0.5},
+        {"id": "tr_3", "type": "smoothleft", "timestamp": 20.0, "duration": 0.5},
+        # Near-edge transition within 0.15s should NOT split into micro-segment
+        {"id": "tr_edge", "type": "fade", "boundaryTime": 0.05, "duration": 0.5},
+    ]
+
+    split_segs = renderer._split_keep_segments_at_transitions(initial_segments, transitions)
+    assert split_segs == [
+        (0.0, 4.5),
+        (4.5, 8.0),
+        (8.0, 12.0),
+        (15.0, 20.0),
+        (20.0, 25.0),
+    ]
+
+    # 2. Verify odd-indexed clips do NOT automatically zoom when smart_punch_in=True unless explicit zoom > 1.01
+    main_vid = str(tmp_path / "source.mp4")
+    with open(main_vid, "wb") as f:
+        f.write(b"S" * 4096)
+
+    video_clips = [
+        {"id": "c0", "start": 0.0, "end": 3.0, "isCut": False},
+        {"id": "c1", "start": 3.0, "end": 6.0, "isCut": False},  # Odd index, no zoom set -> must NOT zoom!
+        {"id": "c2", "start": 6.0, "end": 9.0, "isCut": False, "zoom": 1.25},  # Explicit zoom=1.25 -> MUST zoom!
+    ]
+
+    recorded_ffmpeg_cmds = []
+
+    def fake_subprocess_run(cmd, *args, **kwargs):
+        if cmd and cmd[0] == "ffmpeg":
+            recorded_ffmpeg_cmds.append(cmd)
+            out_file = cmd[-1]
+            with open(out_file, "wb") as f_out:
+                f_out.write(b"V" * 2048)
+            res = MagicMock()
+            res.returncode = 0
+            res.stderr = ""
+            return res
+        # ffprobe mock
+        res = MagicMock()
+        res.returncode = 0
+        res.stdout = "3.0\n"
+        return res
+
+    with patch("render.video_renderer.subprocess.run", side_effect=fake_subprocess_run):
+        renderer._cut_ordered_video_clips(
+            video_clips=video_clips,
+            main_video_path=main_vid,
+            temp_dir=str(tmp_path),
+            smart_punch_in=True,
+            playback_speed=1.0,
+        )
+
+    assert len(recorded_ffmpeg_cmds) == 3
+    # Sort by output filename seg_0000, seg_0001, seg_0002
+    sorted_cmds = sorted(recorded_ffmpeg_cmds, key=lambda c: c[-1])
+    cmd_0_str = " ".join(sorted_cmds[0])
+    cmd_1_str = " ".join(sorted_cmds[1])
+    cmd_2_str = " ".join(sorted_cmds[2])
+
+    assert "crop=" not in cmd_0_str
+    assert "crop=" not in cmd_1_str, "Odd-indexed clip must NOT auto-zoom when smart_punch_in=True!"
+    assert "crop=iw/1.250:ih/1.250" in cmd_2_str, "Clip with explicit zoom=1.25 must apply crop/scale zoom!"
+
 

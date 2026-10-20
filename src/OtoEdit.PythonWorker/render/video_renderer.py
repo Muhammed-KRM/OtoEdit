@@ -279,6 +279,8 @@ class VideoRenderer:
                 explicit_idx = tr.get("afterSegmentIndex")
             if explicit_idx is None:
                 explicit_idx = tr.get("boundaryIndex")
+            if explicit_idx is None:
+                explicit_idx = tr.get("fromClipIndex")
 
             if explicit_idx is not None:
                 b_idx = int(explicit_idx)
@@ -286,8 +288,17 @@ class VideoRenderer:
                     boundary_transitions[b_idx] = tr
                     continue
 
-            if tr.get("timestamp") is not None:
-                ts = float(tr["timestamp"])
+            raw_ts = (
+                tr.get("boundaryTime")
+                if tr.get("boundaryTime") is not None
+                else (
+                    tr.get("boundarySourceTime")
+                    if tr.get("boundarySourceTime") is not None
+                    else tr.get("timestamp")
+                )
+            )
+            if raw_ts is not None:
+                ts = float(raw_ts)
                 best_idx = None
                 best_dist = 1.5  # Sınır eşleşme toleransı (saniye)
                 for b_idx in range(len(segment_files) - 1):
@@ -402,13 +413,18 @@ class VideoRenderer:
             total_duration = self._probe_video_duration(video_path)
 
         cuts = edl_json.get("cuts", [])
-        keep_segments = self._get_keep_segments(cuts, total_duration) if cuts and total_duration > 0 else []
+        keep_segments = self._get_keep_segments(cuts, total_duration) if cuts and total_duration > 0 else (
+            [(0.0, round(total_duration, 3))] if total_duration > 0 else []
+        )
         trimmed_duration = sum(end - start for start, end in keep_segments) if keep_segments else total_duration
 
         overlays = edl_json.get("overlays", [])
         transcript = edl_json.get("transcript")
         transitions = edl_json.get("transitions") or settings.get("transitions") or []
         video_clips = edl_json.get("videoClips") or settings.get("videoClips") or []
+
+        if transitions and keep_segments:
+            keep_segments = self._split_keep_segments_at_transitions(keep_segments, transitions)
         text_overlays = [ov for ov in overlays if ov.get("type") == "text"]
         image_overlays = [
             ov for ov in overlays
@@ -735,6 +751,7 @@ class VideoRenderer:
 
         concat_txt_path = os.path.join(temp_dir, "ordered_video_clips.txt")
         segment_speeds: Dict[int, float] = {}
+        segment_zooms: Dict[int, float] = {}
 
         with open(concat_txt_path, "w", encoding="utf-8") as f:
             f.write("ffconcat version 1.0\n")
@@ -769,6 +786,10 @@ class VideoRenderer:
                 if clip_speed is not None:
                     segment_speeds[idx] = float(clip_speed)
 
+                clip_zoom = float(clip.get("zoom", 1.0) or 1.0)
+                if clip_zoom > 1.01:
+                    segment_zooms[idx] = clip_zoom
+
                 f.write(f"file '{clean_src}'\n")
                 f.write(f"inpoint {start_t}\n")
                 f.write(f"outpoint {end_t}\n")
@@ -779,6 +800,7 @@ class VideoRenderer:
             smart_punch_in=smart_punch_in,
             playback_speed=playback_speed,
             segment_speeds=segment_speeds if segment_speeds else None,
+            segment_zooms=segment_zooms if segment_zooms else None,
         )
 
     def _cut_segments(
@@ -787,11 +809,12 @@ class VideoRenderer:
         temp_dir: str,
         smart_punch_in: bool = False,
         playback_speed: float = 1.0,
-        segment_speeds: Optional[Dict[int, float]] = None
+        segment_speeds: Optional[Dict[int, float]] = None,
+        segment_zooms: Optional[Dict[int, float]] = None,
     ) -> Tuple[List[str], List[float], str]:
         """
         Segmentleri keser ve sürelerini ölçer.
-        Opsiyonel Smart Punch-In (%10 dinamik yakınlaştırma) ve hız çarpanı uygular.
+        Yalnızca açıkça klip bazlı zoom (>1.01) belirtilmişse yakınlaştırma ve hız çarpanı uygular.
         Geri dönüş: (segment_files, actual_durations, merge_concat_path)
         """
         segments = self._parse_concat_file(concat_txt_path)
@@ -810,11 +833,15 @@ class VideoRenderer:
 
             seg_speed = float((segment_speeds or {}).get(idx, playback_speed) or 1.0)
             seg_speed = max(0.5, min(2.0, seg_speed))
+            seg_zoom = float((segment_zooms or {}).get(idx, 1.0) or 1.0)
 
             vf_parts: List[str] = []
-            if smart_punch_in and idx % 2 == 1:
-                # Tek indeksli segmentlerde %10 merkez punch-in zoom
-                vf_parts.append("crop=iw/1.1:ih/1.1:(iw-ow)/2:(ih-oh)/2,scale=trunc(iw*1.1/2)*2:trunc(ih*1.1/2)*2")
+            if seg_zoom > 1.01:
+                z_val = min(2.5, seg_zoom)
+                vf_parts.append(
+                    f"crop=iw/{z_val:.3f}:ih/{z_val:.3f}:(iw-ow)/2:(ih-oh)/2,"
+                    f"scale=trunc(iw*{z_val:.3f}/2)*2:trunc(ih*{z_val:.3f}/2)*2"
+                )
             if abs(seg_speed - 1.0) > 0.01:
                 vf_parts.append(f"setpts={1.0 / seg_speed:.4f}*PTS")
 
@@ -1075,6 +1102,53 @@ class VideoRenderer:
         elif target_format == "1:1":
             return "crop=ih:ih:(iw-ow)/2:0"
         return ""
+
+    def _split_keep_segments_at_transitions(
+        self,
+        keep_segments: List[Tuple[float, float]],
+        transitions: List[Dict[str, Any]],
+    ) -> List[Tuple[float, float]]:
+        """
+        Kullanıcı zaman çizgisinde kesim boşluğu olmadan bir klibi böldüğünde veya geçiş eklediğinde,
+        transition sınır zamanı (boundaryTime / boundarySourceTime / timestamp) tek bir korunan
+        segmentin (s, e) içine düşüyorsa (s + 0.15 < b_time < e - 0.15), segmenti (s, b_time) ve
+        (b_time, e) olarak ikiye böler.
+        """
+        if not keep_segments or not transitions:
+            return list(keep_segments or [])
+
+        result = list(keep_segments)
+        for tr in transitions:
+            if not isinstance(tr, dict):
+                continue
+            raw_bt = (
+                tr.get("boundaryTime")
+                if tr.get("boundaryTime") is not None
+                else (
+                    tr.get("boundarySourceTime")
+                    if tr.get("boundarySourceTime") is not None
+                    else tr.get("timestamp")
+                )
+            )
+            if raw_bt is None:
+                continue
+            try:
+                b_time = round(float(raw_bt), 3)
+            except (ValueError, TypeError):
+                continue
+            if b_time <= 0:
+                continue
+
+            next_result: List[Tuple[float, float]] = []
+            for s, e in result:
+                if s + 0.15 < b_time < e - 0.15:
+                    next_result.append((round(s, 3), b_time))
+                    next_result.append((b_time, round(e, 3)))
+                else:
+                    next_result.append((s, e))
+            result = next_result
+
+        return result
 
     def _get_keep_segments(self, cuts: List[Dict[str, Any]], total_duration: float) -> List[Tuple[float, float]]:
         """Kesilecek kısımları ayıklayıp tutulacak aralıkları döner."""

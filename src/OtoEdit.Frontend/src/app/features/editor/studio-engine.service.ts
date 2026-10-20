@@ -923,52 +923,61 @@ export class StudioEngineService {
     return this.audioCtx;
   }
 
+  private audioElementCache = new Map<string, HTMLAudioElement>();
+
   /**
-   * Stüdyo ses efektini (SFX) 0ms gecikme ile Web Audio API üzerinden sentezler ve çalar.
+   * Gerçek Stüdyo Ses Efektini (/assets/sfx/{presetId}.wav veya özel ses URL'si) çalar.
    */
-  playSfxPreset(presetId: string, volume = 0.8): void {
+  playSfxPreset(presetId: string, volume = 0.85, customUrl?: string): void {
     try {
-      const ctx = this.getAudioContext();
-      const buffer = this.getOrCreateSfxBuffer(ctx, presetId);
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
+      const cleanId = (presetId || 'whoosh-fast').trim();
+      const targetUrl =
+        customUrl && (customUrl.startsWith('http') || customUrl.startsWith('/assets/') || customUrl.startsWith('/api/'))
+          ? customUrl
+          : `/assets/sfx/${cleanId}.wav`;
 
-      const gain = ctx.createGain();
-      gain.gain.value = Math.max(0, Math.min(2.0, volume));
+      let baseAudio = this.audioElementCache.get(targetUrl);
+      if (!baseAudio) {
+        baseAudio = new Audio(targetUrl);
+        baseAudio.preload = 'auto';
+        this.audioElementCache.set(targetUrl, baseAudio);
+      }
 
-      source.connect(gain);
-      gain.connect(ctx.destination);
-      source.start(0);
+      const clone = baseAudio.cloneNode(true) as HTMLAudioElement;
+      clone.volume = Math.max(0, Math.min(1.0, volume));
+      clone.currentTime = 0;
+      clone.play().catch(() => {
+        // Yedek WebAudio geri dönüşü
+        const ctx = this.getAudioContext();
+        const buffer = this.getOrCreateSfxBuffer(ctx, cleanId);
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        const gain = ctx.createGain();
+        gain.gain.value = Math.max(0, Math.min(2.0, volume));
+        source.connect(gain);
+        gain.connect(ctx.destination);
+        source.start(0);
+      });
     } catch (err) {
       console.warn('[STUDIO-SFX] Ses çalınamadı:', err);
     }
   }
 
-  playSynthesizedSfx(presetId: string, volume = 0.8): void {
-    this.playSfxPreset(presetId, volume);
+  playSynthesizedSfx(presetId: string, volume = 0.85, customUrl?: string): void {
+    this.playSfxPreset(presetId, volume, customUrl);
   }
 
   generateSfxWavDataUri(presetId: string, _duration?: number): string {
-    return this.getSfxDataUrl(presetId);
+    const cleanId = (presetId || 'whoosh-fast').trim();
+    return `/assets/sfx/${cleanId}.wav`;
   }
 
   /**
-   * SFX presetini gerçek bir WAV Data URL'sine dönüştürür.
+   * SFX presetinin gerçek stüdyo WAV dosya yolunu döndürür.
    */
   getSfxDataUrl(presetId: string): string {
-    const cached = this.sfxBlobUrlCache.get(presetId);
-    if (cached) return cached;
-
-    try {
-      const ctx = this.getAudioContext();
-      const buffer = this.getOrCreateSfxBuffer(ctx, presetId);
-      const wavBlob = this.audioBufferToWavBlob(buffer);
-      const url = URL.createObjectURL(wavBlob);
-      this.sfxBlobUrlCache.set(presetId, url);
-      return url;
-    } catch {
-      return '';
-    }
+    const cleanId = (presetId || 'whoosh-fast').trim();
+    return `/assets/sfx/${cleanId}.wav`;
   }
 
   private getOrCreateSfxBuffer(ctx: AudioContext, presetId: string): AudioBuffer {
