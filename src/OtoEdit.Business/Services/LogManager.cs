@@ -37,6 +37,7 @@ public class LogManager : ILogService
         }
         catch (Exception ex)
         {
+            _context.Entry(log).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
             _logger.LogError(ex, "Endpoint log DB kaydı başarısız oldu.");
         }
     }
@@ -49,16 +50,17 @@ public class LogManager : ILogService
         string? girdiMetadata = null,
         CancellationToken cancellationToken = default)
     {
+        PipelineLog? log = null;
         try
         {
-            var log = new PipelineLog
+            log = new PipelineLog
             {
                 VideoId = videoId,
                 ProjectId = projectId,
                 Asama = asama,
                 Durum = "Basladi",
                 TraceId = traceId,
-                GirdiMetadata = girdiMetadata != null ? SensitiveDataMasker.MaskJson(girdiMetadata) : null,
+                GirdiMetadata = SensitiveDataMasker.EnsureValidJsonb(girdiMetadata),
                 BaslangicZamani = DateTime.UtcNow,
                 CreatedAt = DateTime.UtcNow
             };
@@ -69,6 +71,10 @@ public class LogManager : ILogService
         }
         catch (Exception ex)
         {
+            if (log != null)
+            {
+                _context.Entry(log).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+            }
             _logger.LogError(ex, "Pipeline start log DB kaydı başarısız oldu.");
             return 0;
         }
@@ -86,7 +92,7 @@ public class LogManager : ILogService
                 log.Durum = "Tamamlandi";
                 log.BitisZamani = DateTime.UtcNow;
                 log.SureMs = (int)(log.BitisZamani.Value - log.BaslangicZamani).TotalMilliseconds;
-                log.CiktiMetadata = ciktiMetadata != null ? SensitiveDataMasker.MaskJson(ciktiMetadata) : null;
+                log.CiktiMetadata = SensitiveDataMasker.EnsureValidJsonb(ciktiMetadata);
                 await _context.SaveChangesAsync(cancellationToken);
             }
         }

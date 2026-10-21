@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace OtoEdit.Business.Helpers;
@@ -40,4 +41,32 @@ public static class SensitiveDataMasker
     }
 
     public static string? MaskJson(string? input) => Mask(input);
+
+    /// <summary>
+    /// PostgreSQL jsonb kolonlarına (girdi_metadata, cikti_metadata) yazılacak metnin
+    /// her zaman geçerli bir JSON dokümanı olmasını garanti eder (22P02 hatasını önler).
+    /// </summary>
+    public static string? EnsureValidJsonb(string? input)
+    {
+        var masked = Mask(input);
+        if (string.IsNullOrWhiteSpace(masked))
+            return null;
+
+        var trimmed = masked.Trim();
+        if ((trimmed.StartsWith('{') && trimmed.EndsWith('}')) ||
+            (trimmed.StartsWith('[') && trimmed.EndsWith(']')))
+        {
+            try
+            {
+                using var _ = JsonDocument.Parse(trimmed);
+                return trimmed;
+            }
+            catch
+            {
+                // Geçersiz JSON ise aşağıda güvenli nesneye sarılır
+            }
+        }
+
+        return JsonSerializer.Serialize(new { message = masked });
+    }
 }

@@ -1,6 +1,9 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
+using Microsoft.EntityFrameworkCore;
 using OtoEdit.API.Hubs;
+using OtoEdit.Business.Helpers;
 using OtoEdit.Data.Context;
 using OtoEdit.Data.Entities;
 using OtoEdit.Data.Enums;
@@ -61,32 +64,10 @@ public class InternalLogsController : ControllerBase
             parsedStage = stageVal;
         }
 
-        try
+        // SignalR ile bağlı Angular istemcilerine canlı bildirim (DB log hatasından bağımsız her zaman gönder)
+        if (parsedProjectId.HasValue)
         {
-            DateTime baslangic = dto.TimestampUtc.HasValue
-                ? (dto.TimestampUtc.Value.Kind == DateTimeKind.Unspecified
-                    ? DateTime.SpecifyKind(dto.TimestampUtc.Value, DateTimeKind.Utc)
-                    : dto.TimestampUtc.Value.ToUniversalTime())
-                : DateTime.UtcNow;
-
-            var logEntity = new PipelineLog
-            {
-                ProjectId = parsedProjectId,
-                VideoId = parsedVideoId,
-                Asama = parsedStage,
-                Durum = dto.Status ?? "InProgress",
-                BaslangicZamani = baslangic,
-                HataMesaji = dto.ErrorMessage,
-                GirdiMetadata = dto.DetailsJson,
-                CiktiMetadata = dto.Message,
-                CreatedAt = DateTime.UtcNow
-            };
-
-            await _context.PipelineLogs.AddAsync(logEntity, cancellationToken);
-            await _context.SaveChangesAsync(cancellationToken);
-
-            // SignalR ile bağlı Angular istemcilerine canlı bildirim
-            if (parsedProjectId.HasValue)
+            try
             {
                 await _hubContext.Clients
                     .Group($"project-{parsedProjectId.Value}")
@@ -99,14 +80,52 @@ public class InternalLogsController : ControllerBase
                         mesaj = dto.Message ?? string.Empty
                     }, cancellationToken);
             }
+            catch (Exception hubEx)
+            {
+                _logger.LogWarning(hubEx, "SignalR AnalysisProgress bildirimi gönderilemedi: ProjectId={ProjectId}", parsedProjectId.Value);
+            }
+        }
+
+        PipelineLog? logEntity = null;
+        try
+        {
+            DateTime baslangic = dto.TimestampUtc.HasValue
+                ? (dto.TimestampUtc.Value.Kind == DateTimeKind.Unspecified
+                    ? DateTime.SpecifyKind(dto.TimestampUtc.Value, DateTimeKind.Utc)
+                    : dto.TimestampUtc.Value.ToUniversalTime())
+                : DateTime.UtcNow;
+
+            var ciktiJson = !string.IsNullOrWhiteSpace(dto.Message)
+                ? JsonSerializer.Serialize(new { message = dto.Message, progress = dto.ProgressPercentage })
+                : null;
+
+            logEntity = new PipelineLog
+            {
+                ProjectId = parsedProjectId,
+                VideoId = parsedVideoId,
+                Asama = parsedStage,
+                Durum = dto.Status ?? "InProgress",
+                BaslangicZamani = baslangic,
+                HataMesaji = dto.ErrorMessage,
+                GirdiMetadata = SensitiveDataMasker.EnsureValidJsonb(dto.DetailsJson),
+                CiktiMetadata = ciktiJson,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.PipelineLogs.AddAsync(logEntity, cancellationToken);
+            await _context.SaveChangesAsync(cancellationToken);
 
             return Ok(new { success = true, logId = logEntity.Id });
         }
         catch (Exception ex)
         {
+            if (logEntity != null)
+            {
+                _context.Entry(logEntity).State = EntityState.Detached;
+            }
             _logger.LogError(ex, "Pipeline logu kaydedilirken hata oluştu: ProjectId={ProjectId}, Stage={Stage}", dto.ProjectId, dto.Stage);
             // Internal log servisi hata durumunda dahi istemciyi (worker) kitlememeli
-            return StatusCode(StatusCodes.Status500InternalServerError, new { success = false, error = ex.Message });
+            return Ok(new { success = false, error = ex.Message });
         }
     }
 }

@@ -6071,6 +6071,21 @@ export class EditorComponent implements OnInit, OnDestroy {
   loadEdl(): void {
     this.edlService.getEdl(this.projectId).subscribe({
       next: (res) => {
+        // ÖNEMLİ: totalDuration sinyalini her şeyden (ve özellikle seqTimestamp hesabından) ÖNCE güncelle!
+        // Aksi halde varsayılan 100sn sınırı nedeniyle 100. saniyeden sonraki tüm katmanlar 01:40'a kırpılır.
+        const segs = res.edl.transcript?.segments || [];
+        const maxSegEnd = segs.length > 0 ? Math.max(...segs.map((s: any) => Number(s.end) || 0)) : 0;
+        const ovs = res.edl.overlays || [];
+        const maxOvEnd = ovs.length > 0 ? Math.max(...ovs.map((o: any) => (Number(o.timestamp) || 0) + (Number(o.duration) || 4))) : 0;
+        const resolvedDuration = Math.max(
+          Number(res.edl.duration) || 0,
+          maxSegEnd,
+          maxOvEnd
+        );
+        if (resolvedDuration > 5) {
+          this.totalDuration.set(resolvedDuration);
+        }
+
         // Eski V1 sonuna eklenmiş harici videoClips kayıtlarını temizle ve serbest B-Roll katmanına dönüştür
         const rawVClips: VideoClipItem[] = res.edl.videoClips || res.edl.settings?.videoClips || [];
         if (rawVClips.some(c => Boolean(c.sourceUrl))) {
@@ -6133,11 +6148,17 @@ export class EditorComponent implements OnInit, OnDestroy {
           res.edl.suggestions = this.studio.generateProactiveSuggestions(res.edl);
         }
         this.edl.set(res.edl);
-        // Tüm katmanların Canonical Sequence Time (seqTimestamp) değerlerini kesim haritasına göre senkronize et
+        // Tüm katmanların Canonical Sequence Time (seqTimestamp) değerlerini gerçek totalDuration ve kesim haritasına göre senkronize et
+        const hasCuts = (res.edl.cuts?.length || 0) > 0;
         if (res.edl.overlays && res.edl.overlays.length > 0) {
           for (const ov of res.edl.overlays) {
-            if (ov.seqTimestamp === undefined || ov.seqTimestamp === null || isNaN(Number(ov.seqTimestamp))) {
-              ov.seqTimestamp = parseFloat(this.getVisTimeFromRawTime(ov.timestamp || 0).toFixed(2));
+            const rawTs = Number(ov.timestamp) || 0;
+            const currentSeq = ov.seqTimestamp !== undefined && ov.seqTimestamp !== null ? Number(ov.seqTimestamp) : NaN;
+            const isClampedAtDefault100 = Math.abs(currentSeq - 100) < 0.05 && rawTs > 100.5;
+            if (!hasCuts) {
+              ov.seqTimestamp = parseFloat(rawTs.toFixed(2));
+            } else if (isNaN(currentSeq) || isClampedAtDefault100) {
+              ov.seqTimestamp = parseFloat(this.getVisTimeFromRawTime(rawTs).toFixed(2));
             }
           }
         }
@@ -7046,6 +7067,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     const video = this.videoRef?.nativeElement;
     if (video && video.duration && !isNaN(video.duration)) {
       this.totalDuration.set(video.duration);
+      const curEdl = this.edl();
+      if (curEdl?.overlays && curEdl.overlays.length > 0 && (curEdl.cuts?.length || 0) === 0) {
+        for (const ov of curEdl.overlays) {
+          ov.seqTimestamp = parseFloat((Number(ov.timestamp) || 0).toFixed(2));
+        }
+      }
     }
     if (video && video.videoWidth && video.videoHeight) {
       const ratio = `${video.videoWidth} / ${video.videoHeight}`;
@@ -7125,13 +7152,19 @@ export class EditorComponent implements OnInit, OnDestroy {
    */
   getOverlaySeqStart(ov: OverlayItem | any): number {
     if (!ov) return 0;
-    if (this.isAnyRippleActive()) {
-      if (ov.seqTimestamp !== undefined && ov.seqTimestamp !== null && !isNaN(Number(ov.seqTimestamp))) {
-        return Math.max(0, Number(ov.seqTimestamp));
-      }
-      return Math.max(0, this.getVisTimeFromRawTime(Number(ov.timestamp) || 0));
+    const rawTs = Math.max(0, Number(ov.timestamp) || 0);
+    // Kesim (cut) yoksa veya Ripple kapalıysa Sequence Time ile Raw Time birebir aynıdır
+    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
+      return rawTs;
     }
-    return Math.max(0, Number(ov.timestamp) || 0);
+    if (ov.seqTimestamp !== undefined && ov.seqTimestamp !== null && !isNaN(Number(ov.seqTimestamp))) {
+      const seqVal = Math.max(0, Number(ov.seqTimestamp));
+      // Eski 100sn varsayılan sınırına takılmış (clamped) değerleri otomatik onar
+      if (!(Math.abs(seqVal - 100) < 0.05 && rawTs > 100.5)) {
+        return seqVal;
+      }
+    }
+    return Math.max(0, this.getVisTimeFromRawTime(rawTs));
   }
 
   getTimeAtClientX(clientX: number): number {
