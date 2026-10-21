@@ -107,12 +107,13 @@ XFADE_TRANSITION_MAP: Dict[str, str] = {
     "hrslice": "hrslice",
     "vuslice": "vuslice",
     "vdslice": "vdslice",
-    # Blur, Squeeze & Zoom Geçişleri
+    # Blur, Squeeze, Radial & Zoom Geçişleri
     "hblur": "hblur",
     "squeezeh": "squeezeh",
     "squeezev": "squeezev",
     "zoomin": "zoomin",
     "zoom-in": "zoomin",
+    "radial": "radial",
     # Rüzgar (Wind) Geçişleri
     "hlwind": "hlwind",
     "hrwind": "hrwind",
@@ -559,6 +560,7 @@ class VideoRenderer:
                     badge_img_ov["type"] = "image"
                     badge_img_ov["source"] = badge_png
                     badge_img_ov["scale"] = float(ov.get("scale", 1.0))
+                    badge_img_ov["isTextBadge"] = True
                     mapped_image_overlays.append(badge_img_ov)
                     logger.info(f"🎨 Metin rozeti PNG olarak görsel katmanına dönüştürüldü: {badge_png}")
                 except Exception as ex:

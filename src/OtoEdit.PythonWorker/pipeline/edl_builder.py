@@ -57,6 +57,7 @@ class EdlBuilder:
         transitions: Optional[List[Dict[str, Any]]] = None,
         sfx_clips: Optional[List[Dict[str, Any]]] = None,
         video_clips: Optional[List[Dict[str, Any]]] = None,
+        video_path: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Tüm analiz çıktılarını tek bir EDL JSON sözlüğüne derler."""
         logger.info(f"EDL dokümanı inşa ediliyor: ProjectId={project_id}, VideoId={video_id}")
@@ -161,27 +162,32 @@ class EdlBuilder:
             float(transcript.duration) if (transcript and float(getattr(transcript, "duration", 0.0)) > 1.0) else 0.0
         )
 
-        # 3.5 AutoDirectorComposer: Otonom Yönetmen katmanlarını (hook, highlight, emoji sticker, geçiş, SFX) ekle
-        if auto_director or extra_overlays:
+        # 3.5 LlmDirector (5 Aşamalı Multimodal Otonom Yönetmen): Yalnızca auto_director açık olduğunda çalışır!
+        if auto_director:
             try:
-                composed = AutoDirectorComposer.compose(
-                    transcript=transcript_dict,
+                from pipeline.llm_director import LlmDirector
+                director = LlmDirector(enable_web_crawl=bool(video_path))
+                composed = director.compose_intelligent_plan(
+                    segments=transcript_dict.get("segments", []),
                     cuts=sorted_cuts,
-                    existing_overlays=overlays,
                     video_duration=effective_duration,
-                    target_format=target_format_str,
+                    face_positions=face_data,
+                    existing_overlays=overlays,
+                    existing_sfx=merged_sfx_clips,
+                    existing_transitions=merged_transitions,
+                    subtitles_enabled=bool(subtitles_enabled),
+                    video_path=video_path,
                 )
+                overlays = []
                 for ad_ov in composed.get("overlays", []):
                     if isinstance(ad_ov, OverlayItem):
                         overlays.append(ad_ov)
                     elif isinstance(ad_ov, dict):
                         overlays.append(OverlayItem(**ad_ov))
-                for ad_tr in composed.get("transitions", []):
-                    merged_transitions.append(dict(ad_tr))
-                for ad_sfx in composed.get("sfxClips", []):
-                    merged_sfx_clips.append(dict(ad_sfx))
+                merged_transitions = [dict(ad_tr) for ad_tr in composed.get("transitions", [])]
+                merged_sfx_clips = [dict(ad_sfx) for ad_sfx in composed.get("sfxClips", composed.get("sfx_list", []))]
             except Exception as ad_err:
-                logger.warning(f"AutoDirectorComposer uyarısı: {ad_err}")
+                logger.warning(f"LlmDirector uyarısı: {ad_err}")
 
         # 4. Otonom Yönetmen (ProactiveDirector) önerilerini üret
         proactive_sugs = []

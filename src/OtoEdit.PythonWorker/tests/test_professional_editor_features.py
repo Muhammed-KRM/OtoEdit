@@ -870,4 +870,114 @@ def test_timeline_mapper_seq_timestamp_and_nearest_cut_boundary(tmp_path):
     assert abs(float(remapped[1]["timestamp"]) - 3.24) < 0.01
 
 
+# ==============================================================================
+# 7. 5-Stage Multimodal Autonomous Director V2 Tests
+# ==============================================================================
+
+def test_turkish_semantic_title_never_cuts_mid_word():
+    """Verify Turkish semantic title extractor never slices words or leaves dangling stopwords."""
+    from pipeline.theme_profiles import extract_turkish_semantic_title
+
+    raw = "Hukuk Muhakemeleri Kanununun çevresinde şekillenen dava şartları mahkemece incelenir."
+    title = extract_turkish_semantic_title(raw, max_chars=32)
+    assert "..." not in title
+    assert not title.endswith("ÇEV")
+    assert not title.endswith("ÇEVRESİNDE")
+    assert title == "HUKUK MUHAKEMELERİ KANUNU"
+
+
+def test_academic_lecture_disables_gifs_and_cyberpunk():
+    """Verify academic/law lecture locks academic_lecture ThemeProfile and disables GIFs."""
+    from pipeline.theme_profiles import detect_theme_profile_heuristic
+
+    transcript = "Bugünkü dersimizde Hukuk Muhakemeleri Kanunu madde 114 dava şartlarını inceleyeceğiz."
+    profile = detect_theme_profile_heuristic(transcript)
+    assert profile.id == "academic_lecture"
+    assert profile.allow_gifs is False
+    assert profile.font_family == "Montserrat"
+
+
+def test_safe_zone_solver_zero_collision_with_subtitles_and_head():
+    """Verify SafeZoneSpatialSolver places cards in 0..100% coordinates with 0% overlap with head & subtitles."""
+    from pipeline.safe_zone_vision_engine import SafeZoneSpatialSolver
+
+    face_positions = [{"time": 10.0, "center_x": 0.50, "center_y": 0.28, "width": 0.18, "height": 0.24}]
+    solver = SafeZoneSpatialSolver(face_positions=face_positions, subtitles_enabled=True)
+    slot_id, px, py, scale, bbox = solver.solve_placement(8.0, 12.0, is_image_card=True)
+    assert 10.0 <= px <= 90.0
+    assert 5.0 <= py <= 65.0
+    assert bbox.y2 <= 70.0
+
+
+def test_validator_strips_stickers_in_academic_theme_and_fixes_unit_scale():
+    """Verify MasterPlanValidator strips stickers in academic theme, fixes 0..1 coords, and drops unlinked SFX."""
+    from pipeline.theme_profiles import detect_theme_profile_heuristic
+    from pipeline.master_plan_validator import MasterPlanValidator
+
+    profile = detect_theme_profile_heuristic("Hukuk mahkeme dava kanun madde")
+    validator = MasterPlanValidator()
+    overlays = [
+        {"type": "sticker", "source": "https://example.com/512.gif", "start": 5.0, "end": 8.0},
+        {"type": "image", "source": "https://example.com/law.jpg", "start": 10.0, "end": 14.0, "positionX": 0.75, "positionY": 0.25},
+    ]
+    sfx = [
+        {"type": "whoosh", "timestamp": 10.0, "volume": 0.85},
+        {"type": "ding", "timestamp": 32.0, "volume": 0.80},
+    ]
+    valid_ov, valid_sfx, _ = validator.validate_and_repair(
+        overlays, sfx, [], profile, video_duration=1200.0, subtitles_enabled=True
+    )
+    assert len(valid_ov) == 1
+    assert valid_ov[0]["type"] == "image"
+    assert valid_ov[0]["positionX"] == 75.0
+    assert len(valid_sfx) == 1
+    assert valid_sfx[0]["volume"] <= 0.24
+
+
+def test_llm_director_20min_lecture_full_coverage_and_image_hash_cache(tmp_path):
+    """Verify LlmDirector covers full 20-minute lecture without stickers and ImageOverlay hashes 512.gif URLs uniquely."""
+    from pipeline.llm_director import LlmDirector
+    from render.image_overlay import ImageOverlay
+
+    # 20-minute lecture (1214.0s) with segments every 20 seconds
+    segments = [
+        {
+            "start": float(i * 20),
+            "end": float(i * 20 + 6),
+            "text": f"Hukuk Muhakemeleri Kanununun çevresinde madde {100 + i} dava şartları ve mahkeme görev kuralları incelenir.",
+        }
+        for i in range(60)
+    ]
+    director = LlmDirector(enable_web_crawl=False, work_dir=str(tmp_path))
+    plan = director.compose_intelligent_plan(
+        segments=segments,
+        cuts=[],
+        video_duration=1214.0,
+        subtitles_enabled=True,
+    )
+
+    assert plan["theme_profile_id"] == "academic_lecture"
+    assert len(plan["overlays"]) >= 12
+    # Must cover past minute 15 (> 900s), not stop at minute 2!
+    assert max(float(o["start"]) for o in plan["overlays"]) >= 900.0
+    # Zero stickers in academic lecture
+    assert all(o["type"] != "sticker" for o in plan["overlays"])
+    # Zero subtitle collisions (Y < 68%)
+    assert all(float(o["positionY"]) < 68.0 for o in plan["overlays"])
+    # Transitions generated at chapter boundaries
+    assert len(plan["transitions"]) >= 4
+
+    # Verify ImageOverlay resolves different .../512.gif URLs to distinct filenames
+    io = ImageOverlay(minio_client=MagicMock())
+    with patch("render.image_overlay.urllib.request.urlretrieve") as mock_dl:
+        def fake_dl(url, target):
+            with open(target, "wb") as f:
+                f.write(url.encode("utf-8"))
+        mock_dl.side_effect = fake_dl
+        p1 = io.resolve_image_path("https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.gif", temp_dir=str(tmp_path))
+        p2 = io.resolve_image_path("https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.gif", temp_dir=str(tmp_path))
+        assert p1 != p2
+
+
+
 

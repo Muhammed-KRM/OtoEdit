@@ -67,7 +67,8 @@ class AudioMixer:
                     "amix",
                     inputs=2,
                     duration="first",
-                    dropout_transition=2
+                    dropout_transition=2,
+                    normalize=0,
                 )
                 logger.info(f"🎧 AudioMixer: Auto-Ducking başarıyla uygulandı (vol={volume}, thresh={threshold})")
                 return mixed_audio
@@ -77,7 +78,8 @@ class AudioMixer:
                     "amix",
                     inputs=2,
                     duration="first",
-                    dropout_transition=2
+                    dropout_transition=2,
+                    normalize=0,
                 )
                 logger.info(f"🎧 AudioMixer: BGM başarıyla eklendi (vol={volume}, ducking=False)")
                 return mixed_audio

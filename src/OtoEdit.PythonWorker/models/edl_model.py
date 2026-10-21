@@ -47,14 +47,26 @@ class OverlayItem(BaseModel):
     id: str
     type: str  # "text", "image", "sticker", "video", "gif"
     content: Optional[str] = None  # Metin veya resim açıklaması
+    text: Optional[str] = None     # Frontend uyumlu metin alanı
     source: Optional[str] = None   # Resim URL'si veya MinIO yolu
     sourceUrl: Optional[str] = None
     font: Optional[str] = "Montserrat-Bold"
+    fontFamily: Optional[str] = None
     fontSize: Optional[int] = 48
     color: Optional[str] = "#FFFFFF"
     backgroundColor: Optional[str] = "#00000080"
-    timestamp: float
+    timestamp: float = 0.0
+    start: Optional[float] = None
+    end: Optional[float] = None
+    seqTimestamp: Optional[float] = None
     duration: float = 5.0
+    preset: Optional[str] = None
+    backgroundBox: Optional[bool] = None
+    boxColor: Optional[str] = None
+    boxOpacity: Optional[float] = None
+    shape: Optional[str] = None
+    anchorSlot: Optional[str] = None
+    isTextBadge: Optional[bool] = None
     animation: Optional[str] = "pop-up"  # "pop-up", "fade", "slide-left", "bounce", "typewriter", "glitch", "blur-in", "zoom-crash"
     exitAnimation: Optional[str] = "fade"  # "fade", "pop-up", "slide-down", "slide-up", "scale-out", "none"
     loopAnimation: Optional[str] = "none"  # "none", "pulse", "float", "wiggle", "shake", "pendulum"

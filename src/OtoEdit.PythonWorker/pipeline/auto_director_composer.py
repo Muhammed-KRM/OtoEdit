@@ -75,16 +75,19 @@ class AutoDirectorComposer:
 
     @staticmethod
     def _extract_impact_phrase(text: str, min_words: int = 2, max_words: int = 4) -> str:
-        """Metin segmentinden 2-4 kelimelik vurucu bir başlık çıkarır."""
+        """Metin segmentinden kelime/tamlama ortasından kesilmeyen anlamlı bir Türkçe başlık çıkarır."""
         if not text:
-            return "ÖNEMLİ DETAY!"
+            return "ÖNEMLİ DETAY"
+        from pipeline.theme_profiles import extract_turkish_semantic_title
+        semantic = extract_turkish_semantic_title(text, max_chars=32)
+        if semantic:
+            return semantic
         cleaned = re.sub(r"[^\w\sçğıöşüÇĞİÖŞÜ!?]", "", text).strip()
         words = [w for w in cleaned.split() if len(w) > 1]
         if not words:
-            return "BUNU KAÇIRMA!"
+            return "ÖNEMLİ DETAY"
         selected = words[:max(min_words, min(len(words), max_words))]
-        phrase = " ".join(selected).upper()
-        return phrase
+        return " ".join(selected).upper()
 
     @classmethod
     def compose(
@@ -270,8 +273,12 @@ class AutoDirectorComposer:
                 codepoint = emoji_meta["codepoint"]
                 gif_url = f"https://fonts.gstatic.com/s/e/notoemoji/latest/{codepoint}/512.gif"
 
-                if idx < len(active_segments):
-                    raw_ts = float(active_segments[idx]["start"]) + 0.4
+                if active_segments:
+                    seg_idx = min(
+                        len(active_segments) - 1,
+                        int(round(idx * (len(active_segments) - 1) / max(1, target_sticker_count - 1))),
+                    )
+                    raw_ts = float(active_segments[seg_idx]["start"]) + 0.4
                 else:
                     raw_ts = 1.2 + idx * step
 

@@ -1,4 +1,6 @@
 """OtoEdit Image Overlay - FFmpeg overlay ile görsel, sticker, animasyonlu GIF ve logo yerleştirme."""
+import base64
+import hashlib
 import os
 import urllib.request
 from typing import Dict, Any, List, Optional
@@ -36,8 +38,29 @@ class ImageOverlay:
             return source
 
         os.makedirs(temp_dir, exist_ok=True)
-        filename = os.path.basename(source.split("?")[0]) or "overlay_img.png"
-        local_target = os.path.join(temp_dir, f"img_{filename}")
+
+        # DÜZELTME 1: data:image/... Base64 çıkartmalarını ve görsellerini dosyaya çöz
+        if source.startswith("data:image/"):
+            try:
+                header, b64_data = source.split(",", 1)
+                ext = ".png" if "png" in header else (".gif" if "gif" in header else ".jpg")
+                digest = hashlib.md5(b64_data[:256].encode("utf-8")).hexdigest()[:12]
+                b64_target = os.path.join(temp_dir, f"b64_{digest}{ext}")
+                if not os.path.isfile(b64_target):
+                    with open(b64_target, "wb") as f:
+                        f.write(base64.b64decode(b64_data))
+                return b64_target
+            except Exception as ex:
+                logger.warning(f"Base64 görsel çözümlenemedi: {ex}")
+                return None
+
+        # DÜZELTME 2: os.path.basename yerine MD5 URL hash kullanarak .../512.gif çakışmasını önle
+        clean_path = source.split("?")[0]
+        ext = os.path.splitext(clean_path)[1].lower()
+        if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".apng", ".mp4", ".mov", ".webm", ".mkv"):
+            ext = ".png"
+        url_hash = hashlib.md5(source.encode("utf-8")).hexdigest()[:12]
+        local_target = os.path.join(temp_dir, f"img_{url_hash}{ext}")
 
         if os.path.isfile(local_target):
             return local_target
@@ -147,7 +170,7 @@ class ImageOverlay:
                         logger.warning(f"Chroma key uygulanamadı: {ex}")
 
                 # 3. Şekil Maskesi (Dairesel Avatar / Yuvarlatılmış Kart / Yıldız / Kalp / Altıgen / Elmas)
-                mask_shape = str(ov.get("maskShape") or "").lower().strip()
+                mask_shape = str(ov.get("maskShape") or ov.get("shape") or "").lower().strip()
                 if mask_shape in _SUPPORTED_SHAPES:
                     try:
                         radius = int(ov.get("borderRadius") or 32)
@@ -214,9 +237,16 @@ class ImageOverlay:
                 scale_w = base_w if base_w % 2 == 0 else base_w + 1
                 img_input = img_input.filter("scale", max(2, scale_w), -1)
             else:
-                # UI'da scale=1.0 demek, 860px genişliğindeki player'da 160px genişlik kaplamak demek (160/860 = ~%18.6).
-                base_ui_ratio = (200.0 / 860.0) if is_video else (160.0 / 860.0)
-                scale_w = int(base_w * base_ui_ratio * scale)
+                is_text_badge = bool(ov.get("isTextBadge") or ov.get("is_text_badge"))
+                if is_text_badge:
+                    # PillowGraphicsEngine tarafından üretilen metin rozetlerinin doğal genişliğini koru (~%42 tuval genişliği)
+                    badge_scale = (scale / 160.0) if scale > 2.5 else scale
+                    scale_w = int(base_w * 0.42 * badge_scale)
+                else:
+                    # UI'da scale=1.0 demek, 860px genişliğindeki player'da 160px-200px genişlik kaplamak demek
+                    base_ui_ratio = (200.0 / 860.0) if is_video else (160.0 / 860.0)
+                    norm_scale = (scale / 100.0) if scale > 2.5 else scale
+                    scale_w = int(base_w * base_ui_ratio * norm_scale)
                 scale_w = scale_w if scale_w % 2 == 0 else scale_w + 1
                 img_input = img_input.filter("scale", max(2, scale_w), -1)
 
@@ -229,6 +259,10 @@ class ImageOverlay:
             # Konum, Giriş/Döngü Animasyonu ve Keyframe Yörüngesi
             pos_x = ov.get("positionX")
             pos_y = ov.get("positionY")
+            if pos_x is not None and pos_y is not None:
+                if 0.0 < float(pos_x) <= 1.0 and 0.0 < float(pos_y) <= 1.0:
+                    pos_x = float(pos_x) * 100.0
+                    pos_y = float(pos_y) * 100.0
             has_dynamic_motion = (
                 bool(keyframes)
                 or (loop_anim and str(loop_anim).lower() != "none")
