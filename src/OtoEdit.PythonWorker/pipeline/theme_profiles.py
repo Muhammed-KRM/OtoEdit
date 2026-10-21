@@ -1,0 +1,339 @@
+"""
+Kilitli Tasarım Jetonları (Locked ThemeProfile Registry) ve
+Türkçe Morfo-Sözdizimsel Anahtar Terim/Başlık Çıkarıcı.
+"""
+
+from dataclasses import dataclass, field
+import re
+from typing import Dict, List
+
+
+@dataclass(frozen=True)
+class ThemeProfile:
+    id: str
+    display_name: str
+    preset_id: str
+    font_family: str
+    secondary_font_family: str
+    title_font_size_1080p: int
+    text_color_hex: str
+    accent_color_hex: str
+    secondary_accent_hex: str
+    background_box: bool
+    box_color_hex: str
+    box_opacity: float
+    border_color_hex: str
+    border_width_px: int
+    border_radius_px: int
+    shadow_blur_px: int
+    text_case: str  # "UPPERCASE_TR" | "TITLE_CASE_TR"
+    max_chars_per_line: int
+    max_lines: int
+    entry_animation: str
+    exit_animation: str
+    allow_gifs: bool
+    allow_emojis: bool
+    min_gap_between_overlays_sec: float
+    max_overlays_per_minute: float
+    allowed_transitions: List[str] = field(default_factory=list)
+    transition_duration_sec: float = 0.45
+    allowed_sfx_map: Dict[str, dict] = field(default_factory=dict)
+
+
+THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
+    "academic_lecture": ThemeProfile(
+        id="academic_lecture",
+        display_name="Akademik Ders & Hukuk/Bilim Semineri",
+        preset_id="glass_card_modern",
+        font_family="Montserrat",
+        secondary_font_family="Inter",
+        title_font_size_1080p=42,
+        text_color_hex="#F8FAFC",
+        accent_color_hex="#38BDF8",
+        secondary_accent_hex="#F59E0B",
+        background_box=True,
+        box_color_hex="#0F172A",
+        box_opacity=0.86,
+        border_color_hex="#334155",
+        border_width_px=2,
+        border_radius_px=14,
+        shadow_blur_px=16,
+        text_case="UPPERCASE_TR",
+        max_chars_per_line=34,
+        max_lines=2,
+        entry_animation="fade",
+        exit_animation="fade",
+        allow_gifs=False,
+        allow_emojis=False,
+        min_gap_between_overlays_sec=24.0,
+        max_overlays_per_minute=2.2,
+        allowed_transitions=["fade", "dissolve", "smoothleft"],
+        transition_duration_sec=0.45,
+        allowed_sfx_map={
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.18},
+            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.15},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.16},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.16},
+        },
+    ),
+    "corporate_explainer": ThemeProfile(
+        id="corporate_explainer",
+        display_name="Kurumsal Sunum & İş Dünyası",
+        preset_id="glass_card_modern",
+        font_family="Inter",
+        secondary_font_family="Roboto",
+        title_font_size_1080p=44,
+        text_color_hex="#FFFFFF",
+        accent_color_hex="#10B981",
+        secondary_accent_hex="#3B82F6",
+        background_box=True,
+        box_color_hex="#111827",
+        box_opacity=0.88,
+        border_color_hex="#1F2937",
+        border_width_px=2,
+        border_radius_px=16,
+        shadow_blur_px=18,
+        text_case="UPPERCASE_TR",
+        max_chars_per_line=32,
+        max_lines=2,
+        entry_animation="slide-up",
+        exit_animation="fade",
+        allow_gifs=False,
+        allow_emojis=False,
+        min_gap_between_overlays_sec=18.0,
+        max_overlays_per_minute=3.0,
+        allowed_transitions=["fade", "wipeleft", "smoothleft"],
+        transition_duration_sec=0.40,
+        allowed_sfx_map={
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.20},
+            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.18},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.18},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.18},
+        },
+    ),
+    "tech_review": ThemeProfile(
+        id="tech_review",
+        display_name="Teknoloji, Yazılım & Ürün İncelemesi",
+        preset_id="apple_minimal",
+        font_family="Inter",
+        secondary_font_family="Roboto",
+        title_font_size_1080p=44,
+        text_color_hex="#F9FAFB",
+        accent_color_hex="#06B6D4",
+        secondary_accent_hex="#8B5CF6",
+        background_box=True,
+        box_color_hex="#090D16",
+        box_opacity=0.84,
+        border_color_hex="#06B6D4",
+        border_width_px=2,
+        border_radius_px=18,
+        shadow_blur_px=20,
+        text_case="UPPERCASE_TR",
+        max_chars_per_line=30,
+        max_lines=2,
+        entry_animation="slide-left",
+        exit_animation="fade",
+        allow_gifs=False,
+        allow_emojis=True,
+        min_gap_between_overlays_sec=14.0,
+        max_overlays_per_minute=3.8,
+        allowed_transitions=["smoothleft", "wipeleft", "circleopen"],
+        transition_duration_sec=0.38,
+        allowed_sfx_map={
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.22},
+            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.20},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.20},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.20},
+        },
+    ),
+    "cinematic_documentary": ThemeProfile(
+        id="cinematic_documentary",
+        display_name="Sinematik Belgesel & Tarih/Hikaye Anlatımı",
+        preset_id="cinematic_serif",
+        font_family="Playfair Display",
+        secondary_font_family="Montserrat",
+        title_font_size_1080p=46,
+        text_color_hex="#FEF3C7",
+        accent_color_hex="#D97706",
+        secondary_accent_hex="#92400E",
+        background_box=True,
+        box_color_hex="#0C0A09",
+        box_opacity=0.78,
+        border_color_hex="#78350F",
+        border_width_px=1,
+        border_radius_px=8,
+        shadow_blur_px=24,
+        text_case="TITLE_CASE_TR",
+        max_chars_per_line=34,
+        max_lines=2,
+        entry_animation="fade",
+        exit_animation="fade",
+        allow_gifs=False,
+        allow_emojis=False,
+        min_gap_between_overlays_sec=22.0,
+        max_overlays_per_minute=2.5,
+        allowed_transitions=["dissolve", "fade", "fadeblack"],
+        transition_duration_sec=0.60,
+        allowed_sfx_map={
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.18},
+            "KEY_TERM_CALLOUT": {"type": "whoosh", "volume": 0.14},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.16},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.15},
+        },
+    ),
+    "energetic_vlog": ThemeProfile(
+        id="energetic_vlog",
+        display_name="Yüksek Enerjili Vlog, Eğlence & Viral Shorts",
+        preset_id="hormozi_pill",
+        font_family="Montserrat",
+        secondary_font_family="Anton",
+        title_font_size_1080p=50,
+        text_color_hex="#FFFFFF",
+        accent_color_hex="#00E676",
+        secondary_accent_hex="#FFD700",
+        background_box=True,
+        box_color_hex="#111111",
+        box_opacity=0.90,
+        border_color_hex="#00E676",
+        border_width_px=3,
+        border_radius_px=22,
+        shadow_blur_px=16,
+        text_case="UPPERCASE_TR",
+        max_chars_per_line=26,
+        max_lines=2,
+        entry_animation="pop-up",
+        exit_animation="zoom-out",
+        allow_gifs=True,
+        allow_emojis=True,
+        min_gap_between_overlays_sec=9.0,
+        max_overlays_per_minute=5.5,
+        allowed_transitions=["wipeleft", "slidedown", "circleopen", "fade"],
+        transition_duration_sec=0.35,
+        allowed_sfx_map={
+            "CHAPTER_TITLE_CARD": {"type": "impact", "volume": 0.24},
+            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.22},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.22},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.20},
+            "EMPHASIS_STICKER": {"type": "pop", "volume": 0.20},
+        },
+    ),
+}
+
+
+# Türkçe başlık sonuna asla gelemeyecek bağlaç, edat, zarf ve yarım tamlayan ekleri
+TR_DANGLING_STOPWORDS = {
+    "ve", "veya", "ile", "için", "gibi", "kadar", "göre", "karşı",
+    "ama", "fakat", "ancak", "lakin", "çünkü", "dolayısıyla", "örneğin",
+    "mesela", "yani", "ise", "de", "da", "ki", "bu", "şu", "o", "bir",
+    "olarak", "olan", "olup", "olduğu", "olduğunu", "çevresinde",
+    "kapsamında", "üzerinde", "içerisinde", "hakkında", "tarafından",
+    "arasında", "sonucunda", "nedeniyle", "sebebiyle", "ilgili", "ilişkin",
+}
+
+TR_GENITIVE_SUFFIXES = (
+    "nın", "nin", "nun", "nün", "ın", "in", "un", "ün",
+    "ndan", "nden", "dan", "den", "nda", "nde",
+)
+
+
+def to_turkish_lower(text: str) -> str:
+    """Türkçe İ -> i ve I -> ı dönüşümünü doğru yapan küçük harf fonksiyonu."""
+    return text.replace("İ", "i").replace("I", "ı").lower()
+
+
+def to_turkish_upper(text: str) -> str:
+    """Türkçe i -> İ ve ı -> I dönüşümünü doğru yapan büyük harf fonksiyonu."""
+    return text.replace("i", "İ").replace("ı", "I").upper()
+
+
+def extract_turkish_semantic_title(text: str, max_chars: int = 32) -> str:
+    """
+    Cümleden ASLA kelime veya isim tamlaması ortasından kesilmeyen,
+    maksimum `max_chars` uzunluğunda tam ve anlamlı bir Türkçe başlık çıkarır.
+    Örn: "Hukuk Muhakemeleri Kanununun çevresinde şekillenen dava şartları..."
+         -> "HUKUK MUHAKEMELERİ KANUNU"
+    """
+    if not text or not text.strip():
+        return ""
+
+    # Noktalama işaretlerinden ilk anlamlı yan cümleciği ayır
+    clauses = re.split(r"[.!?;:—–\-]+", text.strip())
+    clause = next((c.strip() for c in clauses if len(c.strip()) >= 6), text.strip())
+
+    # Sadece harf, rakam ve boşlukları koru
+    cleaned = re.sub(r"[^\w\sğüşıöçĞÜŞİÖÇ0-9/']", " ", clause)
+    words = [w for w in cleaned.split() if len(w) > 1 or w.isdigit()]
+    if not words:
+        return ""
+
+    # Baştaki dolgu kelimelerini temizle ("Arkadaşlar", "Şimdi", "Bakın", "Dolayısıyla" vb.)
+    filler_prefixes = {
+        "arkadaşlar", "şimdi", "bakın", "tabii", "elbette", "burada",
+        "dolayısıyla", "öncelikle", "mesela", "örneğin", "aslında", "peki",
+        "evet", "bugün", "bugünkü", "dersimizde",
+    }
+    while len(words) > 2 and to_turkish_lower(words[0]) in filler_prefixes:
+        words.pop(0)
+
+    # Maksimum 5 kelime ve max_chars sınırı içinde kalacak şekilde tam kelimeleri birleştir
+    selected: List[str] = []
+    for w in words[:5]:
+        candidate = " ".join(selected + [w])
+        if len(candidate) <= max_chars:
+            selected.append(w)
+        else:
+            break
+
+    if not selected:
+        selected = [words[0][:max_chars]]
+
+    # Sondaki asılı kalan bağlaç/edatları ("çevresinde", "ve", "ile", "olarak") temizle
+    while len(selected) > 1 and to_turkish_lower(selected[-1]) in TR_DANGLING_STOPWORDS:
+        selected.pop()
+
+    # Eğer son kelime tamlayan ekiyle ("Kanununun", "Mahkemenin") bitiyorsa yalın hale ("Kanunu") indirge
+    last_lower = to_turkish_lower(selected[-1])
+    if last_lower.endswith(("nun", "nün", "nın", "nin")) and len(last_lower) >= 6:
+        for suf in ("unun", "ünün", "ının", "inin", "nun", "nün", "nın", "nin"):
+            if last_lower.endswith(suf) and len(selected[-1]) - len(suf) >= 3:
+                stem_len = len(selected[-1]) - (3 if suf.startswith(("u", "ü", "ı", "i")) else len(suf))
+                selected[-1] = selected[-1][:stem_len]
+                break
+
+    return to_turkish_upper(" ".join(selected))
+
+
+def detect_theme_profile_heuristic(full_transcript: str) -> ThemeProfile:
+    """
+    LLM erişilemediğinde veya hızlı ön-sınıflandırma gerektiğinde
+    transkriptteki alan kelimelerinden en uygun ThemeProfile'ı seçer.
+    """
+    lower = to_turkish_lower(full_transcript or "")
+    academic_kw = (
+        "kanun", "mahkeme", "dava", "hukuk", "madde", "fıkra", "mevzuat",
+        "teori", "hipotez", "ders", "sınav", "fakülte", "kavram", "literatür",
+        "analiz", "formül", "denklem", "tarih", "felsefe", "anatomi", "tıp",
+        "anayasa", "yargıtay", "danıştay", "muhakeme", "hüküm",
+    )
+    corporate_kw = (
+        "şirket", "yatırım", "bütçe", "strateji", "pazarlama", "müşteri",
+        "büyüme", "finans", "rapor", "kurumsal", "yönetim", "satış", "bilanço",
+    )
+    tech_kw = (
+        "yazılım", "kod", "algoritma", "yapay zeka", "uygulama", "donanım",
+        "işlemci", "ekran kartı", "api", "sunucu", "veritabanı", "teknoloji",
+    )
+    doc_kw = (
+        "belgesel", "yüzyıl", "imparatorluk", "savaş", "keşif", "doğa",
+        "evren", "antik", "medeniyet", "hikaye",
+    )
+
+    scores = {
+        "academic_lecture": sum(3 for k in academic_kw if k in lower),
+        "corporate_explainer": sum(2 for k in corporate_kw if k in lower),
+        "tech_review": sum(2 for k in tech_kw if k in lower),
+        "cinematic_documentary": sum(2 for k in doc_kw if k in lower),
+        "energetic_vlog": 1,
+    }
+    best_id = max(scores, key=lambda k: scores[k])
+    return THEME_PROFILE_REGISTRY[best_id]

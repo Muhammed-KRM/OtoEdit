@@ -69,6 +69,9 @@ class GeminiClient:
                         logger.error(f"Antigravity Proxy tüm denemeler ({max_retries}) tükendi: {ex}")
             return None
 
+        if not self.model:
+            return None
+
         for attempt in range(1, max_retries + 1):
             try:
                 response = self.model.generate_content(prompt)
@@ -82,13 +85,74 @@ class GeminiClient:
                     delay *= 2.0
                 else:
                     logger.error(f"Gemini API tüm denemeler ({max_retries}) tükendi: {ex}")
+        return None
+
+    def is_available(self) -> bool:
+        """Gemini API veya Antigravity Proxy aktif mi kontrol eder."""
+        return bool(self.model or getattr(self, "use_proxy", False))
+
     def generate_text(self, prompt: str, max_retries: int = 3) -> Optional[str]:
         """Genel metin/prompt üretimi için Gemini veya Antigravity Proxy'yi çağırır."""
+        if not self.is_available():
+            return None
         return self._execute_with_retry(prompt, max_retries=max_retries)
+
+    def generate_vision(self, prompt: str, image_path: str, max_retries: int = 2) -> Optional[str]:
+        """Bir görsel dosyası (veya ekran görüntüsü) ile birlikte multimodal VLM analizi yapar."""
+        if not self.is_available() or not image_path or not os.path.exists(image_path):
+            return None
+        import base64
+        try:
+            with open(image_path, "rb") as f:
+                b64_img = base64.b64encode(f.read()).decode("utf-8")
+            ext = os.path.splitext(image_path)[1].lower()
+            mime = "image/png" if ext == ".png" else ("image/webp" if ext == ".webp" else "image/jpeg")
+
+            if getattr(self, "use_proxy", False):
+                url = f"{self.proxy_url}/chat/completions"
+                payload = {
+                    "model": self.proxy_model,
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64_img}"}},
+                            ],
+                        }
+                    ],
+                }
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.proxy_key}",
+                }
+                for attempt in range(1, max_retries + 1):
+                    try:
+                        req = urllib.request.Request(
+                            url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+                        )
+                        with urllib.request.urlopen(req, timeout=45) as resp:
+                            data = json.loads(resp.read().decode("utf-8"))
+                        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    except Exception as ex:
+                        logger.warning(f"Vision Proxy denemesi #{attempt} başarısız: {ex}")
+                        if attempt < max_retries:
+                            time.sleep(1.5)
+                return None
+
+            if self.model:
+                from PIL import Image
+                with Image.open(image_path) as img:
+                    response = self.model.generate_content([prompt, img])
+                    if response and hasattr(response, "text"):
+                        return response.text
+        except Exception as e:
+            logger.warning(f"generate_vision hatası: {e}")
+        return None
 
     def find_viral_clips(self, transcript_text: str, duration: float) -> List[Dict[str, Any]]:
         """Transkriptten en viral 30sn (Reels) ve 90sn (Shorts) bölümleri çıkarır."""
-        if not self.model or not transcript_text.strip():
+        if not self.is_available() or not transcript_text.strip():
             return self._fallback_viral_clips(duration)
 
         prompt = f"""
@@ -141,7 +205,7 @@ class GeminiClient:
 
     def generate_content_suggestions(self, transcript_text: str, duration: float) -> List[Dict[str, Any]]:
         """Transkriptten B-Roll görsel ve vurgu metin önerileri üretir."""
-        if not self.model or not transcript_text.strip():
+        if not self.is_available() or not transcript_text.strip():
             return self._fallback_suggestions(duration)
 
         prompt = f"""
@@ -197,7 +261,7 @@ class GeminiClient:
         montaj outtake'leri açısından denetler.
         Elenmesi önerilen segmentlerin listesini döndürür.
         """
-        if not self.model or not segments_data:
+        if not self.is_available() or not segments_data:
             return []
 
         compact_segments = [
