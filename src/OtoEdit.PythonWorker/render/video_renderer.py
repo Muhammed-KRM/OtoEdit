@@ -632,12 +632,43 @@ class VideoRenderer:
         has_bgm = bool(bgm_cfg and bgm_cfg.get("url"))
 
         sfx_clips = edl_json.get("sfxClips") or settings.get("sfxClips") or []
+        if keep_segments and sfx_clips:
+            mapped_sfx_clips = []
+            for sfx in sfx_clips:
+                if not isinstance(sfx, dict):
+                    continue
+                new_sfx = dict(sfx)
+                raw_s = float(sfx.get("start") if sfx.get("start") is not None else sfx.get("timestamp", 0.0))
+                seq_s = sfx.get("seqTimestamp")
+                if seq_s is not None:
+                    new_sfx["start"] = max(0.0, float(seq_s))
+                else:
+                    new_sfx["start"] = TimelineMapper.remap_timestamp_nearest(raw_s, keep_segments, actual_durations)
+                mapped_sfx_clips.append(new_sfx)
+            sfx_clips = mapped_sfx_clips
+
+        # Video katmanlarının (B-Roll / PiP type == 'video') kendi seslerini (volume > 0) ses mikserine dahil et
+        video_overlay_audio_clips = []
+        for ov in (mapped_image_overlays or []):
+            if str(ov.get("type", "")).lower() == "video":
+                ov_vol = float(ov.get("volume") if ov.get("volume") is not None else 100.0)
+                if ov_vol > 0.5:
+                    video_overlay_audio_clips.append({
+                        "id": f"vid_aud_{ov.get('id', 'v')}",
+                        "source": ov.get("source") or ov.get("sourceUrl"),
+                        "start": float(ov.get("timestamp") or 0.0),
+                        "duration": float(ov.get("duration") or 5.0),
+                        "trimStart": float(ov.get("trimStart") or ov.get("trim_start") or 0.0),
+                        "volume": ov_vol / 100.0 if ov_vol > 1.5 else ov_vol,
+                    })
+
+        combined_audio_clips = list(sfx_clips) + video_overlay_audio_clips
         normalize_audio = bool(settings.get("normalizeAudio", False))
 
-        if mapped_image_overlays or has_bgm or sfx_clips or normalize_audio:
+        if mapped_image_overlays or has_bgm or combined_audio_clips or normalize_audio:
             logger.info(
                 f"🎨 İkinci pass yürütülüyor (Görseller: {len(mapped_image_overlays)}, BGM: {has_bgm}, "
-                f"SFX: {len(sfx_clips)}, Loudnorm: {normalize_audio})..."
+                f"SFX+VideoSes: {len(combined_audio_clips)}, Loudnorm: {normalize_audio})..."
             )
             temp_no_images = os.path.join(temp_dir, f"no_img_{os.path.basename(output_path)}")
             if os.path.exists(output_path):
@@ -680,10 +711,10 @@ class VideoRenderer:
                             )
                             audio_reencode = True
 
-                    if sfx_clips:
+                    if combined_audio_clips:
                         a_stream = AudioMixer.mix_sfx_clips(
                             speech_audio_stream=a_stream,
-                            sfx_clips=sfx_clips,
+                            sfx_clips=combined_audio_clips,
                             temp_dir=temp_dir,
                             resolver_fn=self.image_overlay.resolve_image_path,
                         )

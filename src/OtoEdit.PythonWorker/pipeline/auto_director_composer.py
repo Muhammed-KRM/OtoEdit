@@ -104,6 +104,31 @@ class AutoDirectorComposer:
         Dönüş: {"overlays": [...], "transitions": [...], "sfxClips": [...]}
         """
         segments = cls._extract_segments(transcript)
+        cut_list = list(cuts or [])
+        norm_cuts: List[Dict[str, float]] = []
+        for c in cut_list:
+            cs = float(c.get("start", 0.0) if isinstance(c, dict) else getattr(c, "start", 0.0))
+            ce = float(c.get("end", 0.0) if isinstance(c, dict) else getattr(c, "end", 0.0))
+            if ce > cs:
+                norm_cuts.append({"start": cs, "end": ce})
+        norm_cuts.sort(key=lambda x: x["start"])
+
+        def _is_in_cut(t: float) -> bool:
+            return any(c["start"] - 0.05 <= t <= c["end"] + 0.05 for c in norm_cuts)
+
+        def _to_seq_ts(raw_t: float) -> float:
+            remapped = raw_t
+            for c in norm_cuts:
+                if c["end"] <= raw_t:
+                    remapped -= (c["end"] - c["start"])
+                elif c["start"] < raw_t < c["end"]:
+                    remapped -= (raw_t - c["start"])
+                    break
+            return round(max(0.0, remapped), 2)
+
+        keep_segments = [s for s in segments if not _is_in_cut((s["start"] + s["end"]) * 0.5)]
+        active_segments = keep_segments if keep_segments else segments
+
         full_text = ""
         if isinstance(transcript, dict):
             full_text = str(transcript.get("fullText") or transcript.get("full_text") or "").strip()
@@ -127,15 +152,18 @@ class AutoDirectorComposer:
         generated_sfx: List[Dict[str, Any]] = []
 
         # 1. Hook Title Overlay (0.3s - 3.5s, trackId=2)
-        if enable_text_hooks and (segments or full_text):
-            first_text = segments[0]["text"] if segments else full_text
+        if enable_text_hooks and (active_segments or full_text):
+            first_text = active_segments[0]["text"] if active_segments else full_text
+            hook_ts = round(float(active_segments[0]["start"]) if (active_segments and _is_in_cut(0.3)) else 0.3, 2)
+            hook_seq_ts = _to_seq_ts(hook_ts)
             hook_phrase = cls._extract_impact_phrase(first_text, min_words=2, max_words=4)
             hook_dur = round(min(3.2, max(1.5, eff_duration - 0.3)), 2)
             hook_ov = _ComposerDict({
                 "id": "ad_hook_title_1",
                 "type": "text",
                 "content": hook_phrase,
-                "timestamp": 0.3,
+                "timestamp": hook_ts,
+                "seqTimestamp": hook_seq_ts,
                 "duration": hook_dur,
                 "font": "Montserrat",
                 "fontSize": 58,
@@ -162,19 +190,19 @@ class AutoDirectorComposer:
                     "type": w_preset["presetId"],
                     "category": w_preset["category"],
                     "sourceUrl": f"sfx://{w_preset['presetId']}",
-                    "timestamp": 0.3,
-                    "start": 0.3,
+                    "timestamp": hook_ts,
+                    "start": hook_ts,
                     "duration": w_preset["duration"],
                     "volume": w_preset["volume"],
                 }))
 
         # 2. Key Phrase Highlight Overlays (trackId=2, her ~20-30s'de bir)
-        if enable_text_hooks and len(segments) >= 2:
+        if enable_text_hooks and len(active_segments) >= 2:
             interval = 22.0 if eff_duration >= 45.0 else max(4.0, eff_duration / 3.0)
-            last_ts = 0.3
+            last_ts = float(active_segments[0]["start"]) if active_segments else 0.3
             highlight_idx = 0
 
-            for seg in segments[1:]:
+            for seg in active_segments[1:]:
                 seg_start = float(seg["start"])
                 if seg_start - last_ts >= interval or (highlight_idx == 0 and seg_start >= 3.8):
                     phrase = cls._extract_impact_phrase(seg["text"], min_words=2, max_words=4)
@@ -187,6 +215,7 @@ class AutoDirectorComposer:
                         "type": "text",
                         "content": phrase,
                         "timestamp": round(seg_start, 2),
+                        "seqTimestamp": _to_seq_ts(seg_start),
                         "duration": hl_dur,
                         "font": "Montserrat",
                         "fontSize": 50,
@@ -241,8 +270,8 @@ class AutoDirectorComposer:
                 codepoint = emoji_meta["codepoint"]
                 gif_url = f"https://fonts.gstatic.com/s/e/notoemoji/latest/{codepoint}/512.gif"
 
-                if idx < len(segments):
-                    raw_ts = float(segments[idx]["start"]) + 0.4
+                if idx < len(active_segments):
+                    raw_ts = float(active_segments[idx]["start"]) + 0.4
                 else:
                     raw_ts = 1.2 + idx * step
 
@@ -254,6 +283,7 @@ class AutoDirectorComposer:
                     "source": gif_url,
                     "sourceUrl": gif_url,
                     "timestamp": sticker_ts,
+                    "seqTimestamp": _to_seq_ts(sticker_ts),
                     "duration": 2.4,
                     "position": ["right", "top"],
                     "positionX": 82.0,
@@ -282,16 +312,18 @@ class AutoDirectorComposer:
 
         # 4. Sahne Geçişleri (Transitions: fade, smoothleft, zoomin)
         if enable_transitions:
-            cut_list = list(cuts or [])
-            if cut_list:
-                for c_idx, c in enumerate(cut_list[:6]):
-                    c_start = float(c.get("start", 0.0) if isinstance(c, dict) else getattr(c, "start", 0.0))
+            if norm_cuts:
+                for c_idx, c in enumerate(norm_cuts[:6]):
+                    c_start = c["start"]
+                    c_end = c["end"]
                     tr_type = TRANSITION_CYCLE[c_idx % len(TRANSITION_CYCLE)]
                     generated_transitions.append(_ComposerDict({
                         "id": f"ad_transition_{c_idx + 1}",
                         "type": tr_type,
                         "transitionType": tr_type,
                         "timestamp": round(c_start, 2),
+                        "boundaryTime": round(c_end, 2),
+                        "boundarySourceTime": round(c_end, 2),
                         "segmentIndex": c_idx,
                         "duration": 0.45,
                     }))
@@ -306,6 +338,8 @@ class AutoDirectorComposer:
                         "type": tr_type,
                         "transitionType": tr_type,
                         "timestamp": tr_ts,
+                        "boundaryTime": tr_ts,
+                        "boundarySourceTime": tr_ts,
                         "segmentIndex": t_idx,
                         "duration": 0.45,
                     }))

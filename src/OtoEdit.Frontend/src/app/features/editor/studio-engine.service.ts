@@ -1211,7 +1211,7 @@ export class StudioEngineService {
    * - Hareketli Google Noto Emoji Çıkartmaları (T3)
    * - Kesim sınırlarına Sahne Geçişleri (Transitions)
    * - Senkronize Stüdyo Ses Efektleri (SFX)
-   * yerleştirir.
+   * yerleştirir (Sequence Time / Kesilmeyen aktif kliplerle %100 senkronize).
    */
   composeAutoDirectorTimeline(edl: EdlContent, totalDur?: number): {
     overlays: OverlayItem[];
@@ -1220,27 +1220,92 @@ export class StudioEngineService {
   } {
     const duration = Math.max(8, totalDur || edl.duration || 60);
     const segments = edl.transcript?.segments || [];
-    const cuts = edl.cuts || [];
+    const rawCuts = (edl.cuts || []).slice().sort((a, b) => a.start - b.start);
     const now = Date.now();
+
+    // 0. Kesilmeyen (Keep) aralıkları ve Sequence Time dönüşüm haritasını oluştur
+    const mergedCuts: Array<{ start: number; end: number }> = [];
+    for (const c of rawCuts) {
+      const s = Math.max(0, Number(c.start || 0));
+      const e = Math.min(duration, Number(c.end || 0));
+      if (e <= s) continue;
+      if (mergedCuts.length > 0 && s <= mergedCuts[mergedCuts.length - 1].end + 0.05) {
+        mergedCuts[mergedCuts.length - 1].end = Math.max(mergedCuts[mergedCuts.length - 1].end, e);
+      } else {
+        mergedCuts.push({ start: s, end: e });
+      }
+    }
+
+    const keepIntervals: Array<{ rawStart: number; rawEnd: number; seqStart: number; seqEnd: number; dur: number }> = [];
+    let cursor = 0;
+    let seqCursor = 0;
+    for (const c of mergedCuts) {
+      if (c.start > cursor + 0.15) {
+        const d = c.start - cursor;
+        keepIntervals.push({ rawStart: cursor, rawEnd: c.start, seqStart: seqCursor, seqEnd: seqCursor + d, dur: d });
+        seqCursor += d;
+      }
+      cursor = Math.max(cursor, c.end);
+    }
+    if (cursor < duration - 0.15 || keepIntervals.length === 0) {
+      const startR = keepIntervals.length === 0 ? 0 : cursor;
+      const d = Math.max(1, duration - startR);
+      keepIntervals.push({ rawStart: startR, rawEnd: startR + d, seqStart: seqCursor, seqEnd: seqCursor + d, dur: d });
+      seqCursor += d;
+    }
+    const seqDuration = Math.max(4, seqCursor);
+
+    const isRawInCut = (rawT: number): boolean =>
+      mergedCuts.some(c => rawT >= c.start - 0.05 && rawT <= c.end + 0.05);
+
+    const rawToSeq = (rawT: number): number => {
+      for (const k of keepIntervals) {
+        if (rawT >= k.rawStart - 0.05 && rawT <= k.rawEnd + 0.05) {
+          return Math.max(k.seqStart, Math.min(k.seqEnd, k.seqStart + (rawT - k.rawStart)));
+        }
+        if (rawT < k.rawStart) {
+          return k.seqStart;
+        }
+      }
+      return seqDuration;
+    };
+
+    const seqToRaw = (seqT: number): number => {
+      const clamped = Math.max(0, Math.min(seqDuration, seqT));
+      for (const k of keepIntervals) {
+        if (clamped >= k.seqStart && clamped <= k.seqEnd + 0.001) {
+          return k.rawStart + (clamped - k.seqStart);
+        }
+      }
+      const last = keepIntervals[keepIntervals.length - 1];
+      return last ? last.rawStart : clamped;
+    };
+
+    const keepSegments = segments.filter(s => {
+      const mid = (s.start + s.end) * 0.5;
+      return !isRawInCut(mid) && s.text && s.text.trim().length > 2;
+    });
 
     const overlays: OverlayItem[] = [];
     const transitions: EdlTransition[] = [];
     const sfxClips: EdlSfxClip[] = [];
 
-    // 1. Açılış Viral Hook Başlığı (0.3s - 3.5s, T2)
-    const firstSeg = segments[0];
+    // 1. Açılış Viral Hook Başlığı (Sequence 0.3s - 3.5s, T2)
+    const firstSeg = keepSegments[0] || segments[0];
     const hookWords = firstSeg?.text
       ? firstSeg.text.trim().split(/\s+/).slice(0, 4).join(' ').toUpperCase()
       : 'DİKKAT! BUNU İZLEYİN 🔥';
-    const hookStart = Number(Math.max(0.2, firstSeg ? firstSeg.start : 0.3).toFixed(2));
-    const hookDur = Math.min(3.2, Math.max(2.0, duration * 0.15));
+    const hookSeqStart = Number(Math.min(Math.max(0.2, firstSeg ? rawToSeq(firstSeg.start) : 0.3), Math.max(0.2, seqDuration * 0.15)).toFixed(2));
+    const hookRawStart = Number(seqToRaw(hookSeqStart).toFixed(2));
+    const hookDur = Number(Math.min(3.2, Math.max(1.8, seqDuration * 0.18)).toFixed(2));
 
     overlays.push({
       id: `ad_hook_${now}`,
       type: 'text',
       content: hookWords,
-      timestamp: hookStart,
-      duration: Number(hookDur.toFixed(2)),
+      timestamp: hookRawStart,
+      seqTimestamp: hookSeqStart,
+      duration: hookDur,
       trackId: 2,
       positionX: 50,
       positionY: 22,
@@ -1252,18 +1317,20 @@ export class StudioEngineService {
     sfxClips.push({
       id: `ad_sfx_hook_${now}`,
       name: 'Pop Baloncuk (Hook)',
+      title: 'Pop Baloncuk (Hook)',
       category: 'pop',
       presetId: 'pop-bubble',
       synthPreset: 'pop-bubble',
-      start: hookStart,
+      sourceUrl: this.generateSfxWavDataUri('pop-bubble', 0.25),
+      start: hookRawStart,
       duration: 0.25,
       volume: 0.85,
       peaks: [0.2, 0.95, 1.0, 0.6, 0.2],
       action: 'add'
     });
 
-    // 2. Periyodik Vurgu Başlıkları (T2) + Hareketli Emojiler (T3)
-    const step = Math.max(12, Math.min(25, duration / 4));
+    // 2. Periyodik Vurgu Başlıkları (T2) + Hareketli Emojiler (T3) — Sequence Time boyunca eşit dağılımlı
+    const seqStep = Math.max(6.5, Math.min(22, seqDuration / 4));
     const animatedEmojis = [
       'https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.gif',
       'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4a1/512.gif',
@@ -1276,20 +1343,24 @@ export class StudioEngineService {
     const fallbackPhrases = ['ÖNEMLİ NOKTA ⚡', 'KRİTİK DETAY 💡', 'SONUÇ MUHTEŞEM 🚀', 'BUNU UNUTMAYIN 🎯'];
 
     let idx = 0;
-    for (let t = Math.max(5.5, step * 0.7); t < duration - 4.0 && idx < 6; t += step) {
-      const matchSeg = segments.find(s => Math.abs(s.start - t) < step * 0.45 && s.text.trim().length > 6);
+    const firstHlSeq = Math.max(hookSeqStart + hookDur + 1.2, seqStep * 0.75);
+    for (let seqT = firstHlSeq; seqT < seqDuration - 2.8 && idx < 6; seqT += seqStep) {
+      const matchSeg = keepSegments.find(s => Math.abs(rawToSeq(s.start) - seqT) < seqStep * 0.42 && s.text.trim().length > 6);
       const phrase = matchSeg
         ? matchSeg.text.trim().split(/\s+/).slice(0, 3).join(' ').toUpperCase()
         : fallbackPhrases[idx % fallbackPhrases.length];
-      const stamp = Number((matchSeg ? matchSeg.start : t).toFixed(2));
+      const itemSeqStamp = Number((matchSeg ? Math.max(seqT - seqStep * 0.25, rawToSeq(matchSeg.start)) : seqT).toFixed(2));
+      const itemRawStamp = Number(seqToRaw(itemSeqStamp).toFixed(2));
       const preset = presetPool[idx % presetPool.length];
+      const itemDur = Number(Math.min(2.8, Math.max(1.8, seqDuration - itemSeqStamp - 0.3)).toFixed(2));
 
       overlays.push({
         id: `ad_txt_${now}_${idx}`,
         type: 'text',
         content: phrase,
-        timestamp: stamp,
-        duration: 2.8,
+        timestamp: itemRawStamp,
+        seqTimestamp: itemSeqStamp,
+        duration: itemDur,
         trackId: 2,
         positionX: 50,
         positionY: idx % 2 === 0 ? 20 : 78,
@@ -1299,13 +1370,16 @@ export class StudioEngineService {
       });
 
       // Hareketli Emoji Çıkartması (T3)
+      const stkSeqStamp = Number(Math.min(seqDuration - 1.5, itemSeqStamp + 0.15).toFixed(2));
+      const stkRawStamp = Number(seqToRaw(stkSeqStamp).toFixed(2));
       overlays.push({
         id: `ad_stk_${now}_${idx}`,
         type: 'image',
         content: 'Hareketli Emoji',
         source: animatedEmojis[idx % animatedEmojis.length],
-        timestamp: Number((stamp + 0.15).toFixed(2)),
-        duration: 2.6,
+        timestamp: stkRawStamp,
+        seqTimestamp: stkSeqStamp,
+        duration: Number(Math.min(2.6, itemDur).toFixed(2)),
         trackId: 3,
         positionX: idx % 2 === 0 ? 82 : 18,
         positionY: 26,
@@ -1316,14 +1390,18 @@ export class StudioEngineService {
         action: 'add'
       });
 
+      const sfxPresetId = idx % 2 === 0 ? 'ding-bell' : 'whoosh-fast';
+      const sfxDur = idx % 2 === 0 ? 0.8 : 0.42;
       sfxClips.push({
         id: `ad_sfx_hl_${now}_${idx}`,
         name: idx % 2 === 0 ? 'Ding Parlak Çan' : 'Whoosh Hızlı Geçiş',
+        title: idx % 2 === 0 ? 'Ding Parlak Çan' : 'Whoosh Hızlı Geçiş',
         category: idx % 2 === 0 ? 'ui' : 'whoosh',
-        presetId: idx % 2 === 0 ? 'ding-bell' : 'whoosh-fast',
-        synthPreset: idx % 2 === 0 ? 'ding-bell' : 'whoosh-fast',
-        start: stamp,
-        duration: idx % 2 === 0 ? 0.8 : 0.42,
+        presetId: sfxPresetId,
+        synthPreset: sfxPresetId,
+        sourceUrl: this.generateSfxWavDataUri(sfxPresetId, sfxDur),
+        start: itemRawStamp,
+        duration: sfxDur,
         volume: 0.75,
         peaks: [0.3, 0.9, 1.0, 0.7, 0.3],
         action: 'add'
@@ -1332,23 +1410,46 @@ export class StudioEngineService {
       idx++;
     }
 
-    // 3. Kesim Sınırlarına (veya 3 ana noktaya) Sahne Geçişleri
+    // 3. Gerçek Klip Sınırlarına (veya ana noktalara) Sahne Geçişleri
     const transTypes: EdlTransition['type'][] = ['slideleft', 'zoomin', 'fadewhite', 'smoothright', 'circleopen'];
-    const validCuts = cuts.filter(c => c.start > 2.5 && c.end < duration - 2.5);
-    const maxTrans = Math.min(5, Math.max(1, validCuts.length));
-    for (let i = 0; i < maxTrans; i++) {
-      const cutItem = validCuts[Math.floor((i * validCuts.length) / maxTrans)];
-      const boundary = cutItem ? Number(cutItem.end.toFixed(2)) : Number(((i + 1) * (duration / (maxTrans + 1))).toFixed(2));
-      const tType = transTypes[i % transTypes.length];
-      transitions.push({
-        id: `ad_tr_${now}_${i}`,
-        boundarySourceTime: boundary,
-        boundaryTime: boundary,
-        type: tType,
-        duration: 0.4,
-        autoSfxId: 'whoosh-fast',
-        action: 'add'
-      });
+    const realClipBoundaries: number[] = [];
+    for (let i = 1; i < keepIntervals.length; i++) {
+      if (keepIntervals[i - 1].dur >= 1.0 && keepIntervals[i].dur >= 1.0) {
+        realClipBoundaries.push(Number(keepIntervals[i].rawStart.toFixed(2)));
+      }
+    }
+
+    if (realClipBoundaries.length > 0) {
+      const maxTrans = Math.min(5, realClipBoundaries.length);
+      for (let i = 0; i < maxTrans; i++) {
+        const boundary = realClipBoundaries[Math.floor((i * realClipBoundaries.length) / maxTrans)];
+        const tType = transTypes[i % transTypes.length];
+        transitions.push({
+          id: `ad_tr_${now}_${i}`,
+          boundarySourceTime: boundary,
+          boundaryTime: boundary,
+          type: tType,
+          duration: 0.4,
+          autoSfxId: 'whoosh-fast',
+          action: 'add'
+        });
+      }
+    } else {
+      const maxTrans = Math.min(3, Math.max(1, Math.floor(seqDuration / 8)));
+      for (let i = 0; i < maxTrans; i++) {
+        const seqBound = ((i + 1) * seqDuration) / (maxTrans + 1);
+        const boundary = Number(seqToRaw(seqBound).toFixed(2));
+        const tType = transTypes[i % transTypes.length];
+        transitions.push({
+          id: `ad_tr_${now}_${i}`,
+          boundarySourceTime: boundary,
+          boundaryTime: boundary,
+          type: tType,
+          duration: 0.4,
+          autoSfxId: 'whoosh-fast',
+          action: 'add'
+        });
+      }
     }
 
     return { overlays, transitions, sfxClips };
@@ -1363,7 +1464,11 @@ export class StudioEngineService {
     const cuts = edl.cuts || [];
     const suggestions: SuggestionItem[] = [];
 
-    const firstSeg = segments[0];
+    const isRawInCut = (rawT: number): boolean =>
+      cuts.some(c => rawT >= c.start - 0.05 && rawT <= c.end + 0.05);
+    const keepSegments = segments.filter(s => !isRawInCut((s.start + s.end) * 0.5) && s.text && s.text.trim().length > 2);
+
+    const firstSeg = keepSegments[0] || segments[0];
     const hookText = firstSeg?.text
       ? firstSeg.text.trim().split(/\s+/).slice(0, 4).join(' ').toUpperCase()
       : 'BUNU BİLİYOR MUYDUNUZ?';
@@ -1384,23 +1489,23 @@ export class StudioEngineService {
       status: 'pending'
     });
 
-    const midCut = cuts.find(c => c.start > 3 && c.end < duration - 3) || { start: Math.min(12, duration * 0.25), end: Math.min(13, duration * 0.25 + 1) };
+    const midCut = cuts.find(c => c.start > 2 && c.end < duration - 2) || { start: Math.min(12, duration * 0.25), end: Math.min(13, duration * 0.25 + 1) };
     suggestions.push({
       id: `sug_trans_${Date.now()}_2`,
       type: 'transition_sfx',
       category: '⚡ Sahne Geçişi & SFX',
       title: 'Hızlı Kayma (Whip Pan) Geçişi + Whoosh SFX',
       content: 'slideleft',
-      timestamp: Number(midCut.start.toFixed(1)),
+      timestamp: Number(midCut.end.toFixed(1)),
       duration: 0.4,
       confidence: 92,
       transitionType: 'slideleft',
       sfxPreset: 'whoosh-fast',
-      reason: `${midCut.start.toFixed(1)}. saniyedeki kesim sıçramasını dinamik kamera kayması ve Whoosh rüzgar sesiyle sinematik hale getirir.`,
+      reason: `${midCut.end.toFixed(1)}. saniyedeki kesim sıçramasını dinamik kamera kayması ve Whoosh rüzgar sesiyle sinematik hale getirir.`,
       status: 'pending'
     });
 
-    const midSeg = segments.find(s => s.start >= duration * 0.35 && s.text.length > 12) || segments[Math.floor(segments.length / 2)];
+    const midSeg = keepSegments.find(s => s.start >= duration * 0.3 && s.text.length > 10) || keepSegments[Math.floor(keepSegments.length / 2)] || segments[Math.floor(segments.length / 2)];
     const highlightWords = midSeg?.text
       ? midSeg.text.trim().split(/\s+/).slice(0, 3).join(' ').toUpperCase()
       : 'ÖNEMLİ NOKTA!';
@@ -1421,7 +1526,8 @@ export class StudioEngineService {
       status: 'pending'
     });
 
-    const ctaTime = Number(Math.max(4, duration * 0.72).toFixed(1));
+    const lateSeg = keepSegments[Math.max(0, keepSegments.length - 2)] || keepSegments[keepSegments.length - 1];
+    const ctaTime = Number((lateSeg ? lateSeg.start : Math.max(4, duration * 0.72)).toFixed(1));
     suggestions.push({
       id: `sug_sticker_${Date.now()}_4`,
       type: 'sticker_callout',
@@ -1441,12 +1547,12 @@ export class StudioEngineService {
       id: `sug_master_${Date.now()}_5`,
       type: 'audio_master',
       category: '🎧 Stüdyo Ses & Kadraj Master',
-      title: '-14 LUFS Ses Dengeleme + Smart Punch-In Zoom',
-      content: 'Stüdyo Ses & Jump-Cut Kadraj Paketi',
+      title: '-14 LUFS Ses Dengeleme',
+      content: 'Stüdyo Ses Dengeleme Paketi',
       timestamp: 0,
       duration: Number(duration.toFixed(1)),
       confidence: 95,
-      reason: 'Ses seviyesini YouTube/Reels standardı olan -14 LUFS\'a dengeler ve kesim noktalarında %10 akıllı yakınlaştırma (Smart Punch-In) uygular.',
+      reason: 'Ses seviyesini YouTube/Reels/TikTok yayın standardı olan -14 LUFS seviyesine dengeler.',
       status: 'pending'
     });
 

@@ -4781,7 +4781,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       const visBoundaryTime = prev.visEnd;
       const leftPercent = prev.leftPercent + prev.widthPercent;
       const existing = transitions.find(tr => {
-        const bt = (tr.boundaryTime ?? tr.boundarySourceTime) || 0;
+        const bt = (tr.boundaryTime ?? tr.boundarySourceTime ?? (tr as any).timestamp) || 0;
         return (
           Math.abs(bt - boundaryTime) < 0.45 ||
           Math.abs(bt - prevEnd) < 0.45 ||
@@ -8440,7 +8440,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       Math.abs(b.visBoundaryTime - boundaryTime) < 0.45
     );
     if (matchedBound?.existing) return matchedBound.existing;
-    return this.transitions().find(tr => Math.abs(((tr.boundaryTime ?? tr.boundarySourceTime) || 0) - boundaryTime) < 0.45);
+    return this.transitions().find(tr => Math.abs(((tr.boundaryTime ?? tr.boundarySourceTime ?? (tr as any).timestamp) || 0) - boundaryTime) < 0.45);
   }
 
   getTransitionMeta(type: string): TransitionLibraryItem | undefined {
@@ -8749,13 +8749,18 @@ export class EditorComponent implements OnInit, OnDestroy {
     ) {
       const preset = this.studioEngine.textPresets.find((p: TextTemplatePreset) => p.id === presetKey);
       const isImg = sType === 'image_broll' || sType === 'sticker' || sType === 'sticker_callout';
+      const dur = sug.duration || 3.5;
+      const newOvId = `ov_${sug.id}`;
+      const resolved = this.resolveOverlayPlacement(newOvId, sug.timestamp, dur, isImg ? 3 : 2);
       const ov: OverlayItem = {
-        id: `ov_${sug.id}`,
+        id: newOvId,
         type: isImg ? 'image' : 'text',
         content: sug.content,
         source: sug.sourceUrl,
-        timestamp: sug.timestamp,
-        duration: sug.duration || 3.5,
+        timestamp: resolved.start,
+        seqTimestamp: resolved.seqStart,
+        duration: dur,
+        trackId: resolved.trackId,
         positionX: 50,
         positionY: isImg ? 82 : 78,
         scale: 1.0,
@@ -9896,6 +9901,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       if (ov.font) {
         this.studio.ensureFontLoaded(ov.font);
       }
+      if (typeof ov.seqTimestamp !== 'number') {
+        ov.seqTimestamp = Number(this.getVisTimeFromRawTime(ov.timestamp).toFixed(2));
+      }
+      ov.timestamp = Number(this.getRawTimeFromVisTime(ov.seqTimestamp).toFixed(2));
     }
 
     const patch: EdlPatchDto = {

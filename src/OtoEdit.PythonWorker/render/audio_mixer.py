@@ -168,13 +168,32 @@ class AudioMixer:
                 )
                 start_sec = max(0.0, start_sec)
                 duration = float(clip.get("duration") or 0.0)
-                volume = float(clip.get("volume") if clip.get("volume") is not None else 0.8)
+                trim_start = max(0.0, float(clip.get("trimStart") or clip.get("trim_start") or 0.0))
+                raw_vol = float(clip.get("volume") if clip.get("volume") is not None else 0.8)
+                # Eğer volume 0..100 yüzdelik olarak geldiyse (örn. video overlay volume=100) 0.0..1.0 aralığına çevir
+                volume = (raw_vol / 100.0) if raw_vol > 1.5 else raw_vol
+                if volume <= 0.005:
+                    continue
                 fade_in = float(clip.get("fadeIn") or 0.0)
                 fade_out = float(clip.get("fadeOut") or 0.0)
 
+                # Eğer dosya bir video katmanıysa ve içinde ses kanalı (audio stream) yoksa güvenle atla
+                if local_path.lower().endswith((".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v")):
+                    try:
+                        probe_info = ffmpeg.probe(local_path)
+                        has_audio_track = any(s.get("codec_type") == "audio" for s in probe_info.get("streams", []))
+                        if not has_audio_track:
+                            continue
+                    except Exception:
+                        pass
+
                 sfx_a = ffmpeg.input(local_path).audio
-                if duration > 0:
-                    sfx_a = sfx_a.filter("atrim", duration=duration)
+                if trim_start > 0 and duration > 0:
+                    sfx_a = sfx_a.filter("atrim", start=trim_start, duration=duration).filter("asetpts", "PTS-STARTPTS")
+                elif trim_start > 0:
+                    sfx_a = sfx_a.filter("atrim", start=trim_start).filter("asetpts", "PTS-STARTPTS")
+                elif duration > 0:
+                    sfx_a = sfx_a.filter("atrim", duration=duration).filter("asetpts", "PTS-STARTPTS")
 
                 sfx_a = sfx_a.filter("volume", volume)
 
