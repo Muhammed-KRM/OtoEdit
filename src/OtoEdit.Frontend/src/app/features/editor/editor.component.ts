@@ -4586,6 +4586,14 @@ export class EditorComponent implements OnInit, OnDestroy {
         if (c.start >= 0 && c.start <= total) allPoints.add(c.start);
         if (c.end >= 0 && c.end <= total) allPoints.add(c.end);
       }
+      // Sahne geçişi (Transitions) sınırlarını da V1 klip noktalarına dahil et ki
+      // kesimsiz (1 kliplik) videolarda bile [⚡] geçiş rozetleri timeline üzerinde görünsün!
+      for (const tr of this.transitions()) {
+        const bt = Number(tr.boundaryTime ?? tr.boundarySourceTime ?? (tr as any).timestamp ?? 0);
+        if (bt > 0.5 && bt < total - 0.5) {
+          allPoints.add(Number(bt.toFixed(2)));
+        }
+      }
       
       const sortedPoints = Array.from(allPoints).sort((a,b) => a-b);
       
@@ -6940,8 +6948,13 @@ export class EditorComponent implements OnInit, OnDestroy {
     // 1. Canlı BGM Auto-Ducking ([E2])
     const bgm = this.bgmAudioRef?.nativeElement;
     if (bgm && this.bgmUrl() && !video.paused) {
-      const baseVol = Math.max(0, Math.min(1, (this.edl()?.settings?.bgmVolume ?? 15) / 100));
-      const autoDuck = this.edl()?.settings?.bgmAutoDuck ?? true;
+      const settingsObj = this.edl()?.settings as any;
+      const rawBgmVol =
+        settingsObj?.backgroundMusic?.volume !== undefined
+          ? Number(settingsObj.backgroundMusic.volume) * (Number(settingsObj.backgroundMusic.volume) <= 1 ? 100 : 1)
+          : (settingsObj?.bgmVolume ?? 15);
+      const baseVol = Math.max(0, Math.min(1, rawBgmVol / 100));
+      const autoDuck = settingsObj?.backgroundMusic?.autoDucking ?? settingsObj?.bgmAutoDuck ?? true;
       const isSpeaking = autoDuck && this.visibleSubtitleSegments().some((seg: any) => t >= seg.start && t <= seg.end);
       const targetVol = isSpeaking ? Math.max(0.02, baseVol * 0.25) : baseVol;
       bgm.volume = bgm.volume + (targetVol - bgm.volume) * 0.35;
@@ -6954,7 +6967,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         if (t >= sfx.start && t <= sfx.start + 0.18) {
           if (!this.playedSfxIdsInPass.has(sfx.id)) {
             this.playedSfxIdsInPass.add(sfx.id);
-            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.8);
+            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.22, sfx.sourceUrl);
           }
         } else if (t < sfx.start - 0.1 || t > sfx.start + (sfx.duration || 1.0)) {
           this.playedSfxIdsInPass.delete(sfx.id);
@@ -10005,7 +10018,7 @@ export class EditorComponent implements OnInit, OnDestroy {
                   this.onDemandAiLoading.set(false);
                   this.onDemandAiStatus.set('');
                   this.loadEdl();
-                  if (opts.autoDirector) {
+                  if (opts.autoDirector && (res.edl?.overlays?.length || 0) === 0) {
                     setTimeout(() => this.applyAutoDirectorCompose(), 250);
                   }
                 }

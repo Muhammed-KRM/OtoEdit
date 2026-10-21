@@ -1204,14 +1204,222 @@ export class StudioEngineService {
   }
 
   /**
-   * FAZ D: Otonom Kurgu & Zenginleştirme Motoru (AutoDirectorComposer - Frontend 1-Tık)
-   * Önceden kesilmiş veya ham bir videoya tek tıkla:
-   * - Açılış Viral Hook Başlığı (T2)
-   * - Önemli anlara Vurgu Yazıları (T2)
-   * - Hareketli Google Noto Emoji Çıkartmaları (T3)
-   * - Kesim sınırlarına Sahne Geçişleri (Transitions)
-   * - Senkronize Stüdyo Ses Efektleri (SFX)
-   * yerleştirir (Sequence Time / Kesilmeyen aktif kliplerle %100 senkronize).
+   * Türkçe cümleden ASLA kelime veya tamlama ortasından bölünmeyen,
+   * bağlaç/edat ile bitmeyen tam ve anlamlı bir kavramsal başlık çıkarır.
+   */
+  extractSemanticTurkishPhrase(rawText: string, maxChars = 32): string {
+    if (!rawText || !rawText.trim()) return '';
+    const clauses = rawText.trim().split(/[.!?;:—–\-]+/);
+    const clause = clauses.find(c => c.trim().length >= 6) || rawText.trim();
+    const cleaned = clause.replace(/[^\w\sğüşıöçĞÜŞİÖÇ0-9/']/g, ' ').trim();
+    const words = cleaned.split(/\s+/).filter(w => w.length > 1 || /^\d+$/.test(w));
+    if (!words.length) return '';
+
+    const fillers = new Set([
+      'arkadaşlar', 'şimdi', 'bakın', 'tabii', 'elbette', 'burada',
+      'dolayısıyla', 'öncelikle', 'mesela', 'örneğin', 'aslında', 'peki',
+      'evet', 'bugün', 'bugünkü', 'dersimizde'
+    ]);
+    while (words.length > 2 && fillers.has(words[0].toLocaleLowerCase('tr-TR'))) {
+      words.shift();
+    }
+
+    const danglingStopwords = new Set([
+      've', 'veya', 'ile', 'için', 'gibi', 'kadar', 'göre', 'karşı',
+      'ama', 'fakat', 'ancak', 'çünkü', 'dolayısıyla', 'ise', 'de', 'da', 'ki',
+      'bu', 'şu', 'bir', 'olarak', 'olan', 'olup', 'olduğu', 'çevresinde',
+      'kapsamında', 'üzerinde', 'içerisinde', 'hakkında', 'tarafından', 'arasında'
+    ]);
+
+    const selected: string[] = [];
+    for (const w of words.slice(0, 5)) {
+      const candidate = [...selected, w].join(' ');
+      if (candidate.length <= maxChars) {
+        selected.push(w);
+      } else {
+        break;
+      }
+    }
+    if (!selected.length) selected.push(words[0].slice(0, maxChars));
+
+    while (selected.length > 1 && danglingStopwords.has(selected[selected.length - 1].toLocaleLowerCase('tr-TR'))) {
+      selected.pop();
+    }
+
+    // Tamlayan eki ("Kanununun" -> "Kanunu") düzeltmesi
+    const lastIdx = selected.length - 1;
+    const lastLower = selected[lastIdx].toLocaleLowerCase('tr-TR');
+    for (const suf of ['unun', 'ünün', 'ının', 'inin', 'nun', 'nün', 'nın', 'nin']) {
+      if (lastLower.endsWith(suf) && selected[lastIdx].length - suf.length >= 3) {
+        const cutLen = suf.length === 4 ? 3 : suf.length;
+        selected[lastIdx] = selected[lastIdx].slice(0, selected[lastIdx].length - cutLen);
+        break;
+      }
+    }
+
+    return selected.join(' ').toLocaleUpperCase('tr-TR');
+  }
+
+  /**
+   * Transkriptin içeriğinden kilitli ThemeProfile seçer (Akademik/Hukuk, Kurumsal, Teknoloji, Vlog).
+   */
+  private detectLockedThemeProfile(segments: Array<{ text: string }>): {
+    id: 'academic_lecture' | 'corporate_explainer' | 'tech_review' | 'energetic_vlog';
+    fontFamily: string;
+    fontSize: number;
+    textColor: string;
+    accentColor: string;
+    boxStyle: OverlayItem['boxStyle'];
+    boxBgColor: string;
+    borderRadius: number;
+    boxPadding: number;
+    animation: OverlayItem['animation'];
+    exitAnimation: OverlayItem['exitAnimation'];
+    allowStickers: boolean;
+    minGapSec: number;
+    allowedTransitions: EdlTransition['type'][];
+    contextualImages: Array<{ url: string; label: string; keywords: RegExp }>;
+  } {
+    const fullText = segments.map(s => s.text || '').join(' ').toLocaleLowerCase('tr-TR');
+    const isAcademic = /(kanun|mahkeme|dava|hukuk|madde|fıkra|mevzuat|ders|fakülte|teori|kavram|tarih|tıp|anayasa|yargı)/.test(fullText);
+    const isCorporate = /(şirket|yatırım|bütçe|strateji|müşteri|finans|kurumsal|yönetim|rapor|bilanço)/.test(fullText);
+    const isTech = /(yazılım|algoritma|yapay zeka|uygulama|donanım|sunucu|teknoloji|kod|veri)/.test(fullText);
+
+    if (isAcademic) {
+      return {
+        id: 'academic_lecture',
+        fontFamily: 'Montserrat',
+        fontSize: 42,
+        textColor: '#F8FAFC',
+        accentColor: '#38BDF8',
+        boxStyle: 'rounded',
+        boxBgColor: 'rgba(15, 23, 42, 0.88)',
+        borderRadius: 14,
+        boxPadding: 16,
+        animation: 'fade',
+        exitAnimation: 'fade',
+        allowStickers: false, // Akademik/Hukuk dersinde ateş/roket emojisi KESİNLİKLE YASAK!
+        minGapSec: 22,
+        allowedTransitions: ['fade', 'dissolve', 'smoothleft'],
+        contextualImages: [
+          {
+            url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=900&q=80',
+            label: 'Hukuk & Adalet Terazisi',
+            keywords: /(hukuk|kanun|adalet|anayasa|mevzuat)/i
+          },
+          {
+            url: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&w=900&q=80',
+            label: 'Dava Dilekçesi & Resmi Belge',
+            keywords: /(dava|şart|dilekçe|sözleşme|taraf|usul)/i
+          },
+          {
+            url: 'https://images.unsplash.com/photo-1505664194779-8beaceb93744?auto=format&fit=crop&w=900&q=80',
+            label: 'Hukuk Kütüphanesi & İçtihat',
+            keywords: /(mahkeme|hakim|yargı|madde|fıkra|karar)/i
+          },
+          {
+            url: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=900&q=80',
+            label: 'Akademik İnceleme & Notlar',
+            keywords: /.*/
+          }
+        ]
+      };
+    }
+
+    if (isCorporate) {
+      return {
+        id: 'corporate_explainer',
+        fontFamily: 'Inter',
+        fontSize: 44,
+        textColor: '#FFFFFF',
+        accentColor: '#10B981',
+        boxStyle: 'rounded',
+        boxBgColor: 'rgba(17, 24, 39, 0.88)',
+        borderRadius: 16,
+        boxPadding: 16,
+        animation: 'slide-up',
+        exitAnimation: 'fade',
+        allowStickers: false,
+        minGapSec: 18,
+        allowedTransitions: ['fade', 'wipeleft', 'smoothleft'],
+        contextualImages: [
+          {
+            url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=900&q=80',
+            label: 'Finansal Analiz & Strateji',
+            keywords: /(finans|bütçe|yatırım|rapor|büyüme)/i
+          },
+          {
+            url: 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=900&q=80',
+            label: 'Kurumsal Yönetim Toplantısı',
+            keywords: /.*/
+          }
+        ]
+      };
+    }
+
+    if (isTech) {
+      return {
+        id: 'tech_review',
+        fontFamily: 'Inter',
+        fontSize: 44,
+        textColor: '#F9FAFB',
+        accentColor: '#06B6D4',
+        boxStyle: 'rounded',
+        boxBgColor: 'rgba(9, 13, 22, 0.86)',
+        borderRadius: 16,
+        boxPadding: 16,
+        animation: 'slide-left',
+        exitAnimation: 'fade',
+        allowStickers: false,
+        minGapSec: 15,
+        allowedTransitions: ['smoothleft', 'wipeleft', 'circleopen'],
+        contextualImages: [
+          {
+            url: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=900&q=80',
+            label: 'Yazılım Mimarisi & Kod',
+            keywords: /(kod|yazılım|algoritma|uygulama)/i
+          },
+          {
+            url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80',
+            label: 'Teknoloji & Donanım',
+            keywords: /.*/
+          }
+        ]
+      };
+    }
+
+    return {
+      id: 'energetic_vlog',
+      fontFamily: 'Montserrat',
+      fontSize: 48,
+      textColor: '#FFFFFF',
+      accentColor: '#00E676',
+      boxStyle: 'pill',
+      boxBgColor: 'rgba(17, 17, 17, 0.90)',
+      borderRadius: 22,
+      boxPadding: 18,
+      animation: 'pop-up',
+      exitAnimation: 'fade',
+      allowStickers: true,
+      minGapSec: 12,
+      allowedTransitions: ['wipeleft', 'slidedown', 'circleopen', 'fade'],
+      contextualImages: [
+        {
+          url: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=900&q=80',
+          label: 'Sinematik İçerik Üretimi',
+          keywords: /.*/
+        }
+      ]
+    };
+  }
+
+  /**
+   * 5 Aşamalı Multimodal Otonom Yönetmen (AutoDirectorComposer V2 - Frontend):
+   * 1. Transkriptten kilitli ThemeProfile seçer (Akademik/Hukuk dersinde rastgele font ve emoji yasağı!)
+   * 2. Videonun tamamını (00:00 -> son saniye) orantılı Bölümlere (Chapters) ayırır (idx < 6 sınırı kaldırıldı)
+   * 3. Konuşmacı yüzü (X=50%, Y=28%) ve altyazı kuşağına (Y ∈ [70%, 92%]) ASLA çarpmayan SafeZone köşelerini kullanır
+   * 4. Bölüm içi anlamlı Türkçe kavram başlıkları (T2) ve bağlamsal konu görselleri (T3) yerleştirir
+   * 5. Yalnızca görsel olaylara bağlı zarif mikro-SFX (vol: 0.18) ve cümle sınırına mıknatıslanmış geçişler üretir.
    */
   composeAutoDirectorTimeline(edl: EdlContent, totalDur?: number): {
     overlays: OverlayItem[];
@@ -1286,166 +1494,198 @@ export class StudioEngineService {
       return !isRawInCut(mid) && s.text && s.text.trim().length > 2;
     });
 
+    const theme = this.detectLockedThemeProfile(keepSegments.length ? keepSegments : segments);
     const overlays: OverlayItem[] = [];
     const transitions: EdlTransition[] = [];
     const sfxClips: EdlSfxClip[] = [];
 
-    // 1. Açılış Viral Hook Başlığı (Sequence 0.3s - 3.5s, T2)
-    const firstSeg = keepSegments[0] || segments[0];
-    const hookWords = firstSeg?.text
-      ? firstSeg.text.trim().split(/\s+/).slice(0, 4).join(' ').toUpperCase()
-      : 'DİKKAT! BUNU İZLEYİN 🔥';
-    const hookSeqStart = Number(Math.min(Math.max(0.2, firstSeg ? rawToSeq(firstSeg.start) : 0.3), Math.max(0.2, seqDuration * 0.15)).toFixed(2));
-    const hookRawStart = Number(seqToRaw(hookSeqStart).toFixed(2));
-    const hookDur = Number(Math.min(3.2, Math.max(1.8, seqDuration * 0.18)).toFixed(2));
-
-    overlays.push({
-      id: `ad_hook_${now}`,
-      type: 'text',
-      content: hookWords,
-      timestamp: hookRawStart,
-      seqTimestamp: hookSeqStart,
-      duration: hookDur,
-      trackId: 2,
-      positionX: 50,
-      positionY: 22,
-      scale: 1,
-      ...this.textPresets[0].props,
-      action: 'add'
-    });
-
-    sfxClips.push({
-      id: `ad_sfx_hook_${now}`,
-      name: 'Pop Baloncuk (Hook)',
-      title: 'Pop Baloncuk (Hook)',
-      category: 'pop',
-      presetId: 'pop-bubble',
-      synthPreset: 'pop-bubble',
-      sourceUrl: this.generateSfxWavDataUri('pop-bubble', 0.25),
-      start: hookRawStart,
-      duration: 0.25,
-      volume: 0.85,
-      peaks: [0.2, 0.95, 1.0, 0.6, 0.2],
-      action: 'add'
-    });
-
-    // 2. Periyodik Vurgu Başlıkları (T2) + Hareketli Emojiler (T3) — Sequence Time boyunca eşit dağılımlı
-    const seqStep = Math.max(6.5, Math.min(22, seqDuration / 4));
-    const animatedEmojis = [
-      'https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.gif',
-      'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4a1/512.gif',
-      'https://fonts.gstatic.com/s/e/notoemoji/latest/1f680/512.gif',
-      'https://fonts.gstatic.com/s/e/notoemoji/latest/26a1/512.gif',
-      'https://fonts.gstatic.com/s/e/notoemoji/latest/1f3af/512.gif',
-      'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4af/512.gif'
+    // SafeZone Köşe Yuvaları (Konuşmacının X=50%, Y=28% merkez yüzüne ve Y=85% altyazısına ASLA çarpmaz!)
+    const safeTextSlots = [
+      { x: 75, y: 16 }, // Sağ Üst Rozet
+      { x: 25, y: 16 }, // Sol Üst Rozet
+      { x: 76, y: 24 }, // Sağ Üst Kart
+      { x: 24, y: 24 }  // Sol Üst Kart
     ];
-    const presetPool = [this.textPresets[1], this.textPresets[2], this.textPresets[3], this.textPresets[7]];
-    const fallbackPhrases = ['ÖNEMLİ NOKTA ⚡', 'KRİTİK DETAY 💡', 'SONUÇ MUHTEŞEM 🚀', 'BUNU UNUTMAYIN 🎯'];
+    const safeImageSlots = [
+      { x: 78, y: 26 }, // Sağ Üst Görsel Kartı
+      { x: 22, y: 26 }  // Sol Üst Görsel Kartı
+    ];
 
-    let idx = 0;
-    const firstHlSeq = Math.max(hookSeqStart + hookDur + 1.2, seqStep * 0.75);
-    for (let seqT = firstHlSeq; seqT < seqDuration - 2.8 && idx < 6; seqT += seqStep) {
-      const matchSeg = keepSegments.find(s => Math.abs(rawToSeq(s.start) - seqT) < seqStep * 0.42 && s.text.trim().length > 6);
-      const phrase = matchSeg
-        ? matchSeg.text.trim().split(/\s+/).slice(0, 3).join(' ').toUpperCase()
-        : fallbackPhrases[idx % fallbackPhrases.length];
-      const itemSeqStamp = Number((matchSeg ? Math.max(seqT - seqStep * 0.25, rawToSeq(matchSeg.start)) : seqT).toFixed(2));
-      const itemRawStamp = Number(seqToRaw(itemSeqStamp).toFixed(2));
-      const preset = presetPool[idx % presetPool.length];
-      const itemDur = Number(Math.min(2.8, Math.max(1.8, seqDuration - itemSeqStamp - 0.3)).toFixed(2));
+    // Videonun tamamını (00:00 -> seqDuration) kapsayan Bölüm Orantılı (Chapter-Proportional) Planlama
+    const targetChapterLen = seqDuration >= 240 ? 135 : Math.max(20, seqDuration / 3);
+    const chapterCount = Math.max(2, Math.min(16, Math.round(seqDuration / targetChapterLen)));
+    const chapterDuration = seqDuration / chapterCount;
 
-      overlays.push({
-        id: `ad_txt_${now}_${idx}`,
-        type: 'text',
-        content: phrase,
-        timestamp: itemRawStamp,
-        seqTimestamp: itemSeqStamp,
-        duration: itemDur,
-        trackId: 2,
-        positionX: 50,
-        positionY: idx % 2 === 0 ? 20 : 78,
-        scale: 1,
-        ...preset.props,
-        action: 'add'
+    let lastOverlaySeqEnd = -999;
+    let lastSfxSeqStart = -999;
+    let imageCardCounter = 0;
+
+    for (let chIdx = 0; chIdx < chapterCount; chIdx++) {
+      const chSeqStart = chIdx * chapterDuration;
+      const chSeqEnd = (chIdx + 1) * chapterDuration;
+      const chSegs = keepSegments.filter(s => {
+        const st = rawToSeq(s.start);
+        return st >= chSeqStart - 0.5 && st < chSeqEnd + 0.5;
       });
 
-      // Hareketli Emoji Çıkartması (T3)
-      const stkSeqStamp = Number(Math.min(seqDuration - 1.5, itemSeqStamp + 0.15).toFixed(2));
-      const stkRawStamp = Number(seqToRaw(stkSeqStamp).toFixed(2));
-      overlays.push({
-        id: `ad_stk_${now}_${idx}`,
-        type: 'image',
-        content: 'Hareketli Emoji',
-        source: animatedEmojis[idx % animatedEmojis.length],
-        timestamp: stkRawStamp,
-        seqTimestamp: stkSeqStamp,
-        duration: Number(Math.min(2.6, itemDur).toFixed(2)),
-        trackId: 3,
-        positionX: idx % 2 === 0 ? 82 : 18,
-        positionY: 26,
-        scale: 0.75,
-        animation: 'pop-up',
-        exitAnimation: 'scale-out',
-        loopAnimation: 'float',
-        action: 'add'
-      });
+      // 1. Bölüm Sınırı Geçişi (Cümle başlangıcına mıknatıslanmış, kesimsiz 1 kliplik videolarda da V1'i böler!)
+      if (chIdx > 0) {
+        const boundarySeq = chSegs.length > 0 ? rawToSeq(chSegs[0].start) : chSeqStart;
+        const boundaryRaw = Number(seqToRaw(boundarySeq).toFixed(2));
+        if (boundaryRaw > 4.0 && boundaryRaw < duration - 4.0) {
+          const tType = theme.allowedTransitions[(chIdx - 1) % theme.allowedTransitions.length];
+          transitions.push({
+            id: `ad_tr_${now}_${chIdx}`,
+            boundarySourceTime: boundaryRaw,
+            boundaryTime: boundaryRaw,
+            type: tType,
+            duration: 0.45,
+            autoSfxId: 'whoosh-fast',
+            action: 'add'
+          });
+        }
+      }
 
-      const sfxPresetId = idx % 2 === 0 ? 'ding-bell' : 'whoosh-fast';
-      const sfxDur = idx % 2 === 0 ? 0.8 : 0.42;
-      sfxClips.push({
-        id: `ad_sfx_hl_${now}_${idx}`,
-        name: idx % 2 === 0 ? 'Ding Parlak Çan' : 'Whoosh Hızlı Geçiş',
-        title: idx % 2 === 0 ? 'Ding Parlak Çan' : 'Whoosh Hızlı Geçiş',
-        category: idx % 2 === 0 ? 'ui' : 'whoosh',
-        presetId: sfxPresetId,
-        synthPreset: sfxPresetId,
-        sourceUrl: this.generateSfxWavDataUri(sfxPresetId, sfxDur),
-        start: itemRawStamp,
-        duration: sfxDur,
-        volume: 0.75,
-        peaks: [0.3, 0.9, 1.0, 0.7, 0.3],
-        action: 'add'
-      });
+      if (!chSegs.length) continue;
 
-      idx++;
-    }
+      // 2. Bölüm İçi Kurgu Olayları (Bölüm başına 2-3 anlamlı olay)
+      const eventsInChapter = Math.max(2, Math.min(3, Math.floor(chapterDuration / theme.minGapSec) + 1));
+      const stepInChapter = chapterDuration / (eventsInChapter + 0.5);
 
-    // 3. Gerçek Klip Sınırlarına (veya ana noktalara) Sahne Geçişleri
-    const transTypes: EdlTransition['type'][] = ['slideleft', 'zoomin', 'fadewhite', 'smoothright', 'circleopen'];
-    const realClipBoundaries: number[] = [];
-    for (let i = 1; i < keepIntervals.length; i++) {
-      if (keepIntervals[i - 1].dur >= 1.0 && keepIntervals[i].dur >= 1.0) {
-        realClipBoundaries.push(Number(keepIntervals[i].rawStart.toFixed(2)));
+      for (let eIdx = 0; eIdx < eventsInChapter; eIdx++) {
+        const targetSeq = chSeqStart + stepInChapter * (eIdx + 0.35);
+        const matchSeg =
+          chSegs.find(s => rawToSeq(s.start) >= targetSeq - stepInChapter * 0.4 && s.text.trim().length >= 14) ||
+          chSegs[Math.min(chSegs.length - 1, eIdx)];
+        if (!matchSeg) continue;
+
+        const itemSeqStamp = Number(Math.max(0.3, rawToSeq(matchSeg.start)).toFixed(2));
+        if (itemSeqStamp - lastOverlaySeqEnd < theme.minGapSec * 0.65) continue;
+
+        const itemRawStamp = Number(seqToRaw(itemSeqStamp).toFixed(2));
+        const itemDur = Number(Math.min(3.8, Math.max(2.2, seqDuration - itemSeqStamp - 0.4)).toFixed(2));
+        const phrase = this.extractSemanticTurkishPhrase(matchSeg.text, 32);
+        if (!phrase || phrase.length < 3) continue;
+
+        const textSlot = safeTextSlots[(chIdx + eIdx) % safeTextSlots.length];
+
+        // Her bölümün 2. olayında (eIdx === 1) bağlamsal konu görseli kartı (T3) + kavram başlığı (T2)
+        if (eIdx === 1 && theme.contextualImages.length > 0) {
+          const matchedImg =
+            theme.contextualImages.find(ci => ci.keywords.test(matchSeg.text)) ||
+            theme.contextualImages[imageCardCounter % theme.contextualImages.length];
+          const imgSlot = safeImageSlots[imageCardCounter % safeImageSlots.length];
+          imageCardCounter++;
+
+          overlays.push({
+            id: `ad_img_${now}_${chIdx}_${eIdx}`,
+            type: 'image',
+            content: `${phrase} — ${matchedImg.label}`,
+            source: matchedImg.url,
+            timestamp: itemRawStamp,
+            seqTimestamp: itemSeqStamp,
+            duration: itemDur,
+            trackId: 3,
+            positionX: imgSlot.x,
+            positionY: imgSlot.y,
+            scale: 0.95,
+            maskShape: 'rounded',
+            borderRadius: 18,
+            dropShadow: true,
+            shadowBlur: 18,
+            animation: 'fade',
+            exitAnimation: 'fade',
+            action: 'add'
+          });
+        } else {
+          // Kilitli Tema Stiliyle Kavramsal Başlık Kartı (T2)
+          overlays.push({
+            id: `ad_txt_${now}_${chIdx}_${eIdx}`,
+            type: 'text',
+            content: phrase,
+            timestamp: itemRawStamp,
+            seqTimestamp: itemSeqStamp,
+            duration: itemDur,
+            trackId: 2,
+            positionX: textSlot.x,
+            positionY: textSlot.y,
+            scale: 1,
+            font: theme.fontFamily,
+            fontSize: theme.fontSize,
+            fontWeight: 800,
+            color: eIdx === 0 ? theme.accentColor : theme.textColor,
+            fillType: 'solid',
+            strokeColor: '#000000',
+            strokeWidth: 2,
+            boxStyle: theme.boxStyle,
+            boxBgColor: theme.boxBgColor,
+            boxPadding: theme.boxPadding,
+            borderRadius: theme.borderRadius,
+            allCaps: true,
+            animation: theme.animation,
+            exitAnimation: theme.exitAnimation,
+            loopAnimation: 'none',
+            action: 'add'
+          });
+        }
+
+        // Yalnızca eğlence/vlog temasında izin veriliyorsa ve ilk bölümde 1 adet vurgu çıkartması
+        if (theme.allowStickers && chIdx < 2 && eIdx === 0) {
+          overlays.push({
+            id: `ad_stk_${now}_${chIdx}`,
+            type: 'image',
+            content: 'Vurgu Çıkartması',
+            source: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f525/512.gif',
+            timestamp: itemRawStamp,
+            seqTimestamp: itemSeqStamp,
+            duration: 2.4,
+            trackId: 3,
+            positionX: textSlot.x > 50 ? 22 : 78,
+            positionY: 24,
+            scale: 0.75,
+            animation: 'pop-up',
+            exitAnimation: 'scale-out',
+            action: 'add'
+          });
+        }
+
+        // Olaya Bağlı Zarif Mikro-SFX (Metronom döngüsü yok, ses seviyesi: 0.18)
+        if (itemSeqStamp - lastSfxSeqStart >= 14) {
+          const sfxPresetId = eIdx === 0 ? 'whoosh-fast' : 'pop-crisp';
+          const sfxDur = eIdx === 0 ? 0.42 : 0.25;
+          sfxClips.push({
+            id: `ad_sfx_${now}_${chIdx}_${eIdx}`,
+            name: eIdx === 0 ? 'Bölüm Geçiş Efekti' : 'Kavram Kartı Efekti',
+            title: eIdx === 0 ? 'Bölüm Geçiş Efekti' : 'Kavram Kartı Efekti',
+            category: eIdx === 0 ? 'whoosh' : 'pop',
+            presetId: sfxPresetId,
+            synthPreset: sfxPresetId,
+            sourceUrl: this.generateSfxWavDataUri(sfxPresetId, sfxDur),
+            start: itemRawStamp,
+            duration: sfxDur,
+            volume: 0.18,
+            peaks: [0.2, 0.7, 0.9, 0.5, 0.15],
+            action: 'add'
+          });
+          lastSfxSeqStart = itemSeqStamp;
+        }
+
+        lastOverlaySeqEnd = itemSeqStamp + itemDur;
       }
     }
 
-    if (realClipBoundaries.length > 0) {
-      const maxTrans = Math.min(5, realClipBoundaries.length);
-      for (let i = 0; i < maxTrans; i++) {
-        const boundary = realClipBoundaries[Math.floor((i * realClipBoundaries.length) / maxTrans)];
-        const tType = transTypes[i % transTypes.length];
+    // Eğer gerçek kesim sınırları varsa ve henüz geçiş eklenmemişse kesim sınırlarını da değerlendir
+    if (transitions.length === 0 && keepIntervals.length > 1) {
+      const maxTrans = Math.min(6, keepIntervals.length - 1);
+      for (let i = 1; i <= maxTrans; i++) {
+        const boundary = Number(keepIntervals[i].rawStart.toFixed(2));
+        const tType = theme.allowedTransitions[(i - 1) % theme.allowedTransitions.length];
         transitions.push({
-          id: `ad_tr_${now}_${i}`,
+          id: `ad_tr_cut_${now}_${i}`,
           boundarySourceTime: boundary,
           boundaryTime: boundary,
           type: tType,
-          duration: 0.4,
-          autoSfxId: 'whoosh-fast',
-          action: 'add'
-        });
-      }
-    } else {
-      const maxTrans = Math.min(3, Math.max(1, Math.floor(seqDuration / 8)));
-      for (let i = 0; i < maxTrans; i++) {
-        const seqBound = ((i + 1) * seqDuration) / (maxTrans + 1);
-        const boundary = Number(seqToRaw(seqBound).toFixed(2));
-        const tType = transTypes[i % transTypes.length];
-        transitions.push({
-          id: `ad_tr_${now}_${i}`,
-          boundarySourceTime: boundary,
-          boundaryTime: boundary,
-          type: tType,
-          duration: 0.4,
+          duration: 0.45,
           autoSfxId: 'whoosh-fast',
           action: 'add'
         });
