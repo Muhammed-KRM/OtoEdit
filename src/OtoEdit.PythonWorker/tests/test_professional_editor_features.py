@@ -980,18 +980,56 @@ def test_llm_director_20min_lecture_full_coverage_and_image_hash_cache(tmp_path)
 
 
 def test_youtube_style_person_enumeration_and_definition_triggers(tmp_path):
-    """Verify HolisticAnalyzer + LlmDirector detect Person Introductions (Name + Portrait), Enumerations (1., 2., 3.), and Definitions across split Whisper segments."""
+    """Verify HolisticAnalyzer + LlmDirector perform Word-Synchronized Single Term, Paired Terms (Tabiat + Fıtrat), Progressive Stack List (Fizik..Astronomi Left->Right overflow), and Person Portrait placement."""
     from pipeline.llm_director import LlmDirector
 
     segments = [
-        {"start": 10.0, "end": 13.5, "text": "Eserlerden müessire intikal eden bürhan-ı inni delilini inceliyoruz."},
         {"start": 45.0, "end": 48.2, "text": "İlk dönem kelamcılarının geliştirdiği hudus delili kainatın başlangıcını açıklar."},
         {"start": 120.0, "end": 123.5, "text": "İslam düşünce tarihinde İmam Gazali bu ayrımı çok net ortaya koymuştur."},
-        {"start": 210.0, "end": 213.2, "text": "Birincisi tenzili şeriat"},
-        {"start": 213.3, "end": 216.8, "text": "yani teşri şeriattır. İkincisi ise tekvini şeriat."},
-        {"start": 216.9, "end": 220.1, "text": "Yani kainat kitabıdır. Üçüncüsü ise mahiyet."},
-        {"start": 220.2, "end": 223.8, "text": "Yani akli şeriattır ve mantık ilkeleridir."},
-        {"start": 310.0, "end": 313.0, "text": "Hukukta normlar hiyerarşisi ve kaziye-i muhkeme kavramları esastır."},
+        {
+            "start": 565.04,
+            "end": 567.25,
+            "text": "İkincisi tekvini şeriattır.",
+            "words": [
+                {"word": "İkincisi", "start": 565.04, "end": 565.71},
+                {"word": "tekvini", "start": 565.97, "end": 566.58},
+                {"word": "şeriattır.", "start": 566.58, "end": 567.25},
+            ],
+        },
+        {
+            "start": 570.80,
+            "end": 574.30,
+            "text": "sıvatından gelen tabiat ve fıtrat",
+            "words": [
+                {"word": "sıvatından", "start": 570.80, "end": 571.40},
+                {"word": "gelen", "start": 571.40, "end": 571.80},
+                {"word": "tabiat", "start": 571.80, "end": 572.08},
+                {"word": "ve", "start": 572.87, "end": 573.64},
+                {"word": "fıtrat", "start": 573.64, "end": 574.30},
+            ],
+        },
+        {
+            "start": 574.30,
+            "end": 578.06,
+            "text": "kanunlarıdır. Fizik, kimya, biyoloji,",
+            "words": [
+                {"word": "kanunlarıdır.", "start": 574.30, "end": 575.27},
+                {"word": "Fizik,", "start": 575.75, "end": 576.45},
+                {"word": "kimya,", "start": 576.55, "end": 577.24},
+                {"word": "biyoloji,", "start": 577.27, "end": 578.06},
+            ],
+        },
+        {
+            "start": 578.26,
+            "end": 584.94,
+            "text": "tıp, astronomi ilimlerinin tespit ettiği kanunlar bu şeriatın maddeleridir.",
+            "words": [
+                {"word": "tıp,", "start": 578.26, "end": 578.62},
+                {"word": "astronomi", "start": 579.18, "end": 579.90},
+                {"word": "ilimlerinin", "start": 579.90, "end": 580.74},
+                {"word": "maddeleridir.", "start": 584.04, "end": 584.94},
+            ],
+        },
     ]
 
     director = LlmDirector(enable_web_crawl=True, work_dir=str(tmp_path))
@@ -1008,35 +1046,40 @@ def test_youtube_style_person_enumeration_and_definition_triggers(tmp_path):
         plan = director.compose_intelligent_plan(
             segments=segments,
             cuts=[],
-            video_duration=360.0,
+            video_duration=600.0,
             subtitles_enabled=True,
         )
 
     ovs = plan["overlays"]
-    texts = [o.get("text") for o in ovs if o.get("type") == "text"]
+    by_text = {o.get("text"): o for o in ovs if o.get("type") == "text"}
     images = [o for o in ovs if o.get("type") == "image"]
 
-    # 1. Person Introduction: "İMAM GAZALİ" text on T2 + Wikipedia portrait on T3 at the same timestamp!
-    assert "İMAM GAZALİ" in texts
-    assert len(images) >= 1
-    assert any("Al-Ghazali" in img["source"] and img["trackId"] == 3 for img in images)
+    # 1. Person Introduction ONLY gets an image (no abstract concept images!)
+    assert "İMAM GAZALİ" in by_text
+    assert len(images) == 1
+    assert "Al-Ghazali" in images[0]["source"]
 
-    # 2. Enumerations across split 3-second Whisper segments preserved in sequence!
-    assert any(t.startswith("1. TENZİLİ") for t in texts)
-    assert any(t.startswith("2. TEKVİNİ") for t in texts)
-    assert any(t.startswith("3. AKLİ") for t in texts)
+    # 2. "TEKVİNÎ ŞERİAT" starts on "tekvini" (565.97s) and vanishes when "şeriattır." ends (567.25s)
+    assert "TEKVİNÎ ŞERİAT" in by_text
+    tekvini_ov = by_text["TEKVİNÎ ŞERİAT"]
+    assert abs(tekvini_ov["start"] - 565.97) < 0.05
+    assert abs(tekvini_ov["end"] - 567.25) < 0.05
 
-    # 3. Definitions detected!
-    assert any("BÜRHAN-I İNNİ" in t for t in texts)
-    assert any("HUDUS DELİLİ" in t for t in texts)
-    assert any("NORMLAR HİYERARŞİSİ" in t for t in texts)
+    # 3. Paired terms "TABİAT" (571.80s) and "FITRAT" (573.64s) both end when "kanunlarıdır." ends (575.27s)
+    assert "TABİAT" in by_text and "FITRAT" in by_text
+    assert abs(by_text["TABİAT"]["start"] - 571.80) < 0.05
+    assert abs(by_text["FITRAT"]["start"] - 573.64) < 0.05
+    assert abs(by_text["TABİAT"]["end"] - 575.27) < 0.05
+    assert abs(by_text["FITRAT"]["end"] - 575.27) < 0.05
 
-    # 4. YouTube clean stroke style (boxStyle="none", strokeWidth=5)
-    for o in ovs:
-        if o.get("type") == "text":
-            assert o["boxStyle"] == "none"
-            assert o["strokeWidth"] == 5
-            assert o["strokeColor"] == "#000000"
+    # 4. Progressive list "FİZİK, KİMYA, BİYOLOJİ, TIP" on Left Column (X=16.0) + "ASTRONOMİ" on Right Column (X=84.0), all ending at 584.94s!
+    for idx_sci, sci in enumerate(["FİZİK", "KİMYA", "BİYOLOJİ", "TIP"]):
+        assert sci in by_text
+        assert by_text[sci]["positionX"] == 16.0
+        assert abs(by_text[sci]["end"] - 584.94) < 0.05
+    assert "ASTRONOMİ" in by_text
+    assert by_text["ASTRONOMİ"]["positionX"] == 84.0
+    assert abs(by_text["ASTRONOMİ"]["end"] - 584.94) < 0.05
 
 
 

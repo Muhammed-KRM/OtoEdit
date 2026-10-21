@@ -1,13 +1,20 @@
 """
-Aşama 1: Bütüncül Video Analizcisi (HolisticAnalyzer).
-Videonun tamamını (00:00 -> son saniye) anlamsal bölümlere (Chapters) ayırır,
-tek bir kilitli ThemeProfile seçer ve kayan çoklu-segment penceresi (Sliding 3-Segment Window)
-üzerinden:
-  1. Kişi / Alim / Filozof Tanıtımlarını (PERSON_INTRODUCTION -> İsim + Wikipedia Portresi)
-  2. Sıralama ve Maddelendirmeleri (ENUMERATION_CALLOUT -> "Birincisi..., İkincisi..., Üçüncüsü...")
-  3. Kavram Tanımları, Deliller ve Hukuki/Felsefi İlkeleri (DEFINITION_CALLOUT)
-  4. Bölüm Başlıkları ve Madde/İstatistik Vurgularını (CHAPTER_TITLE_CARD, STAT_OR_ARTICLE_CALLOUT)
-tespit ederek her bölüme orantılı kurgu eylemleri planlar.
+Aşama 1: Kelime-Senkronlu Bütüncül Video Analizcisi (HolisticAnalyzer).
+Videonun tamamını (00:00 -> son saniye) kelime bazlı zaman damgaları (words[]) üzerinden tarar:
+  1. Kişi veya Eser Tanıtımları (PERSON_INTRODUCTION / WORK_INTRODUCTION):
+     - SADECE bir kişi/alim/filozof veya somut bir kitap/eser tanıtıldığında görsel (Wikipedia portresi/eser resmi) koyar.
+     - Kişi/eser adı geçtiği kelimenin 'start' salisesinde başlar, o cümlenin son kelimesinin 'end' salisesinde biter.
+  2. Kümülatif Sıralamalar (PROGRESSIVE_LIST):
+     - Konuşmacı maddeleri sayarken (ör. "Fizik, kimya, biyoloji, tıp ve astronomi ilimlerinin...")
+       her madde ağzından çıktığı kelimenin 'start' salisesinde sol sütuna alt alta (Y=18%, 27.5%, 37%, 46.5%) yazılır,
+       sol sütun (4 satır) dolduğunda sağ sütuna (X=84%, Y=18%...) geçer ve cümlenin bitiş kelimesi ('end') tamamlandığında
+       tüm liste aynı anda ekrandan kalkar.
+  3. İkili Kavram Vurguları (PAIRED_TERMS):
+     - Ör. "tabiat ve fıtrat kanunlarıdır" dediğinde tam "tabiat" kelimesinde 'TABİAT', tam "fıtrat" kelimesinde
+       altına 'FITRAT' yazılır; "kanunlarıdır" kelimesi biter bitmez (bir sonraki cümle başlamadan önce) ikisi birlikte silinir.
+  4. Anlık Kısa Terim Vurguları (SINGLE_TERM / DEFINITION_CALLOUT / ENUMERATION_CALLOUT):
+     - Ör. "İkincisi: Tekvinî Şeriat'tır" dediğinde tam "tekvini" kelimesinde 'TEKVİNÎ ŞERİAT' çıkar ve "şeriattır"
+       kelimesi bittiği salisede hemen kaybolur (sabit saniye kullanılmaz, kelime sınırlarına kilitlenir).
 """
 
 import json
@@ -29,8 +36,21 @@ from utils.logger import get_logger
 logger = get_logger("HolisticAnalyzer")
 
 
+@dataclass
+class WordToken:
+    idx: int
+    raw: str
+    clean: str
+    lower: str
+    start: float
+    end: float
+    seg_idx: int
+    has_comma: bool
+    has_sentence_end: bool
+
+
 # Tanınmış filozof, alim, bilim insanı ve tarihsel şahsiyetlerin
-# (anahtar_kelime -> (Ekran Başlığı, Türkçe Wikipedia Başlığı, İngilizce Wikipedia Başlığı)) eşlemesi
+# (anahtar_kelime_listesi, Ekran Başlığı, Türkçe Wikipedia Başlığı, İngilizce Wikipedia Başlığı) eşlemesi
 KNOWN_PERSONS_WIKI_MAP: List[Tuple[Tuple[str, ...], str, str, str]] = [
     (("imam gazali", "imam-ı gazali", "gazali", "gazzali"), "İMAM GAZALİ", "Gazzâlî", "Al-Ghazali"),
     (("aristoteles", "aristo"), "ARİSTOTELES", "Aristoteles", "Aristotle"),
@@ -56,47 +76,223 @@ KNOWN_PERSONS_WIKI_MAP: List[Tuple[Tuple[str, ...], str, str, str]] = [
     (("isaac newton", "newton"), "ISAAC NEWTON", "Isaac Newton", "Isaac Newton"),
 ]
 
-# Felsefi, hukuki, kelami ve bilimsel özel kavram/tanım kalıpları
-# (anahtar_kelimeler, Ekran Başlığı, Somut Ansiklopedik Görsel Başlığı (TR|EN) veya Boş)
-KNOWN_DEFINITIONS_MAP: List[Tuple[Tuple[str, ...], str, str]] = [
-    (("hakim, fehim", "mecellenin bir hakim", "mekin ve mitin"), "MECELLE: HAKİMİN VASIFLARI", "Mecelle|Mecelle"),
-    (("bürhan-ı inni", "burhan-ı inni", "eserden müessire", "eserlerden müessire"), "BÜRHAN-I İNNİ (ESERDEN MÜESSİRE)", ""),
-    (("bürhan-ı limmi", "burhan-ı limmi", "müessirden esere", "sebepten esere inen"), "BÜRHAN-I LİMMİ (SEBEPTEN SONUCA)", ""),
-    (("kainat kitabı", "tekvini bir nizam alanı"), "KAİNAT KİTABI (TEKVİNİ NİZAM)", "Evren|Universe"),
-    (("hudus delili", "hudûs delili"), "HUDUS DELİLİ (YARATILIŞ KANITI)", ""),
-    (("imkan delili", "imkân delili"), "İMKÂN DELİLİ (ZORUNLU VARLIK)", ""),
-    (("inayet ve gaye delili", "inayet delili", "gaye ve nizam"), "İNAYET VE GAYE DELİLİ", ""),
-    (("temanü delili", "temânü delili", "lev kane fihima", "nizam fesada uğrardı"), "TEMÂNÜ DELİLİ (KOZMİK NİZAM)", ""),
-    (("normlar hiyerarşisi", "normlar yararçisi"), "NORMLAR HİYERARŞİSİ", "Normlar hiyerarşisi|Hierarchy"),
-    (("piramidin en tepesinde", "türkiye cumhuriyeti anayasası"), "ANAYASA VE EVRENSEL HUKUK", ""),
-    (("kaziye-i muhkeme", "kaziye-i muhakeme"), "KAZİYE-İ MUHKEME (KESİN HÜKÜM)", ""),
-    (("mukayeseli hukuk", "farklı hukuk ekollerinden iktibas"), "MUKAYESELİ HUKUK VE İKTİBAS", ""),
-    (("kanunun bir lafzı", "ruhu, felsefesi ve vicdani adalet"), "KANUNUN LAFZI VE RUHU", "Adalet|Lady Justice"),
-    (("edille-i şer'iyye", "edille-i şeriyye", "edilley-i şehriye", "edille-i erbaa"), "EDİLLE-İ ŞER'İYYE (DÖRT DELİL)", ""),
-    (("içtihat ile içtihat nakz", "içtihatla içtihat nakz"), "İÇTİHAT İLE İÇTİHAT NAKZOLUNMAZ", ""),
-    (("türk medeni kanunu'nun birinci", "medeni kanunu'nun madde bir"), "TÜRK MEDENİ KANUNU MADDE 1", ""),
-    (("adalet-i mahza",), "ADALET-İ MAHZA (MUTLAK ADALET)", ""),
-    (("üç büyük şeriat", "üç devasa kanunlar manzumesi"), "ÜÇ BÜYÜK ŞERİAT (İLAHİ KANUNLAR)", ""),
-    (("yerçekimi kanunu", "suyun kaldırma kuvveti"), "FİZİK VE TABİAT KANUNLARI", "Kütleçekim|Gravity"),
-    (("küre-i arz", "24 bin senede kat edebileceği"), "DÜNYA'NIN YÖRÜNGE NİZAMI", "Dünya|Earth"),
-    (("pozitif ilimler islam'ın evlatlarıdır", "fenler yeni bir kanun icat etmez"), "POZİTİF BİLİMLER VE TEKVİNİ KANUN", ""),
-    (("nübüvvete lüzum yoktur", "peygambere ne ihtiyaç vardır"), "AKIL VE PEYGAMBERLİK (NÜBÜVVET)", ""),
-    (("kanun icra maddelerine", "kağıt üzerinde kalmaktan başka"), "KANUN VE İCRA MEKANİZMASI", ""),
-    (("kainat devasa bir mektep", "semavi suhflar ve kur'an ilahi müfredat"), "KAİNAT MEKTEBİ VE İLAHİ MÜFREDAT", "Kur'an|Quran"),
-    (("zülcenahen", "zülcenaheyn", "iki kanatlı bir temsilci"), "ZÜLCENAHEYN (İKİ KANATLI ELÇİ)", ""),
-    (("necisin nereden geliyorsun", "3 muazzam tılsım"), "VARLIĞIN 3 BÜYÜK SORUSU", ""),
-    (("ibrahim'i dinler", "hz. ibrahim'i, hz. musa"), "İBRAHİMİ DİNLER VE PEYGAMBERLER", ""),
-    (("ismet sıfatı", "tek bir yalana tenezzül etmemesi"), "İSMET SIFATI (DOĞRULUK VE GÜVEN)", ""),
-    (("mekke'nin fethi", "bugün size başa kakma ve kınama yoktur"), "MEKKE'NİN FETHİ VE AF AHLAKI", "Kâbe|Kaaba"),
-    (("ratio legis", "ratyoleges", "kanunun gayesi", "hikmet-i teşri"), "RATIO LEGIS (KANUNUN GAYESİ)", ""),
-    (("kanunu bilip kanun koyucuğu tanımamak", "mimariyi alkışlayıp mimarı inkar"), "ESERDEN MÜESSİRE: KANUN VE KANUN KOYUCU", ""),
-    (("ihtira", "iştira ve temanü", "nizam-nazım ilişkisini"), "İHTİRA DELİLİ VE NİZAM-NAZIM İLİŞKİSİ", ""),
-    (("makasıdu'ş-şeria", "makasıdu şeria", "zaruriyat-ı diniyye", "maslahat"), "MAKÂSIDU'Ş-ŞERİA (TEMEL GAYELER)", ""),
-    (("fitne katilden beterdir", "fitne çıkarmak"), "İLKE: FİTNE KATİLDEN BETERDİR", ""),
-    (("cihat kelimesi", "ceht kökünden"), "CİHAT (CEHD: ÜSTÜN GAYRET)", ""),
-    (("laiklik", "din ve devlet işleri"), "LAİKLİK VE DİN-DEVLET İLİŞKİSİ", ""),
-    (("emaneti ehline", "ehliyet ve liyakat"), "EMANET VE LİYAKAT İLKESİ", ""),
-    (("şura", "meşveret", "istişare"), "ŞÛRÂ VE İSTİŞARE İLKESİ", ""),
+# Sadece somut bir Kitap / Eser / Kanunname tanıtıldığında görsel konulacak eserler
+KNOWN_WORKS_WIKI_MAP: List[Tuple[Tuple[str, ...], str, str, str]] = [
+    (("mecellenin", "mecelle-i", "mecelle"), "MECELLE-İ AHKÂM-I ADLİYE", "Mecelle", "Mecelle"),
+    (("risale-i nur", "lemeat adlı eserinde"), "RİSALE-İ NUR KÜLLİYATI", "Risale-i Nur", "Risale-i Nur"),
+]
+
+# Kısa, öz (1-2 kelimelik) kavramsal terimler — Görsel KONULMAZ, yalnızca kelime-senkronlu kısa terim yazılır!
+# (tetikleyici_alt_dizeler, Başlangıç_Kelimesi_İpucu, Bitiş_Kelimesi_İpucu, Ekran_Metni)
+SHORT_CONCEPT_TERMS: List[Tuple[Tuple[str, ...], str, str, str]] = [
+    (("tahkikat ve ön inceleme",), "tahkikat", "dengesini", "TAHKİKAT VE ÖN İNCELEME"),
+    (("bürhan-ı inni", "burhan-ı inni"), "bürhan-ı", "inniyle", "BÜRHAN-I İNNÎ"),
+    (("bürhan-ı limmi", "burhan-ı limmi"), "bürhan-ı", "metodolojisini", "BÜRHAN-I LİMMÎ"),
+    (("hudus delili", "hudûs delili"), "hudus", "fısıldar", "HUDÛS DELİLİ"),
+    (("imkan delili", "imkân delili"), "imkan", "hatırlatır", "İMKÂN DELİLİ"),
+    (("inayet delili", "inayet ve gaye"), "inayet", "gösterir", "İNAYET DELİLİ"),
+    (("temanü delili", "temânü delili"), "temanü", "delili", "TEMÂNÜ DELİLİ"),
+    (("normlar hiyerarşisidir", "normlar yararçisiyle"), "normlar", "hiyerarşisidir", "NORMLAR HİYERARŞİSİ"),
+    (("kaziye-i muhkeme", "kaziye-i muhakeme"), "kaziye-i", "haline", "KAZİYE-İ MUHKEME"),
+    (("mukayeseli hukukun", "mukayeseli hukuk"), "mukayeseli", "hukukun", "MUKAYESELİ HUKUK"),
+    (("edille-i şer'iyye", "edilley-i şehriye"), "edilley-i", "inşa", "EDİLLE-İ ŞER'İYYE"),
+    (("içtihat ile içtihat nakz", "içtihatla içtihat nakz"), "içtihat", "olunmaz", "İÇTİHAT İLE İÇTİHAT NAKZOLUNMAZ"),
+    (("türk medeni kanunu'nun birinci",), "türk", "maddesi", "TMK MADDE 1"),
+    (("adalet-i mahza",), "adalet-i", "mahza", "ADALET-İ MAHZA"),
+    (("üç büyük şeriat",), "üç", "şeriat", "ÜÇ BÜYÜK ŞERİAT"),
+    (("birincisi tenzili", "teşri şeriatdır"), "tenzili", "şeriatdır", "TENZİLÎ (TEŞRÎ) ŞERİAT"),
+    (("ikincisi tekvini şeriattır", "ikincisi ise tekvini"), "tekvini", "şeriattır", "TEKVİNÎ ŞERİAT"),
+    (("üçüncüsü ise mahiyet", "yani akli şeriattır"), "akli", "şeriattır", "AKLÎ ŞERİAT"),
+    (("zülcenahen", "zülcenaheyn"), "zülcenahen", "arar", "ZÜLCENAHEYN"),
+    (("ismet sıfatı",), "ismet", "sıfatı", "İSMET SIFATI"),
+    (("ratio legis", "ratyolegesini"), "ratyolegesini", "arar", "RATIO LEGIS"),
+]
+
+# İkili kavram vurguları (Önce 1. kelime çıkar, tam 2. kelime söylendiğinde altına 2. kelime eklenir, cümle sonunda ikisi birden gider)
+# (pencere_tetikleyici, [(kelime1_ipucu, Ekran1), (kelime2_ipucu, Ekran2)], bitiş_kelimesi_ipucu)
+PAIRED_TERM_RULES: List[Tuple[str, List[Tuple[str, str]], str]] = [
+    ("mutlak irade ve kudret", [("irade", "İRADE"), ("kudret", "KUDRET")], "sıvatından"),
+    ("tabiat ve fıtrat", [("tabiat", "TABİAT"), ("fıtrat", "FITRAT")], "kanunlarıdır"),
+    ("eserlerden müessire", [("eserlerden", "ESERDEN MÜESSİRE"), ("sebepten", "SEBEPTEN SONUCA")], "inen"),
+    ("amiriyet ve hakimiyet", [("amiriyet", "AMİRİYET"), ("hakimiyet", "HAKİMİYET")], "ortaklık"),
+    ("kanunun bir lafzı", [("lafzı", "KANUNUN LAFZI"), ("ruhu", "KANUNUN RUHU")], "vardır"),
+    ("kalem sıfatının kelimeleridir", [("kalem", "KALEM SIFATI (KUR'AN)"), ("kudret", "KUDRET SIFATI (KAİNAT)")], "ayetleridir"),
+    ("sübjektif ve objektif iradesini", [("sübjektif", "SÜBJEKTİF İRADE"), ("objektif", "OBJEKTİF İRADE")], "gayesini"),
+    ("kanunu bilip kanun koyucuğu", [("kanunu", "KANUN VE NİZAM"), ("koyucuğu", "KANUN KOYUCU")], "tanımamak"),
+]
+
+# Çoklu/Kümülatif Sıralama Kalıpları (Her madde kendi kelimesi söylendiği salisede alt alta eklenir,
+# sol sütun 4 satır dolunca sağ sütuna geçer, bitiş kelimesi tamamlandığında hepsi aynı anda silinir!)
+# (pencere_tetikleyici, [(kelime_ipucu, Ekran_Metni), ...], bitiş_kelimesi_ipucu)
+PROGRESSIVE_LIST_RULES: List[Tuple[str, List[Tuple[str, str]], str]] = [
+    (
+        "hakim, fehim",
+        [
+            ("hakim,", "HAKÎM"),
+            ("fehim", "FEHÎM"),
+            ("mekin", "MEKÎN"),
+            ("mitin", "METÎN"),
+        ],
+        "vasıflarını",
+    ),
+    (
+        "hukuk, vahiy ve tabiat",
+        [
+            ("hukuk", "HUKUK"),
+            ("vahiy", "VAHİY"),
+            ("tabiat", "TABİAT KANUNLARI"),
+        ],
+        "olabilir",
+    ),
+    (
+        "piramidin en tepesinde",
+        [
+            ("uluslararası", "ULUSLARARASI SÖZLEŞMELER"),
+            ("anayasa", "ANAYASA"),
+            ("kanunlar", "KANUNLAR"),
+            ("yönetmelik", "YÖNETMELİK VE GENELGE"),
+            ("yargıtay", "YARGITAY İÇTİHATLARI"),
+        ],
+        "sıralanır",
+    ),
+    (
+        "idare hukukumuzu fransa",
+        [
+            ("idare", "İDARE HUKUKU (FRANSA)"),
+            ("yargılama", "USUL HUKUKU (İSVİÇRE)"),
+            ("medeni", "MEDENİ HUKUK (İSVİÇRE)"),
+            ("ceza", "CEZA HUKUKU (İTALYA)"),
+            ("ticaret", "TİCARET HUKUKU (ALMANYA)"),
+        ],
+        "ettik",
+    ),
+    (
+        "birinci ve mutlak kaynak",
+        [
+            ("kur'an-ı", "1. KUR'AN-I KERİM"),
+            ("sünnet-i", "2. SÜNNET-İ SENİYYE"),
+            ("icma", "3. İCMÂ"),
+            ("kıyastır", "4. KIYAS"),
+        ],
+        "kıyastır",
+    ),
+    (
+        "allah'ın kitabı ile",
+        [
+            ("kitabı", "1. ALLAH'IN KİTABI"),
+            ("sünneti", "2. RESÛLULLAH'IN SÜNNETİ"),
+            ("iştihat", "3. AKILLA İÇTİHAT"),
+        ],
+        "ararım",
+    ),
+    (
+        "medeni kanunu'nun madde bir",
+        [
+            ("lafzıyla", "1. KANUNUN LAFZI VE RUHU"),
+            ("örf", "2. ÖRF VE ÂDET HUKUKU"),
+            ("koyucu", "3. HAKİMİN HUKUK YARATMASI"),
+        ],
+        "verir",
+    ),
+    (
+        "tefsir, tastik ve teyit",
+        [
+            ("tefsir", "TEFSİR"),
+            ("tastik", "TASDİK"),
+            ("teyit", "TEYİT"),
+        ],
+        "eder",
+    ),
+    (
+        "adaleti, ibadeti, ahlakı",
+        [
+            ("adaleti", "ADALET"),
+            ("ibadeti", "İBADET"),
+            ("ahlakı", "AHLAK"),
+            ("helali", "HELAL"),
+            ("haramı", "HARAM"),
+        ],
+        "gösterir",
+    ),
+    (
+        "fizik, kimya, biyoloji",
+        [
+            ("fizik", "FİZİK"),
+            ("kimya", "KİMYA"),
+            ("biyoloji", "BİYOLOJİ"),
+            ("tıp", "TIP"),
+            ("astronomi", "ASTRONOMİ"),
+        ],
+        "maddeleridir",
+    ),
+    (
+        "suyun kaldırma kuvveti",
+        [
+            ("suyun", "SUYUN KALDIRMA KUVVETİ"),
+            ("yerçekimi", "YERÇEKİMİ KANUNU"),
+            ("fotosentez", "FOTOSENTEZ NİZAMI"),
+            ("gezegenlerin", "GEZEGENLERİN YÖRÜNGELERİ"),
+        ],
+        "yörüngeleri",
+    ),
+    (
+        "doğru düşünme, çelişkiden",
+        [
+            ("doğru", "DOĞRU DÜŞÜNME"),
+            ("çelişkiden", "ÇELİŞKİDEN KAÇINMA"),
+            ("sebep", "SEBEP-SONUÇ BAĞI"),
+            ("tutarlı", "TUTARLI DAVRANMA"),
+        ],
+        "kurallarıdır",
+    ),
+    (
+        "necisin nereden geliyorsun",
+        [
+            ("necisin", "NECİSİN?"),
+            ("nereden", "NEREDEN GELİYORSUN?"),
+            ("nereye", "NEREYE GİDİYORSUN?"),
+        ],
+        "çözecek",
+    ),
+    (
+        "yahudilerin, hristiyanların ve müslümanların",
+        [
+            ("yahudilerin", "YAHUDİLİK"),
+            ("hristiyanların", "HRİSTİYANLIK"),
+            ("müslümanların", "İSLAM"),
+        ],
+        "tanrı'dır",
+    ),
+    (
+        "hz. ibrahim'i, hz. musa",
+        [
+            ("ibrahim'i", "HZ. İBRAHİM"),
+            ("musa'ya", "HZ. MUSA"),
+            ("isa'ya", "HZ. İSA"),
+        ],
+        "kılar",
+    ),
+    (
+        "fen bilimleri, laboratuvarlar",
+        [
+            ("fen", "FEN BİLİMLERİ"),
+            ("laboratuvarlar", "LABORATUVARLAR"),
+            ("teleskoplar", "TELESKOPLAR"),
+            ("mikroskoplar", "MİKROSKOPLAR"),
+        ],
+        "anlatır",
+    ),
+    (
+        "inayet, hudus, imkan",
+        [
+            ("inayet", "İNAYET DELİLİ"),
+            ("hudus", "HUDÛS DELİLİ"),
+            ("imkan", "İMKÂN DELİLİ"),
+            ("iştira", "İHTİRA DELİLİ"),
+            ("temanü", "TEMÂNÜ DELİLİ"),
+        ],
+        "delilleriyle",
+    ),
 ]
 
 
@@ -104,7 +300,7 @@ KNOWN_DEFINITIONS_MAP: List[Tuple[Tuple[str, ...], str, str]] = [
 class PlannedEditorialEvent:
     event_id: str
     chapter_id: int
-    action_type: str  # "CHAPTER_TITLE_CARD" | "PERSON_INTRODUCTION" | "ENUMERATION_CALLOUT" | "DEFINITION_CALLOUT" | "CONCEPT_IMAGE_CARD" | "KEY_TERM_CALLOUT" | "STAT_OR_ARTICLE_CALLOUT"
+    action_type: str  # "PERSON_INTRODUCTION" | "WORK_INTRODUCTION" | "PROGRESSIVE_LIST" | "PAIRED_TERMS" | "SINGLE_TERM" | "ENUMERATION_CALLOUT" | "DEFINITION_CALLOUT" | "CHAPTER_TITLE_CARD"
     start_sec: float
     end_sec: float
     text_primary: str
@@ -116,6 +312,8 @@ class PlannedEditorialEvent:
     person_wiki_tr: str = ""
     person_wiki_en: str = ""
     semantic_priority: bool = False
+    group_id: str = ""
+    stack_slot: Optional[int] = None
 
 
 @dataclass
@@ -130,11 +328,16 @@ class ChapterPlan:
 
 class HolisticAnalyzer:
     """
-    Uzun veya kısa videoları bütünsel olarak analiz edip Bölüm Orantılı
-    (Chapter-Proportional) ve Semantik Tetikleyici Duyarlı kurgu eylem planı çıkaran yönetmen katmanı.
+    Videoyu kelime-zamanlamalı (Word-Synchronized) olarak analiz eden ve:
+      - Kişi/Eser tanıtımlarında (ve SADECE bunlarda) İsim + Wikipedia Görseli,
+      - Sıralama anlarında ("Fizik, kimya, biyoloji, tıp ve astronomi") her kelime söylendiğinde
+        sol sütuna alt alta, sol dolunca sağ sütuna geçen kümülatif liste,
+      - İkili kavramlarda ("tabiat ve fıtrat") önce 1., sonra 2. kavramı çıkarıp cümle bitiminde birlikte silen,
+      - Tekil kavramlarda ("Tekvinî Şeriat'tır") kavram kelimesinde başlayıp o cümlenin bitiş kelimesinde hemen silen
+    kurgu planlayıcısı.
     """
 
-    def __init__(self, gemini_client: Any = None, enable_llm_planning: bool = False):
+    def __init__(self, gemini_client: Any = None, enable_llm_planning: bool = True):
         self.gemini = gemini_client
         self.enable_llm_planning = enable_llm_planning
 
@@ -144,9 +347,6 @@ class HolisticAnalyzer:
         video_duration: float,
         cuts: Optional[List[Any]] = None,
     ) -> Tuple[ThemeProfile, str, List[ChapterPlan]]:
-        """
-        Döndürür: (locked_theme_profile, subject_summary, chapter_plans)
-        """
         normalized_cuts = self._normalize_cuts(cuts or [])
         active_segments = self._filter_active_segments(segments, normalized_cuts)
         full_text = " ".join(str(s.get("text", "")).strip() for s in active_segments)
@@ -154,7 +354,7 @@ class HolisticAnalyzer:
         # 1. Kilitli ThemeProfile tespiti
         theme_profile = detect_theme_profile_heuristic(full_text)
 
-        # 2. Videoyu kronolojik bölümlere (Chapters) ayır (00:00 -> video_duration)
+        # 2. Videoyu kronolojik bölümlere (Chapters) ayır
         safe_duration = max(5.0, float(video_duration or 30.0))
         target_chapter_len = 135.0 if safe_duration >= 300.0 else max(25.0, safe_duration / 3.0)
         num_chapters = max(1, min(16, int(round(safe_duration / target_chapter_len))))
@@ -162,16 +362,14 @@ class HolisticAnalyzer:
             active_segments, safe_duration, num_chapters
         )
 
-        # 3. Önce tüm videodaki yüksek öncelikli semantik tetikleyicileri
-        # (Kişi Tanıtımları, Birincisi/İkincisi Sıralamalar, Tanımlar/Deliller) kayan pencere ile tespit et
+        # 3. Düzleştirilmiş kelime akışı (WordToken listesi) oluştur ve tüm kelime-senkronlu olayları çıkar
+        word_stream = self._build_word_stream(active_segments)
         global_semantic_triggers = self._detect_global_semantic_triggers(
-            active_segments, safe_duration
+            active_segments, safe_duration, word_stream=word_stream
         )
 
-        # 4. Her bölüm için semantik tetikleyicileri ve bölüm başlıklarını birleştirerek plan üret
+        # 4. Bölüm planlarına dağıt
         chapter_plans: List[ChapterPlan] = []
-        used_titles_global: Set[str] = set()
-
         for ch_idx in range(len(chapter_boundaries) - 1):
             ch_start = chapter_boundaries[ch_idx]
             ch_end = chapter_boundaries[ch_idx + 1]
@@ -190,9 +388,12 @@ class HolisticAnalyzer:
             if not ch_segs:
                 continue
 
+            is_last_ch = ch_idx == len(chapter_boundaries) - 2
             ch_triggers = [
-                t for t in global_semantic_triggers
-                if ch_start - 0.5 <= t.start_sec < ch_end + 0.5
+                t
+                for t in global_semantic_triggers
+                if (ch_start <= t.start_sec < ch_end)
+                or (is_last_ch and ch_start <= t.start_sec <= ch_end + 1.0)
             ]
 
             ch_plan = self._plan_single_chapter(
@@ -202,7 +403,6 @@ class HolisticAnalyzer:
                 ch_segments=ch_segs,
                 theme_profile=theme_profile,
                 chapter_triggers=ch_triggers,
-                used_titles_global=used_titles_global,
             )
             chapter_plans.append(ch_plan)
 
@@ -212,52 +412,272 @@ class HolisticAnalyzer:
         logger.info(
             f"[HolisticAnalyzer] Tamamlandı: Tema='{theme_profile.id}', "
             f"Bölüm Sayısı={len(chapter_plans)}, "
-            f"Toplam Olay={sum(len(c.events) for c in chapter_plans)}"
+            f"Toplam Kelime-Senkronlu Olay={sum(len(c.events) for c in chapter_plans)}"
         )
         return theme_profile, subject_summary, chapter_plans
+
+    def _build_word_stream(self, active_segments: List[Dict[str, Any]]) -> List[WordToken]:
+        """
+        Her segmentteki 'words' dizisini (yoksa metinden orantılı enterpolasyonla)
+        düz ve salise hassasiyetli bir WordToken akışına dönüştürür.
+        """
+        tokens: List[WordToken] = []
+        for seg_idx, seg in enumerate(active_segments):
+            s_start = float(seg.get("start", 0.0))
+            s_end = max(s_start + 0.2, float(seg.get("end", s_start + 2.5)))
+            raw_words = seg.get("words") or []
+            if raw_words and isinstance(raw_words, list):
+                for w in raw_words:
+                    w_str = str(w.get("word", "")).strip()
+                    if not w_str:
+                        continue
+                    w_start = float(w.get("start", s_start))
+                    w_end = max(w_start + 0.08, float(w.get("end", w_start + 0.35)))
+                    clean = re.sub(r"^[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ]+|[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ'-]+$", "", w_str)
+                    tokens.append(
+                        WordToken(
+                            idx=len(tokens),
+                            raw=w_str,
+                            clean=clean or w_str,
+                            lower=to_turkish_lower(clean or w_str),
+                            start=round(w_start, 2),
+                            end=round(w_end, 2),
+                            seg_idx=seg_idx,
+                            has_comma="," in w_str,
+                            has_sentence_end=any(p in w_str for p in (".", "?", "!", ":", ";")),
+                        )
+                    )
+            else:
+                parts = [p for p in str(seg.get("text", "")).strip().split() if p]
+                if not parts:
+                    continue
+                step = (s_end - s_start) / float(len(parts))
+                for k, w_str in enumerate(parts):
+                    w_start = s_start + k * step
+                    w_end = w_start + step
+                    clean = re.sub(r"^[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ]+|[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ'-]+$", "", w_str)
+                    tokens.append(
+                        WordToken(
+                            idx=len(tokens),
+                            raw=w_str,
+                            clean=clean or w_str,
+                            lower=to_turkish_lower(clean or w_str),
+                            start=round(w_start, 2),
+                            end=round(w_end, 2),
+                            seg_idx=seg_idx,
+                            has_comma="," in w_str,
+                            has_sentence_end=any(p in w_str for p in (".", "?", "!", ":", ";")),
+                        )
+                    )
+        return tokens
+
+    def _find_word_in_range(
+        self,
+        word_stream: List[WordToken],
+        min_seg_idx: int,
+        max_seg_idx: int,
+        keyword_hint: str,
+        after_word_idx: int = -1,
+    ) -> Optional[WordToken]:
+        hint_low = to_turkish_lower(keyword_hint.strip())
+        if not hint_low:
+            return None
+        for tok in word_stream:
+            if tok.idx <= after_word_idx:
+                continue
+            if tok.seg_idx < min_seg_idx:
+                continue
+            if tok.seg_idx > max_seg_idx:
+                break
+            if tok.lower.startswith(hint_low) or hint_low in tok.lower or hint_low in to_turkish_lower(tok.raw):
+                return tok
+        return None
+
+    def _find_sentence_end_word(
+        self,
+        word_stream: List[WordToken],
+        start_tok: WordToken,
+        max_seg_idx: int,
+        end_hint: str = "",
+    ) -> WordToken:
+        if end_hint:
+            found_end = self._find_word_in_range(
+                word_stream, start_tok.seg_idx, max_seg_idx, end_hint, after_word_idx=start_tok.idx - 1
+            )
+            if found_end:
+                return found_end
+        # Cümle sonu noktalama işaretine (. ? ! ; :) sahip ilk kelimeyi bul
+        for tok in word_stream[start_tok.idx :]:
+            if tok.seg_idx > max_seg_idx:
+                break
+            if tok.idx > start_tok.idx and tok.has_sentence_end:
+                return tok
+        # Bulunamazsa mevcut segmentin son kelimesini döndür
+        seg_tokens = [t for t in word_stream if t.seg_idx == start_tok.seg_idx]
+        return seg_tokens[-1] if seg_tokens else start_tok
 
     def _detect_global_semantic_triggers(
         self,
         active_segments: List[Dict[str, Any]],
         video_duration: float,
+        word_stream: Optional[List[WordToken]] = None,
     ) -> List[PlannedEditorialEvent]:
-        """
-        Whisper segmentleri cümleleri 2.5 - 3.5 saniyelik parçalara böldüğü için
-        3'lü kayan pencere (seg[i] + seg[i+1] + seg[i+2]) kullanarak:
-          - PERSON_INTRODUCTION (Kişi / Alim / Filozof tanıtımı + Wikipedia portresi)
-          - ENUMERATION_CALLOUT ("Birincisi..., İkincisi..., Üçüncüsü..., Birinci kaynak...")
-          - DEFINITION_CALLOUT (Felsefi deliller, hukuki/bilimsel tanımlar ve ilkeler)
-        olaylarını tam ve kesintisiz olarak yakalar.
-        """
-        triggers: List[PlannedEditorialEvent] = []
         if not active_segments:
-            return triggers
+            return []
+        if word_stream is None:
+            word_stream = self._build_word_stream(active_segments)
 
+        triggers: List[PlannedEditorialEvent] = []
         seen_persons: Dict[str, float] = {}
-        seen_definitions: Dict[str, float] = {}
-        seen_enumerations: Dict[str, float] = {}
+        seen_works: Dict[str, float] = {}
+        seen_groups: Dict[str, float] = {}
+        seen_terms: Dict[str, float] = {}
+        occupied_ranges: List[Tuple[float, float]] = []
+
+        def is_range_busy(st: float, en: float) -> bool:
+            for o_st, o_en in occupied_ranges:
+                if max(st, o_st) < min(en, o_en) - 0.15:
+                    return True
+            return False
+
         n_segs = len(active_segments)
 
+        # ------------------------------------------------------------------
+        # AŞAMA A: KÜMÜLATİF SIRALAMALAR (PROGRESSIVE_LIST)
+        # ("Fizik, kimya, biyoloji, tıp ve astronomi", "Adalet, ibadet, ahlak, helal ve haram", vb.)
+        # ------------------------------------------------------------------
         for i in range(n_segs):
-            seg_cur = active_segments[i]
-            s_start = float(seg_cur.get("start", 0.0))
-            s_end = float(seg_cur.get("end", s_start + 3.2))
-            text_cur = str(seg_cur.get("text", "")).strip()
-            text_next = str(active_segments[i + 1].get("text", "")).strip() if i + 1 < n_segs else ""
-            text_next2 = str(active_segments[i + 2].get("text", "")).strip() if i + 2 < n_segs else ""
+            seg_window_max = min(n_segs - 1, i + 15)
+            window_3_text = " ".join(
+                str(active_segments[k].get("text", "")).strip()
+                for k in range(i, min(n_segs, i + 3))
+            )
+            lower_win3 = to_turkish_lower(window_3_text)
+            lower_cur = to_turkish_lower(str(active_segments[i].get("text", "")).strip())
 
+            for rule_trigger, item_specs, end_hint in PROGRESSIVE_LIST_RULES:
+                if rule_trigger in lower_cur or (
+                    rule_trigger in lower_win3
+                    and rule_trigger.split()[0] in lower_cur
+                ):
+                    last_seen = seen_groups.get(rule_trigger, -999.0)
+                    seg_st = float(active_segments[i].get("start", 0.0))
+                    if seg_st - last_seen < 90.0:
+                        continue
+
+                    matched_items: List[Tuple[WordToken, str]] = []
+                    last_tok_idx = -1
+                    for word_hint, label_tr in item_specs:
+                        tok = self._find_word_in_range(
+                            word_stream, i, seg_window_max, word_hint, after_word_idx=last_tok_idx
+                        )
+                        if tok:
+                            matched_items.append((tok, label_tr))
+                            last_tok_idx = tok.idx
+
+                    if len(matched_items) >= 2:
+                        last_item_tok = matched_items[-1][0]
+                        end_tok = self._find_sentence_end_word(
+                            word_stream, last_item_tok, min(n_segs - 1, last_item_tok.seg_idx + 2), end_hint
+                        )
+                        shared_end_sec = round(max(last_item_tok.end + 0.35, end_tok.end), 2)
+                        seen_groups[rule_trigger] = seg_st
+                        grp_id = f"grp_list_{len(seen_groups):02d}"
+
+                        for slot_idx, (item_tok, label_tr) in enumerate(matched_items):
+                            item_start = round(item_tok.start, 2)
+                            item_end = round(max(item_start + 0.45, shared_end_sec), 2)
+                            triggers.append(
+                                PlannedEditorialEvent(
+                                    event_id=f"{grp_id}_item_{slot_idx + 1:02d}",
+                                    chapter_id=0,
+                                    action_type="PROGRESSIVE_LIST",
+                                    start_sec=item_start,
+                                    end_sec=item_end,
+                                    text_primary=label_tr,
+                                    text_secondary=f"Sıralama {slot_idx + 1}",
+                                    semantic_priority=True,
+                                    group_id=grp_id,
+                                    stack_slot=slot_idx,
+                                )
+                            )
+                        occupied_ranges.append((matched_items[0][0].start, shared_end_sec))
+                        break
+
+        # Genel Virgüllü / "ve" Bağlaçlı Sıralama Yakalayıcı (Özel listede olmayan her türlü yeni video için!)
+        self._detect_generic_comma_lists(
+            active_segments, word_stream, triggers, occupied_ranges, is_range_busy
+        )
+
+        # ------------------------------------------------------------------
+        # AŞAMA B: İKİLİ KAVRAM VURGULARI (PAIRED_TERMS)
+        # (Ör. "tabiat ve fıtrat kanunlarıdır" -> Önce TABİAT, sonra altına FITRAT, "kanunlarıdır" bitince ikisi de gider!)
+        # ------------------------------------------------------------------
+        for i in range(n_segs):
+            window_2_text = " ".join(
+                str(active_segments[k].get("text", "")).strip()
+                for k in range(i, min(n_segs, i + 3))
+            )
+            lower_win2 = to_turkish_lower(window_2_text)
+            lower_cur = to_turkish_lower(str(active_segments[i].get("text", "")).strip())
+
+            for pair_trigger, pair_specs, end_hint in PAIRED_TERM_RULES:
+                if pair_trigger in lower_cur or (
+                    pair_trigger in lower_win2 and pair_trigger.split()[0] in lower_cur
+                ):
+                    seg_st = float(active_segments[i].get("start", 0.0))
+                    if seg_st - seen_groups.get(pair_trigger, -999.0) < 90.0:
+                        continue
+                    tok1 = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 2), pair_specs[0][0])
+                    if not tok1:
+                        continue
+                    tok2 = self._find_word_in_range(
+                        word_stream, tok1.seg_idx, min(n_segs - 1, tok1.seg_idx + 2), pair_specs[1][0], after_word_idx=tok1.idx
+                    )
+                    if not tok2:
+                        continue
+                    end_tok = self._find_sentence_end_word(
+                        word_stream, tok2, min(n_segs - 1, tok2.seg_idx + 1), end_hint
+                    )
+                    shared_end = round(max(tok2.end + 0.35, end_tok.end), 2)
+                    if is_range_busy(tok1.start, shared_end):
+                        continue
+
+                    seen_groups[pair_trigger] = seg_st
+                    grp_id = f"grp_pair_{len(seen_groups):02d}"
+                    for slot_idx, (tok, label_tr) in enumerate([(tok1, pair_specs[0][1]), (tok2, pair_specs[1][1])]):
+                        st_s = round(tok.start, 2)
+                        en_s = round(max(st_s + 0.45, shared_end), 2)
+                        triggers.append(
+                            PlannedEditorialEvent(
+                                event_id=f"{grp_id}_{slot_idx + 1}",
+                                chapter_id=0,
+                                action_type="PAIRED_TERMS",
+                                start_sec=st_s,
+                                end_sec=en_s,
+                                text_primary=label_tr,
+                                text_secondary="İkili Kavram",
+                                semantic_priority=True,
+                                group_id=grp_id,
+                                stack_slot=slot_idx,
+                            )
+                        )
+                    occupied_ranges.append((tok1.start, shared_end))
+
+        # ------------------------------------------------------------------
+        # AŞAMA C: KİŞİ VEYA ESER TANITIMLARI (SADECE BUNLARDA GÖRSEL KONUR!)
+        # ------------------------------------------------------------------
+        for i in range(n_segs):
+            text_cur = str(active_segments[i].get("text", "")).strip()
+            text_next = str(active_segments[i + 1].get("text", "")).strip() if i + 1 < n_segs else ""
             window_2 = f"{text_cur} {text_next}".strip()
-            window_3 = f"{text_cur} {text_next} {text_next2}".strip()
             lower_cur = to_turkish_lower(text_cur)
             lower_win2 = to_turkish_lower(window_2)
-            lower_win3 = to_turkish_lower(window_3)
+            s_start = float(active_segments[i].get("start", 0.0))
 
-            # ------------------------------------------------------------------
-            # 1. KİŞİ / ALİM / FİLOZOF TANITIMI (PERSON_INTRODUCTION)
-            # ------------------------------------------------------------------
+            # 1. Kişi Tanıtımı (PERSON_INTRODUCTION)
             matched_person = False
             for kw_tuple, display_name, wiki_tr, wiki_en in KNOWN_PERSONS_WIKI_MAP:
-                # Kişi adı mevcut segmentte başlıyor veya (Prof. + Hans Küng gibi) cur->next sınırında bölünmüşse
                 in_cur = any(k in lower_cur for k in kw_tuple)
                 in_boundary = (
                     not in_cur
@@ -268,32 +688,40 @@ class HolisticAnalyzer:
                     )
                 )
                 if in_cur or in_boundary:
-                    last_seen = seen_persons.get(display_name, -999.0)
-                    if s_start - last_seen >= 240.0:
-                        seen_persons[display_name] = s_start
-                        ev_start = round(s_start, 2)
-                        ev_end = round(min(video_duration - 0.2, ev_start + 4.5), 2)
-                        triggers.append(
-                            PlannedEditorialEvent(
-                                event_id=f"trig_person_{len(triggers) + 1:02d}",
-                                chapter_id=0,
-                                action_type="PERSON_INTRODUCTION",
-                                start_sec=ev_start,
-                                end_sec=ev_end,
-                                text_primary=display_name,
-                                text_secondary="Kişi / Düşünür",
-                                primary_web_query_tr=wiki_tr,
-                                secondary_stock_query_en=wiki_en,
-                                fallback_minimal_query_en=wiki_en,
-                                person_wiki_tr=wiki_tr,
-                                person_wiki_en=wiki_en,
-                                semantic_priority=True,
-                            )
-                        )
-                        matched_person = True
-                        break
+                    if s_start - seen_persons.get(display_name, -999.0) >= 240.0:
+                        first_kw = next((k.split()[0] for k in kw_tuple if k in lower_win2), kw_tuple[0].split()[0])
+                        start_tok = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 1), first_kw)
+                        ev_start = round(start_tok.start if start_tok else s_start, 2)
+                        if start_tok:
+                            end_tok = self._find_sentence_end_word(word_stream, start_tok, min(n_segs - 1, i + 2))
+                            ev_end = round(max(ev_start + 1.8, min(ev_start + 4.8, end_tok.end)), 2)
+                        else:
+                            ev_end = round(min(video_duration - 0.2, ev_start + 3.8), 2)
 
-            # Dinamik Unvanlı Kişi Yakalayıcı (Örn. "Prof. Dr. Ahmet Arslan", "İmam Maturidi")
+                        if not is_range_busy(ev_start, ev_end):
+                            seen_persons[display_name] = s_start
+                            triggers.append(
+                                PlannedEditorialEvent(
+                                    event_id=f"trig_person_{len(triggers) + 1:02d}",
+                                    chapter_id=0,
+                                    action_type="PERSON_INTRODUCTION",
+                                    start_sec=ev_start,
+                                    end_sec=ev_end,
+                                    text_primary=display_name,
+                                    text_secondary="Kişi / Düşünür",
+                                    primary_web_query_tr=wiki_tr,
+                                    secondary_stock_query_en=wiki_en,
+                                    fallback_minimal_query_en=wiki_en,
+                                    person_wiki_tr=wiki_tr,
+                                    person_wiki_en=wiki_en,
+                                    semantic_priority=True,
+                                )
+                            )
+                            occupied_ranges.append((ev_start, ev_end))
+                            matched_person = True
+                            break
+
+            # Dinamik Unvanlı Kişi Yakalayıcı (Örn. "Prof. Dr. Ahmet Arslan")
             if not matched_person:
                 dyn_match = re.search(
                     r"\b((?:Prof\.?\s*(?:Dr\.?\s*)?|Doç\.?\s*Dr\.?\s*|İmam(?:-ı)?\s+)[A-ZÇĞİÖŞÜÂÎÛ][a-zçğıöşüâîû]+(?:\s+[A-ZÇĞİÖŞÜÂÎÛ][a-zçğıöşüâîû]+){0,2})",
@@ -303,220 +731,288 @@ class HolisticAnalyzer:
                     raw_person = re.sub(r"['’].*$", "", dyn_match.group(1).strip())
                     disp_person = to_turkish_upper(raw_person)
                     if len(disp_person) >= 7 and s_start - seen_persons.get(disp_person, -999.0) >= 240.0:
-                        seen_persons[disp_person] = s_start
                         clean_wiki = re.sub(r"^(Prof\.?\s*(?:Dr\.?\s*)?|Doç\.?\s*Dr\.?\s*)", "", raw_person, flags=re.I).strip()
-                        ev_start = round(s_start, 2)
-                        triggers.append(
-                            PlannedEditorialEvent(
-                                event_id=f"trig_person_{len(triggers) + 1:02d}",
-                                chapter_id=0,
-                                action_type="PERSON_INTRODUCTION",
-                                start_sec=ev_start,
-                                end_sec=round(min(video_duration - 0.2, ev_start + 4.5), 2),
-                                text_primary=disp_person,
-                                text_secondary="Kişi / Düşünür",
-                                primary_web_query_tr=clean_wiki,
-                                secondary_stock_query_en=clean_wiki,
-                                fallback_minimal_query_en=clean_wiki,
-                                person_wiki_tr=clean_wiki,
-                                person_wiki_en=clean_wiki,
-                                semantic_priority=True,
+                        start_tok = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 1), clean_wiki.split()[0])
+                        ev_start = round(start_tok.start if start_tok else s_start, 2)
+                        ev_end = round(min(video_duration - 0.2, ev_start + 3.6), 2)
+                        if not is_range_busy(ev_start, ev_end):
+                            seen_persons[disp_person] = s_start
+                            triggers.append(
+                                PlannedEditorialEvent(
+                                    event_id=f"trig_person_{len(triggers) + 1:02d}",
+                                    chapter_id=0,
+                                    action_type="PERSON_INTRODUCTION",
+                                    start_sec=ev_start,
+                                    end_sec=ev_end,
+                                    text_primary=disp_person,
+                                    text_secondary="Kişi / Düşünür",
+                                    primary_web_query_tr=clean_wiki,
+                                    secondary_stock_query_en=clean_wiki,
+                                    fallback_minimal_query_en=clean_wiki,
+                                    person_wiki_tr=clean_wiki,
+                                    person_wiki_en=clean_wiki,
+                                    semantic_priority=True,
+                                )
                             )
+                            occupied_ranges.append((ev_start, ev_end))
+
+            # 2. Somut Eser / Kitap / Kanunname Tanıtımı (WORK_INTRODUCTION)
+            for kw_tuple, work_title, wiki_tr, wiki_en in KNOWN_WORKS_WIKI_MAP:
+                if any(k in lower_cur for k in kw_tuple):
+                    if s_start - seen_works.get(work_title, -999.0) >= 300.0:
+                        first_kw = next((k.split()[0] for k in kw_tuple if k in lower_cur), kw_tuple[0].split()[0])
+                        start_tok = self._find_word_in_range(word_stream, i, i, first_kw)
+                        ev_start = round(start_tok.start if start_tok else s_start, 2)
+                        end_tok = (
+                            self._find_sentence_end_word(word_stream, start_tok, min(n_segs - 1, i + 1))
+                            if start_tok
+                            else None
                         )
-
-            # ------------------------------------------------------------------
-            # 2. SIRALAMA VE MADDELENDİRME (ENUMERATION_CALLOUT)
-            # ("Birincisi..., İkincisi..., Üçüncüsü..., Dördüncüsü..., Birinci kaynak...")
-            # ------------------------------------------------------------------
-            enum_results = self._extract_enumerations_from_segment(
-                text_cur=text_cur,
-                window_3=window_3,
-                seg_start=s_start,
-                seg_end=s_end,
-            )
-            for enum_ts, enum_title in enum_results:
-                if enum_title and enum_ts - seen_enumerations.get(enum_title, -999.0) >= 60.0:
-                    seen_enumerations[enum_title] = enum_ts
-                    triggers.append(
-                        PlannedEditorialEvent(
-                            event_id=f"trig_enum_{len(triggers) + 1:02d}",
-                            chapter_id=0,
-                            action_type="ENUMERATION_CALLOUT",
-                            start_sec=round(enum_ts, 2),
-                            end_sec=round(min(video_duration - 0.2, enum_ts + 3.4), 2),
-                            text_primary=enum_title,
-                            text_secondary="Sıralama Vurgusu",
-                            semantic_priority=True,
+                        ev_end = round(
+                            max(ev_start + 1.5, min(ev_start + 3.8, end_tok.end if end_tok else ev_start + 2.8)),
+                            2,
                         )
-                    )
+                        if not is_range_busy(ev_start, ev_end):
+                            seen_works[work_title] = s_start
+                            triggers.append(
+                                PlannedEditorialEvent(
+                                    event_id=f"trig_work_{len(triggers) + 1:02d}",
+                                    chapter_id=0,
+                                    action_type="WORK_INTRODUCTION",
+                                    start_sec=ev_start,
+                                    end_sec=ev_end,
+                                    text_primary=work_title,
+                                    text_secondary="Eser / Kanunname",
+                                    primary_web_query_tr=wiki_tr,
+                                    secondary_stock_query_en=wiki_en,
+                                    fallback_minimal_query_en=wiki_en,
+                                    person_wiki_tr=wiki_tr,
+                                    person_wiki_en=wiki_en,
+                                    semantic_priority=True,
+                                )
+                            )
+                            occupied_ranges.append((ev_start, ev_end))
+                            break
 
-            # ------------------------------------------------------------------
-            # 3. KAVRAM TANIMI, DELİL VE İLKE VURGULARI (DEFINITION_CALLOUT)
-            # (Eğer aynı segmentte zaten bir Kişi Tanıtımı veya 1./2./3. Sıralama yakalandıysa çakışmayı önle!)
-            # ------------------------------------------------------------------
-            if matched_person or enum_results:
-                continue
+        # ------------------------------------------------------------------
+        # AŞAMA D: ANLIK KISA TERİM VURGULARI (SINGLE_TERM / DEFINITION / ENUMERATION)
+        # (Tam o kelimede başlar, o cümlenin bitiş kelimesinde hemen kaybolur — GÖRSEL KONULMAZ!)
+        # ------------------------------------------------------------------
+        for i in range(n_segs):
+            text_cur = str(active_segments[i].get("text", "")).strip()
+            text_next = str(active_segments[i + 1].get("text", "")).strip() if i + 1 < n_segs else ""
+            window_2 = f"{text_cur} {text_next}".strip()
+            lower_cur = to_turkish_lower(text_cur)
+            lower_win2 = to_turkish_lower(window_2)
+            s_start = float(active_segments[i].get("start", 0.0))
 
-            for kw_tuple, def_title, stock_en in KNOWN_DEFINITIONS_MAP:
+            matched_term = False
+            for kw_tuple, start_hint, end_hint, display_term in SHORT_CONCEPT_TERMS:
                 if any(k in lower_cur for k in kw_tuple) or (
                     any(k in lower_win2 for k in kw_tuple)
                     and not any(k in to_turkish_lower(text_next) for k in kw_tuple)
                 ):
-                    last_def_ts = seen_definitions.get(def_title, -999.0)
-                    if s_start - last_def_ts >= 180.0:
-                        seen_definitions[def_title] = s_start
-                        ev_start = round(s_start, 2)
-                        w_tr, w_en = "", ""
-                        if "|" in stock_en:
-                            w_tr, w_en = stock_en.split("|", 1)
-                        elif stock_en:
-                            w_en = stock_en
+                    if s_start - seen_terms.get(display_term, -999.0) < 120.0:
+                        continue
+                    start_tok = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 1), start_hint)
+                    ev_start = round(start_tok.start if start_tok else s_start, 2)
+                    if start_tok:
+                        end_tok = self._find_sentence_end_word(
+                            word_stream, start_tok, min(n_segs - 1, start_tok.seg_idx + 1), end_hint
+                        )
+                        ev_end = round(max(ev_start + 0.9, min(ev_start + 3.4, end_tok.end)), 2)
+                    else:
+                        ev_end = round(min(video_duration - 0.2, ev_start + 2.2), 2)
+
+                    if not is_range_busy(ev_start, ev_end):
+                        seen_terms[display_term] = s_start
+                        act_type = (
+                            "ENUMERATION_CALLOUT"
+                            if any(
+                                o in lower_win2
+                                for o in ("birincisi", "ikincisi", "üçüncüsü", "dördüncüsü")
+                            )
+                            else "DEFINITION_CALLOUT"
+                        )
                         triggers.append(
                             PlannedEditorialEvent(
-                                event_id=f"trig_def_{len(triggers) + 1:02d}",
+                                event_id=f"trig_term_{len(triggers) + 1:02d}",
                                 chapter_id=0,
-                                action_type="CONCEPT_IMAGE_CARD" if (w_tr or w_en) else "DEFINITION_CALLOUT",
+                                action_type=act_type,
                                 start_sec=ev_start,
-                                end_sec=round(min(video_duration - 0.2, ev_start + 4.0), 2),
-                                text_primary=def_title,
-                                text_secondary="Kavram / Tanım",
-                                primary_web_query_tr=w_tr,
-                                secondary_stock_query_en=w_en,
-                                fallback_minimal_query_en=w_en,
+                                end_sec=ev_end,
+                                text_primary=display_term,
+                                text_secondary="Kavram Vurgusu",
                                 semantic_priority=True,
                             )
                         )
+                        occupied_ranges.append((ev_start, ev_end))
+                        matched_term = True
                         break
-            else:
-                # Genel Türkçe Tanım Kalıbı ("... delili", "... ilkesi", "... teorisi", "... demektir")
-                gen_def = self._extract_generic_definition_from_window(text_cur, window_2)
-                if gen_def and s_start - seen_definitions.get(gen_def, -999.0) >= 120.0:
-                    seen_definitions[gen_def] = s_start
-                    ev_start = round(s_start, 2)
-                    triggers.append(
-                        PlannedEditorialEvent(
-                            event_id=f"trig_def_{len(triggers) + 1:02d}",
-                            chapter_id=0,
-                            action_type="DEFINITION_CALLOUT",
-                            start_sec=ev_start,
-                            end_sec=round(min(video_duration - 0.2, ev_start + 3.8), 2),
-                            text_primary=gen_def,
-                            text_secondary="Tanım",
-                            semantic_priority=True,
-                        )
-                    )
 
-        # Zaman sırasına göre diz ve aynı saniyeye düşen mükerrer tetikleyicileri birleştir
-        triggers.sort(key=lambda e: (e.start_sec, 0 if e.action_type == "PERSON_INTRODUCTION" else 1))
-        deduped: List[PlannedEditorialEvent] = []
-        for trig in triggers:
-            if deduped and abs(trig.start_sec - deduped[-1].start_sec) < 16.0:
-                if trig.text_primary in deduped[-1].text_primary or deduped[-1].text_primary in trig.text_primary:
-                    continue
-            if deduped and abs(trig.start_sec - deduped[-1].start_sec) < 2.2:
-                # Eğer biri PERSON_INTRODUCTION ise onu koru, ya da ikincisini +3.2sn ötele
-                if trig.action_type == "ENUMERATION_CALLOUT" and deduped[-1].action_type == "ENUMERATION_CALLOUT":
-                    trig.start_sec = round(deduped[-1].start_sec + 3.0, 2)
-                    trig.end_sec = round(trig.start_sec + 3.2, 2)
-                    deduped.append(trig)
+            # Genel "Birincisi X, İkincisi Y" ve "... delili / ... ilkesi / ... kanunu" yakalayıcı
+            if not matched_term:
+                gen_ev = self._extract_generic_word_synced_term(
+                    i, active_segments, word_stream, seen_terms, is_range_busy
+                )
+                if gen_ev:
+                    triggers.append(gen_ev)
+                    occupied_ranges.append((gen_ev.start_sec, gen_ev.end_sec))
+
+        # Kronolojik sırala ve bir sonraki tekil olay başlamadan hemen önce bitişleri kırp
+        triggers.sort(key=lambda e: (e.start_sec, e.stack_slot if e.stack_slot is not None else -1))
+        for idx in range(len(triggers) - 1):
+            cur_ev = triggers[idx]
+            nxt_ev = triggers[idx + 1]
+            # Aynı grup içindeki (PROGRESSIVE_LIST veya PAIRED_TERMS) öğeler birlikte ekranda kalır!
+            if cur_ev.group_id and cur_ev.group_id == nxt_ev.group_id:
                 continue
-            deduped.append(trig)
+            # Farklı bir grup veya yeni bir kavram başlıyorsa, önceki kavram yeni kelime başlamadan 0.08s önce silinir!
+            if cur_ev.end_sec > nxt_ev.start_sec - 0.08:
+                cur_ev.end_sec = round(max(cur_ev.start_sec + 0.55, nxt_ev.start_sec - 0.08), 2)
 
-        return deduped
+        return triggers
 
-    def _extract_enumerations_from_segment(
+    def _detect_generic_comma_lists(
         self,
-        text_cur: str,
-        window_3: str,
-        seg_start: float,
-        seg_end: float,
-    ) -> List[Tuple[float, str]]:
+        active_segments: List[Dict[str, Any]],
+        word_stream: List[WordToken],
+        triggers: List[PlannedEditorialEvent],
+        occupied_ranges: List[Tuple[float, float]],
+        is_range_busy: Any,
+    ) -> None:
         """
-        Mevcut segmentte başlayan "Birincisi..., İkincisi..., Üçüncüsü..., Dördüncüsü...,
-        Birinci kaynak..., İkinci kaynak..." ifadelerini 3 segmentlik pencereden tam olarak çıkarır.
+        Önceden tanımlı kurallarda olmasa bile herhangi bir videoda konuşmacının
+        virgüllerle ardışık saydığı (ör. "A, B, C ve D") 3+ maddelik kelime dizilerini
+        otomatik olarak yakalayıp kelime-senkronlu PROGRESSIVE_LIST'e dönüştürür.
         """
-        results: List[Tuple[float, str]] = []
-        lower_cur = to_turkish_lower(text_cur)
-        lower_win = to_turkish_lower(window_3)
+        n_tokens = len(word_stream)
+        idx = 0
+        while idx < n_tokens - 3:
+            tok = word_stream[idx]
+            if tok.has_comma and len(tok.clean) >= 3:
+                chain: List[WordToken] = [tok]
+                cur = idx + 1
+                while cur < n_tokens and len(chain) < 7:
+                    nxt = word_stream[cur]
+                    if nxt.has_comma and len(nxt.clean) >= 3:
+                        chain.append(nxt)
+                        cur += 1
+                    elif nxt.lower in ("ve", "ile", "yahut", "veya") and cur + 1 < n_tokens:
+                        after_ve = word_stream[cur + 1]
+                        if len(after_ve.clean) >= 3:
+                            chain.append(after_ve)
+                        cur += 2
+                        break
+                    else:
+                        if len(chain) >= 2 and len(nxt.clean) >= 3 and not nxt.has_sentence_end:
+                            chain.append(nxt)
+                            cur += 1
+                        break
 
-        # Özel yüksek doğruluklu kalıplar (İslam Hukuku Kaynakları & Şeriat Türleri vb.)
-        special_enum_patterns: List[Tuple[str, str, str]] = [
-            ("birinci ve mutlak kaynak", "birinci ve mutlak kaynak", "1. KAYNAK: KUR'AN-I KERİM"),
-            ("ikinci kaynak", "sünnet", "2. KAYNAK: SÜNNET-İ SENİYYE"),
-            ("üçüncü kaynak", "icma", "3. KAYNAK: İCMA"),
-            ("dördüncü kaynak", "kıyas", "4. KAYNAK: KIYAS"),
-            ("birincisi tenzili", "tenzili", "1. TENZİLİ (TEŞRİ) ŞERİAT"),
-            ("ikincisi ise tekvini", "tekvini", "2. TEKVİNİ ŞERİAT (KAİNAT KİTABI)"),
-            ("ikincisi tekvini", "tekvini", "2. TEKVİNİ ŞERİAT (TABİAT KANUNLARI)"),
-            ("üçüncüsü ise mahiyet", "akli şeriat", "3. AKLİ ŞERİAT (MANTIK İLKELERİ)"),
-        ]
-        for cur_trigger, win_confirm, formatted_title in special_enum_patterns:
-            if cur_trigger in lower_cur and win_confirm in lower_win:
-                # Eğer cümlenin ikinci yarısında geçiyorsa zaman damgasını hafifçe ileri kaydır
-                pos_ratio = lower_cur.find(cur_trigger) / max(1.0, float(len(lower_cur)))
-                ts = seg_start + pos_ratio * max(0.5, (seg_end - seg_start) * 0.6)
-                results.append((round(ts, 2), formatted_title))
+                if len(chain) >= 3:
+                    end_tok = self._find_sentence_end_word(
+                        word_stream, chain[-1], min(len(active_segments) - 1, chain[-1].seg_idx + 1)
+                    )
+                    shared_end = round(max(chain[-1].end + 0.35, end_tok.end), 2)
+                    if not is_range_busy(chain[0].start, shared_end):
+                        grp_id = f"grp_auto_list_{chain[0].idx}"
+                        for slot_idx, c_tok in enumerate(chain):
+                            label = to_turkish_upper(c_tok.clean)
+                            triggers.append(
+                                PlannedEditorialEvent(
+                                    event_id=f"{grp_id}_{slot_idx + 1}",
+                                    chapter_id=0,
+                                    action_type="PROGRESSIVE_LIST",
+                                    start_sec=round(c_tok.start, 2),
+                                    end_sec=shared_end,
+                                    text_primary=label,
+                                    text_secondary=f"Sıralama {slot_idx + 1}",
+                                    semantic_priority=True,
+                                    group_id=grp_id,
+                                    stack_slot=slot_idx,
+                                )
+                            )
+                        occupied_ranges.append((chain[0].start, shared_end))
+                        idx = cur
+                        continue
+            idx += 1
 
-        if results:
-            return results
-
-        # Genel Türkçe Sıralama Kalıbı:
-        # "Birincisi X", "İkincisi Y", "Üçüncüsü Z", "Dördüncüsü W", "Birinci adım X", "İkinci şart Y"
-        ordinal_map = {
-            "birincisi": "1.",
-            "ikincisi": "2.",
-            "üçüncüsü": "3.",
-            "dördüncüsü": "4.",
-            "beşincisi": "5.",
-            "birinci": "1.",
-            "ikinci": "2.",
-            "üçüncü": "3.",
-            "dördüncü": "4.",
-            "beşinci": "5.",
-        }
-        pattern = re.compile(
-            r"\b(birincisi|ikincisi|üçüncüsü|dördüncüsü|beşincisi|"
-            r"(?:birinci|ikinci|üçüncü|dördüncü|beşinci)\s+(?:kaynak|delil|şart|ilke|kural|adım|aşama|bölüm|husus|nokta))"
-            r"\s*(?:ise\s+|olarak\s+|yani\s+)?([^.!?;:]{4,55})",
-            flags=re.IGNORECASE,
+    def _extract_generic_word_synced_term(
+        self,
+        seg_idx: int,
+        active_segments: List[Dict[str, Any]],
+        word_stream: List[WordToken],
+        seen_terms: Dict[str, float],
+        is_range_busy: Any,
+    ) -> Optional[PlannedEditorialEvent]:
+        text_cur = str(active_segments[seg_idx].get("text", "")).strip()
+        text_next = (
+            str(active_segments[seg_idx + 1].get("text", "")).strip()
+            if seg_idx + 1 < len(active_segments)
+            else ""
         )
-        for m in pattern.finditer(window_3):
-            if m.start() >= len(text_cur):
-                continue
-            ord_raw = to_turkish_lower(m.group(1).strip())
-            first_word = ord_raw.split()[0]
-            num_prefix = ordinal_map.get(first_word, "1.")
-            rest_phrase = m.group(2).strip()
+        window_2 = f"{text_cur} {text_next}".strip()
+        s_start = float(active_segments[seg_idx].get("start", 0.0))
 
-            # "dir / dır / tir / tır / dur / dür" bildirme eklerini temizle
-            rest_title = extract_turkish_semantic_title(rest_phrase, max_chars=28)
-            if rest_title and len(rest_title) >= 3:
-                pos_ratio = m.start() / max(1.0, float(len(text_cur)))
-                ts = seg_start + pos_ratio * max(0.4, (seg_end - seg_start) * 0.5)
-                results.append((round(ts, 2), f"{num_prefix} {rest_title}"))
-
-        return results
-
-    def _extract_generic_definition_from_window(
-        self, text_cur: str, window_2: str
-    ) -> Optional[str]:
-        """
-        Herhangi bir Türkçe eğitim/felsefe/hukuk/bilim videosunda geçen
-        '... delili', '... ilkesi', '... teorisi', '... kanunu' kavramlarını yakalar.
-        """
-        m = re.search(
-            r"\b([A-ZÇĞİÖŞÜa-zçğıöşüâîû'\-]{3,18}(?:\s+[A-ZÇĞİÖŞÜa-zçğıöşüâîû'\-]{2,18}){0,2}\s+"
-            r"(?:delili|ilkesi|teorisi|kanunu|doktrini|hipotezi|paradoksu|yasası))\b",
+        # 1. Genel "Birincisi X / İkincisi Y / Üçüncüsü Z"
+        m_ord = re.search(
+            r"\b(birincisi|ikincisi|üçüncüsü|dördüncüsü|beşincisi)\s+(?:ise\s+|yani\s+)?([A-ZÇĞİÖŞÜa-zçğıöşüâîû'\-]{3,18}(?:\s+[A-ZÇĞİÖŞÜa-zçğıöşüâîû'\-]{3,18})?)",
             window_2,
             flags=re.IGNORECASE,
         )
-        if m and m.start() < len(text_cur):
-            raw_phrase = m.group(1).strip()
+        if m_ord and m_ord.start() < len(text_cur):
+            concept_raw = m_ord.group(2).strip()
+            title = extract_turkish_semantic_title(concept_raw, max_chars=24)
+            if title and len(title) >= 3 and s_start - seen_terms.get(title, -999.0) >= 90.0:
+                first_w = concept_raw.split()[0]
+                tok = self._find_word_in_range(word_stream, seg_idx, min(len(active_segments) - 1, seg_idx + 1), first_w)
+                ev_st = round(tok.start if tok else s_start, 2)
+                end_tok = self._find_sentence_end_word(word_stream, tok, min(len(active_segments) - 1, seg_idx + 1)) if tok else None
+                ev_en = round(max(ev_st + 0.9, min(ev_st + 3.0, end_tok.end if end_tok else ev_st + 2.0)), 2)
+                if not is_range_busy(ev_st, ev_en):
+                    seen_terms[title] = s_start
+                    return PlannedEditorialEvent(
+                        event_id=f"trig_ord_{seg_idx}",
+                        chapter_id=0,
+                        action_type="ENUMERATION_CALLOUT",
+                        start_sec=ev_st,
+                        end_sec=ev_en,
+                        text_primary=title,
+                        text_secondary="Sıralama Vurgusu",
+                        semantic_priority=True,
+                    )
+
+        # 2. Genel "... delili / ... ilkesi / ... teorisi / ... kanunu"
+        m_def = re.search(
+            r"\b([A-ZÇĞİÖŞÜa-zçğıöşüâîû'\-]{3,16}\s+(?:delili|ilkesi|teorisi|doktrini|paradoksu))\b",
+            window_2,
+            flags=re.IGNORECASE,
+        )
+        if m_def and m_def.start() < len(text_cur):
+            raw_phrase = m_def.group(1).strip()
             lower_p = to_turkish_lower(raw_phrase)
-            # Zamir veya sıfat tamlamalarını ("bu delili", "bir kanunu") ele
             bad_starts = ("bu ", "şu ", "o ", "bir ", "her ", "hangi ", "aynı ", "böyle ", "diğer ")
             if not any(lower_p.startswith(bs) for bs in bad_starts):
-                return extract_turkish_semantic_title(raw_phrase, max_chars=34)
+                title = extract_turkish_semantic_title(raw_phrase, max_chars=24)
+                if title and s_start - seen_terms.get(title, -999.0) >= 120.0:
+                    first_w = raw_phrase.split()[0]
+                    tok = self._find_word_in_range(word_stream, seg_idx, min(len(active_segments) - 1, seg_idx + 1), first_w)
+                    ev_st = round(tok.start if tok else s_start, 2)
+                    end_tok = self._find_sentence_end_word(word_stream, tok, min(len(active_segments) - 1, seg_idx + 1)) if tok else None
+                    ev_en = round(max(ev_st + 0.9, min(ev_st + 3.2, end_tok.end if end_tok else ev_st + 2.2)), 2)
+                    if not is_range_busy(ev_st, ev_en):
+                        seen_terms[title] = s_start
+                        return PlannedEditorialEvent(
+                            event_id=f"trig_def_{seg_idx}",
+                            chapter_id=0,
+                            action_type="DEFINITION_CALLOUT",
+                            start_sec=ev_st,
+                            end_sec=ev_en,
+                            text_primary=title,
+                            text_secondary="Tanım Vurgusu",
+                            semantic_priority=True,
+                        )
         return None
 
     def _find_natural_chapter_boundaries(
@@ -525,10 +1021,6 @@ class HolisticAnalyzer:
         video_duration: float,
         num_chapters: int,
     ) -> List[float]:
-        """
-        İdeal eşit zaman noktalarına (i * D / M) en yakın cümle arası boşluğu
-        (seg[k].end -> seg[k+1].start) bularak cümle ortasında kesmeyi önler.
-        """
         if num_chapters <= 1 or not active_segments:
             return [0.0, video_duration]
 
@@ -565,177 +1057,54 @@ class HolisticAnalyzer:
         ch_segments: List[Dict[str, Any]],
         theme_profile: ThemeProfile,
         chapter_triggers: Optional[List[PlannedEditorialEvent]] = None,
-        used_titles_global: Optional[Set[str]] = None,
     ) -> ChapterPlan:
         """
-        Tek bir bölüm (ör. 05:00 - 07:15) için:
-          1. Yüksek öncelikli Semantik Tetikleyicileri (PERSON_INTRODUCTION, ENUMERATION_CALLOUT, DEFINITION_CALLOUT)
-          2. Bölüm Başlığı Kartını (CHAPTER_TITLE_CARD)
-          3. Gerekirse tamamlayıcı anahtar kavram vurgularını
-        birleştirerek zengin ve anlamlı bir ChapterPlan üretir.
+        Her bölüm için:
+          - Varsa kelime-senkronlu Semantik Tetikleyicileri (PROGRESSIVE_LIST, PAIRED_TERMS,
+            PERSON_INTRODUCTION, WORK_INTRODUCTION, SINGLE_TERM/DEFINITION) doğrudan korur.
+          - Rastgele cümlelerden anlamsız kelimeler kesen eski dolgu (filler) döngüsünü ASLA çalıştırmaz;
+            yalnızca bölümde hiç tetikleyici yoksa (test/kısa videolar için) en yüksek semantik skorlu
+            1-2 kısa terimi kelime sınırlarına kilitleyerek ekler.
         """
-        if used_titles_global is None:
-            used_titles_global = set()
         chapter_triggers = list(chapter_triggers or [])
-
-        ch_duration = max(1.0, ch_end - ch_start)
-        base_max_events = max(
-            3,
-            min(
-                8,
-                int(math.floor((ch_duration / 60.0) * theme_profile.max_overlays_per_minute)) + 1,
-            ),
-        )
-        max_events = max(base_max_events, len(chapter_triggers) + 1)
-
-        if (
-            self.enable_llm_planning
-            and not chapter_triggers
-            and self.gemini
-            and getattr(self.gemini, "is_available", lambda: False)()
-        ):
-            llm_plan = self._call_llm_for_chapter(
-                chapter_id, ch_start, ch_end, ch_segments, theme_profile, max_events
-            )
-            if llm_plan:
-                return llm_plan
-
-        # Bölüm başlığını 2 segmentlik birleştirilmiş tam cümleden çıkar (yarım segment kesilmesini önle!)
-        joined_opening = " ".join(str(s.get("text", "")).strip() for s in ch_segments[:2])
-        chapter_title = (
-            extract_turkish_semantic_title(joined_opening, max_chars=34)
-            or f"BÖLÜM {chapter_id}"
-        )
-
         events: List[PlannedEditorialEvent] = []
 
-        # 1. Önce bu bölümdeki tüm Semantik Tetikleyicileri (Kişi, Sıralama, Tanım) ekle
         for idx, trig in enumerate(chapter_triggers):
             trig.chapter_id = chapter_id
-            trig.event_id = f"evt_ch{chapter_id}_sem_{idx + 1:02d}"
+            if not trig.event_id:
+                trig.event_id = f"evt_ch{chapter_id}_{idx + 1:02d}"
             events.append(trig)
-            used_titles_global.add(trig.text_primary)
 
-        # 2. Bölüm açılışında (ilk 6 saniyede) zaten bir semantik tetikleyici yoksa Bölüm Başlığı ekle
-        used_titles_chapter: Set[str] = set(e.text_primary for e in events)
-        first_ts = max(0.3, float(ch_segments[0].get("start", ch_start)) + 0.3)
-        has_early_trigger = any(abs(e.start_sec - first_ts) < 12.0 for e in events)
-        if not has_early_trigger and len(chapter_triggers) < 2:
-            if chapter_title in used_titles_global:
-                alt_open = " ".join(str(ch_segments[0].get("text", "")).split()[3:])
-                chapter_title = extract_turkish_semantic_title(alt_open, max_chars=34) or f"BÖLÜM {chapter_id}: {chapter_title[:22]}"
-            first_end = min(ch_end - 0.3, first_ts + 3.6)
-            if first_end <= first_ts + 0.8:
-                first_end = first_ts + 2.5
-            events.append(
-                PlannedEditorialEvent(
-                    event_id=f"evt_ch{chapter_id}_01",
-                    chapter_id=chapter_id,
-                    action_type="CHAPTER_TITLE_CARD",
-                    start_sec=round(first_ts, 2),
-                    end_sec=round(first_end, 2),
-                    text_primary=chapter_title,
-                    text_secondary=f"Bölüm {chapter_id}",
-                )
-            )
-            used_titles_chapter.add(chapter_title)
-            used_titles_global.add(chapter_title)
+        # Eğer bölümde hiç semantik tetikleyici yakalanmadıysa (ör. sentetik birim testleri),
+        # yalnızca o bölümdeki 2 segmentten kısa terim çıkar
+        if not events and ch_segments:
+            word_stream = self._build_word_stream(ch_segments)
+            step = max(1, len(ch_segments) // 2)
+            for idx_s in range(0, len(ch_segments), step):
+                if len(events) >= 2:
+                    break
+                seg = ch_segments[idx_s]
+                s_text = str(seg.get("text", "")).strip()
+                short_title = extract_turkish_semantic_title(s_text, max_chars=22)
+                if short_title:
+                    seg_toks = [t for t in word_stream if t.seg_idx == idx_s]
+                    st_sec = seg_toks[0].start if seg_toks else float(seg.get("start", ch_start))
+                    en_sec = seg_toks[-1].end if seg_toks else min(ch_end, st_sec + 2.2)
+                    events.append(
+                        PlannedEditorialEvent(
+                            event_id=f"evt_ch{chapter_id}_fallback_{idx_s + 1}",
+                            chapter_id=chapter_id,
+                            action_type="KEY_TERM_CALLOUT",
+                            start_sec=round(st_sec, 2),
+                            end_sec=round(max(st_sec + 0.8, en_sec), 2),
+                            text_primary=short_title,
+                            text_secondary=f"Bölüm {chapter_id}",
+                            semantic_priority=True,
+                        )
+                    )
 
-        # 3. Eğer bu bölümde en az 2 adet gerçek semantik tetikleyici (Tanım, Sıralama, Kişi) zaten yakalandıysa,
-        # rastgele cümlelerden başlık kesen dolgu döngüsünü çalıştırma!
-        if len(chapter_triggers) >= 2:
-            events.sort(key=lambda e: e.start_sec)
-            return ChapterPlan(
-                chapter_id=chapter_id,
-                start_sec=round(ch_start, 2),
-                end_sec=round(ch_end, 2),
-                title_tr=events[0].text_primary if events else chapter_title,
-                key_terms=[e.text_primary for e in events],
-                events=events,
-            )
-        min_gap = min(theme_profile.min_gap_between_overlays_sec, max(4.0, ch_duration / 3.5))
-        scored_candidates = []
-        for idx_s in range(len(ch_segments)):
-            s = ch_segments[idx_s]
-            s_start = float(s.get("start", 0))
-            s_text = str(s.get("text", "")).strip()
-            next_text = str(ch_segments[idx_s + 1].get("text", "")).strip() if idx_s + 1 < len(ch_segments) else ""
-            combined_text = f"{s_text} {next_text}".strip()
-            if len(s_text) < 12:
-                continue
-            score = self._score_semantic_importance(combined_text)
-            scored_candidates.append((score, s_start, combined_text, s_text))
-
-        scored_candidates.sort(key=lambda x: (-x[0], x[1]))
-
-        evt_counter = len(events) + 1
-        for _score, s_start, combined_text, s_text in scored_candidates:
-            if len(events) >= max_events:
-                break
-            if any(abs(s_start - existing.start_sec) < max(12.0, min_gap) for existing in events):
-                continue
-
-            # Eğer cümlede "madde 114 ..." gibi spesifik bir kanun maddesi varsa onu öne çıkar
-            art_match = re.search(r"\b(madde\s+\d+(?:\s+[a-zçğıöşüA-ZÇĞİÖŞÜ]+){0,2})", combined_text, flags=re.I)
-            if art_match:
-                semantic_title = extract_turkish_semantic_title(art_match.group(1), max_chars=34)
-            else:
-                semantic_title = extract_turkish_semantic_title(combined_text, max_chars=34)
-
-            if semantic_title in used_titles_chapter or semantic_title in used_titles_global:
-                tail_words = combined_text.split()[3:]
-                if len(tail_words) >= 2:
-                    alt_title = extract_turkish_semantic_title(" ".join(tail_words), max_chars=34)
-                    if alt_title and len(alt_title) >= 4:
-                        semantic_title = alt_title
-
-            if (
-                not semantic_title
-                or len(semantic_title) < 4
-                or semantic_title in used_titles_chapter
-                or len(semantic_title.split()) < 2
-            ):
-                continue
-
-            lower_text = to_turkish_lower(combined_text)
-            has_number = bool(re.search(r"\b(\d+|madde|md\.|fıkra|yüzde|%)\b", lower_text))
-            if has_number:
-                action_type = "STAT_OR_ARTICLE_CALLOUT"
-            elif evt_counter % 3 == 0:
-                action_type = "CONCEPT_IMAGE_CARD"
-            else:
-                action_type = "KEY_TERM_CALLOUT"
-
-            web_q_tr, stock_q_en, fallback_q_en = self._build_visual_queries(
-                semantic_title, combined_text, theme_profile.id
-            )
-
-            ev_end = min(ch_end - 0.2, s_start + 3.8)
-            if ev_end <= s_start + 1.0:
-                ev_end = s_start + 3.0
-
-            events.append(
-                PlannedEditorialEvent(
-                    event_id=f"evt_ch{chapter_id}_{evt_counter:02d}",
-                    chapter_id=chapter_id,
-                    action_type=action_type,
-                    start_sec=round(s_start, 2),
-                    end_sec=round(ev_end, 2),
-                    text_primary=semantic_title,
-                    text_secondary="",
-                    primary_web_query_tr=web_q_tr,
-                    secondary_stock_query_en=stock_q_en,
-                    fallback_minimal_query_en=fallback_q_en,
-                )
-            )
-            used_titles_chapter.add(semantic_title)
-            used_titles_global.add(semantic_title)
-            evt_counter += 1
-
-        events.sort(key=lambda e: e.start_sec)
-        if events and chapter_title.startswith("BÖLÜM "):
-            chapter_title = events[0].text_primary
-
+        events.sort(key=lambda e: (e.start_sec, e.stack_slot if e.stack_slot is not None else -1))
+        chapter_title = events[0].text_primary if events else f"BÖLÜM {chapter_id}"
         return ChapterPlan(
             chapter_id=chapter_id,
             start_sec=round(ch_start, 2),
@@ -745,173 +1114,34 @@ class HolisticAnalyzer:
             events=events,
         )
 
-    def _call_llm_for_chapter(
-        self,
-        chapter_id: int,
-        ch_start: float,
-        ch_end: float,
-        ch_segments: List[Dict[str, Any]],
-        theme_profile: ThemeProfile,
-        max_events: int,
-    ) -> Optional[ChapterPlan]:
-        """GeminiClient üzerinden bölüm için yapılandırılmış JSON kurgu planı üretir."""
-        try:
-            lines = [
-                f"[{float(s.get('start', 0)):.1f}s - {float(s.get('end', 0)):.1f}s] {str(s.get('text', '')).strip()}"
-                for s in ch_segments[:45]
-            ]
-            transcript_block = "\n".join(lines)
-            prompt = (
-                f"Sen profesyonel bir kurgu yönetmenisin. Video teması: {theme_profile.display_name}.\n"
-                f"Bu bölüm [{ch_start:.1f}s - {ch_end:.1f}s] aralığındadır.\n"
-                f"Aşağıdaki transkriptten en fazla {max_events} adet kurgu olayı seç.\n"
-                "KURALLAR:\n"
-                "1. 'text_primary' TAM BİR TÜRKÇE KAVRAM VEYA İSİM TAMLAMASI olmalıdır (en fazla 34 karakter). "
-                "ASLA cümleyi ortasından kesme, ASLA '...' kullanma!\n"
-                "2. Kişi tanıtımlarını ('PERSON_INTRODUCTION'), sıralamaları ('ENUMERATION_CALLOUT': 1. ..., 2. ...) "
-                "ve tanımları ('DEFINITION_CALLOUT') mutlaka yakala.\n"
-                "Sadece aşağıdaki JSON formatında yanıt ver:\n"
-                '{"chapter_title": "...", "events": [{"action_type": "CHAPTER_TITLE_CARD|PERSON_INTRODUCTION|ENUMERATION_CALLOUT|DEFINITION_CALLOUT|KEY_TERM_CALLOUT", '
-                '"start_sec": 12.5, "text_primary": "...", "primary_web_query_tr": "...", "secondary_stock_query_en": "..."}]}\n\n'
-                f"TRANSKRİPT:\n{transcript_block}"
-            )
-            raw = self.gemini.generate_text(prompt, max_retries=1)
-            if not raw:
-                return None
-            cleaned = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-            data = self.gemini._safe_parse_json(cleaned) if hasattr(self.gemini, "_safe_parse_json") else json.loads(cleaned)
-            if not isinstance(data, dict):
-                return None
-            raw_events = data.get("events", [])
-            if not raw_events:
-                return None
-
-            events: List[PlannedEditorialEvent] = []
-            for idx, ev in enumerate(raw_events[:max_events]):
-                st = max(ch_start + 0.2, min(ch_end - 2.0, float(ev.get("start_sec", ch_start))))
-                title = extract_turkish_semantic_title(str(ev.get("text_primary", "")), max_chars=34)
-                if not title:
-                    continue
-                web_q, stock_q, fallback_q = self._build_visual_queries(title, title, theme_profile.id)
-                events.append(
-                    PlannedEditorialEvent(
-                        event_id=f"evt_ch{chapter_id}_{idx + 1:02d}",
-                        chapter_id=chapter_id,
-                        action_type=str(ev.get("action_type", "KEY_TERM_CALLOUT")),
-                        start_sec=round(st, 2),
-                        end_sec=round(min(ch_end - 0.2, st + 3.8), 2),
-                        text_primary=title,
-                        primary_web_query_tr=str(ev.get("primary_web_query_tr") or web_q),
-                        secondary_stock_query_en=str(ev.get("secondary_stock_query_en") or stock_q),
-                        fallback_minimal_query_en=fallback_q,
-                    )
-                )
-            if not events:
-                return None
-            return ChapterPlan(
-                chapter_id=chapter_id,
-                start_sec=round(ch_start, 2),
-                end_sec=round(ch_end, 2),
-                title_tr=extract_turkish_semantic_title(str(data.get("chapter_title", "")), 34) or events[0].text_primary,
-                key_terms=[e.text_primary for e in events],
-                events=events,
-            )
-        except Exception as exc:
-            logger.warning(f"[HolisticAnalyzer] Bölüm {chapter_id} LLM çağrısı yedek plana düştü: {exc}")
-            return None
-
-    def _score_semantic_importance(self, text: str) -> float:
-        lower = to_turkish_lower(text)
-        score = 1.0
-        for kw in (
-            "önemli", "dikkat", "şart", "kural", "madde", "kanun",
-            "temel", "birincisi", "ikincisi", "üçüncüsü", "dördüncüsü",
-            "delil", "ilke", "kavram", "tanım", "yani", "demektir",
-            "sonuç", "kritik", "özetle", "kaynak", "hüküm", "adalet",
-        ):
-            if kw in lower:
-                score += 1.5
-        if "?" in text or "!" in text:
-            score += 1.0
-        return score
-
-    def _build_visual_queries(
-        self, title_tr: str, sentence_tr: str, theme_id: str
-    ) -> Tuple[str, str, str]:
-        """
-        Türkçe kavramı YALNIZCA somut görsel karşılığı varsa ansiklopedik/stok sorguya çevirir.
-        Soyut cümle parçalarını ASLA ham web sorgusu olarak döndürmez!
-        """
-        lower = to_turkish_lower(title_tr + " " + sentence_tr)
-        if any(k in lower for k in ("kur'an", "kuran-ı kerim", "vahiy", "ayet", "sure")):
-            return (
-                "Kur'an",
-                "Quran",
-                "Islamic calligraphy manuscript Quran",
-            )
-        if any(k in lower for k in ("mahkeme", "dava", "hukuk", "kanun", "hakim", "hmk", "yargı", "anayasa", "adalet")):
-            return (
-                "Adalet",
-                "Lady Justice",
-                "wooden judge gavel law book courtroom desk",
-            )
-        if any(k in lower for k in ("kainat", "evren", "kozmos", "uzay", "galaksi", "yıldız", "güneş")):
-            return (
-                "Evren",
-                "Universe",
-                "cosmos galaxy stars nebula space",
-            )
-        if any(k in lower for k in ("sözleşme", "imza", "borç", "taraflar", "dilekçe", "tebligat")):
-            return (
-                "Sözleşme",
-                "Contract",
-                "signing legal contract document fountain pen desk",
-            )
-        if theme_id == "corporate_explainer":
-            return (
-                "",
-                "modern executive boardroom presentation analytics",
-                "minimalist corporate office architecture",
-            )
-        if theme_id == "tech_review":
-            return (
-                "",
-                "modern software engineering monitor code close up",
-                "clean minimal technology desk hardware",
-            )
-        if theme_id == "cinematic_documentary":
-            return (
-                "",
-                "cinematic historical architecture dramatic lighting",
-                "vintage archive manuscript library",
-            )
-        # Soyut akademik/felsefi konularda rastgele haber sitesi görseli çekilmemesi için web_q_tr boş bırakılır
-        return (
-            "",
-            "",
-            "",
-        )
-
     @staticmethod
     def _normalize_cuts(cuts: List[Any]) -> List[Tuple[float, float]]:
-        out: List[Tuple[float, float]] = []
+        result = []
         for c in cuts:
-            if isinstance(c, (tuple, list)) and len(c) >= 2:
-                out.append((float(c[0]), float(c[1])))
-            elif isinstance(c, dict):
-                out.append((float(c.get("start", 0.0)), float(c.get("end", 0.0))))
+            if isinstance(c, dict):
+                st = float(c.get("start", c.get("Start", 0)))
+                en = float(c.get("end", c.get("End", 0)))
+                is_del = c.get("isDeleted", c.get("IsDeleted", True))
+                if is_del and en > st:
+                    result.append((st, en))
             elif hasattr(c, "start") and hasattr(c, "end"):
-                out.append((float(getattr(c, "start", 0.0)), float(getattr(c, "end", 0.0))))
-        return out
+                if getattr(c, "isDeleted", True) and float(c.end) > float(c.start):
+                    result.append((float(c.start), float(c.end)))
+        return sorted(result, key=lambda x: x[0])
 
+    @staticmethod
     def _filter_active_segments(
-        self, segments: List[Dict[str, Any]], cuts: List[Tuple[float, float]]
+        segments: List[Dict[str, Any]], cuts: List[Tuple[float, float]]
     ) -> List[Dict[str, Any]]:
         active = []
         for s in segments:
-            s_start = float(s.get("start", 0.0))
-            s_end = float(s.get("end", s_start + 2.0))
-            mid = (s_start + s_end) / 2.0
-            if not any(c_start <= mid <= c_end for c_start, c_end in cuts):
-                active.append(s)
+            st = float(s.get("start", 0))
+            en = float(s.get("end", st + 2.0))
+            txt = str(s.get("text", "")).strip()
+            if not txt:
+                continue
+            mid = (st + en) / 2.0
+            if any(c_st <= mid <= c_en for c_st, c_en in cuts):
+                continue
+            active.append(s)
         return active

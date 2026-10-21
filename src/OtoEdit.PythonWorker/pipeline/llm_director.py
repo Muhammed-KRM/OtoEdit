@@ -1,9 +1,9 @@
 """
-5 Aşamalı Multimodal Otonom Yönetmen Orkestratörü (LlmDirector).
-Stage 1: HolisticAnalyzer & ThemeProfile (Kişi Tanıtımı, Sıralama, Tanım/Delil Tetikleyicileri ile)
-Stage 2: SafeZoneSpatialSolver (ve KeyframeSnapshotAnalyzer)
-Stage 3: WebImageCrawler (Wikipedia Portre/Kavram + Pexels + Wikimedia) & VLMAssetVerifier
-Stage 4: MasterPlanValidator
+5 Aşamalı Kelime-Senkronlu Multimodal Otonom Yönetmen Orkestratörü (LlmDirector).
+Stage 1: HolisticAnalyzer & ThemeProfile (Kelime bazlı Kişi/Eser, Kümülatif Liste, İkili Kavram, Tekil Terim)
+Stage 2: SafeZoneSpatialSolver (Sol Sütun -> Sağ Sütun Taşma & Yüz Koruma)
+Stage 3: WebImageCrawler (SADECE Kişi ve Eser Tanıtımlarında Wikipedia Portre/Eser Görseli) & VLMAssetVerifier
+Stage 4: MasterPlanValidator (Kelime Sınırları ve Kümülatif Grup Koruma)
 Stage 5: DeterministicTimelineExecutor Çıktısı (overlays, sfx_list / sfxClips, transitions)
 """
 
@@ -14,6 +14,7 @@ from pipeline.holistic_analyzer import HolisticAnalyzer
 from pipeline.master_plan_validator import MasterPlanValidator
 from pipeline.safe_zone_vision_engine import SafeZoneSpatialSolver
 from pipeline.vlm_asset_verifier import VLMAssetVerifier
+from services.gemini_client import GeminiClient
 from services.pexels_client import PexelsClient
 from services.web_image_crawler import WebImageCrawler
 from utils.logger import get_logger
@@ -29,11 +30,11 @@ class LlmDirector:
         work_dir: Optional[str] = None,
         enable_web_crawl: bool = True,
     ):
-        self.gemini = gemini_client
+        self.gemini = gemini_client or GeminiClient()
         self.pexels = pexels_client or PexelsClient()
         self.work_dir = work_dir or os.path.join(tempfile.gettempdir(), "otoedit_director_assets")
         self.enable_web_crawl = enable_web_crawl
-        self.analyzer = HolisticAnalyzer(gemini_client=self.gemini)
+        self.analyzer = HolisticAnalyzer(gemini_client=self.gemini, enable_llm_planning=True)
         self.crawler = WebImageCrawler(work_dir=self.work_dir, pexels_client=self.pexels)
         self.verifier = VLMAssetVerifier(gemini_client=self.gemini)
         self.validator = MasterPlanValidator()
@@ -70,7 +71,7 @@ class LlmDirector:
                 "transitions": existing_transitions,
             }
 
-        # AŞAMA 1: Bütüncül Analiz, Kilitli ThemeProfile ve Bölüm Orantılı Plan
+        # AŞAMA 1: Kelime-Senkronlu Bütüncül Analiz ve Kilitli ThemeProfile
         theme_profile, summary, chapter_plans = self.analyzer.analyze_video(
             segments=segments, video_duration=video_duration, cuts=cuts
         )
@@ -86,7 +87,7 @@ class LlmDirector:
         generated_sfx: List[Dict[str, Any]] = []
         generated_transitions: List[Dict[str, Any]] = []
 
-        # Mevcut kesimler varsa kesim sınırlarına da geçiş adayı ekle
+        # Mevcut kesimler varsa kesim sınırlarına yumuşak geçiş adayı ekle
         normalized_cuts = self.analyzer._normalize_cuts(cuts or [])
         for c_idx, (c_start, c_end) in enumerate(normalized_cuts[:8]):
             tr_type = theme_profile.allowed_transitions[
@@ -101,9 +102,8 @@ class LlmDirector:
                 "duration": theme_profile.transition_duration_sec,
             })
 
-        # AŞAMA 3: Her Bölümdeki Kurgu Olaylarını Somutlaştır ve Görselleri Doğrula
+        # AŞAMA 3: Kelime-Senkronlu Kurgu Olaylarını Somutlaştır
         for ch_idx, ch in enumerate(chapter_plans):
-            # Bölüm geçişi (İlk bölüm hariç her bölüm başlangıcına cümle arası yumuşak geçiş)
             if ch_idx > 0 and ch.start_sec > 3.5:
                 tr_type = theme_profile.allowed_transitions[
                     (ch_idx - 1) % len(theme_profile.allowed_transitions)
@@ -119,21 +119,31 @@ class LlmDirector:
 
             for evt in ch.events:
                 action_type = evt.action_type
-                dur = round(max(1.8, evt.end_sec - evt.start_sec), 2)
+                dur = round(max(0.45, evt.end_sec - evt.start_sec), 2)
 
                 # --------------------------------------------------------------
-                # 1. KİŞİ TANITIMI (PERSON_INTRODUCTION):
-                # Sol üste kalın siyah konturlu beyaz İsim + Sağ üste Wikipedia Portresi!
+                # 1. KİŞİ VEYA ESER TANITIMI (PERSON_INTRODUCTION / WORK_INTRODUCTION):
+                # SADECE kişi veya somut bir eser tanıtıldığında Wikipedia görseli konur!
                 # --------------------------------------------------------------
-                if action_type == "PERSON_INTRODUCTION":
-                    pair_group_id = f"pair_{evt.event_id}"
+                if action_type in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION", "CONCEPT_IMAGE_CARD"):
+                    pair_group_id = evt.group_id or f"pair_{evt.event_id}"
                     portrait_asset = None
-                    if self.enable_web_crawl and (evt.person_wiki_tr or evt.person_wiki_en):
+                    wiki_tr = evt.person_wiki_tr or evt.primary_web_query_tr
+                    wiki_en = evt.person_wiki_en or evt.secondary_stock_query_en
+
+                    if self.enable_web_crawl and (wiki_tr or wiki_en):
                         cand_portraits = self.crawler.gather_person_portrait_candidates(
-                            wiki_title_tr=evt.person_wiki_tr,
-                            wiki_title_en=evt.person_wiki_en,
+                            wiki_title_tr=wiki_tr,
+                            wiki_title_en=wiki_en,
                             max_candidates=2,
                         )
+                        if not cand_portraits and action_type == "CONCEPT_IMAGE_CARD":
+                            cand_portraits = self.crawler.gather_verified_candidates(
+                                query_tr=wiki_tr,
+                                query_en=wiki_en,
+                                fallback_en=evt.fallback_minimal_query_en,
+                                max_candidates=2,
+                            )
                         portrait_asset = self.verifier.select_best_candidate(
                             candidates=cand_portraits,
                             spoken_context_tr=evt.text_primary,
@@ -141,9 +151,7 @@ class LlmDirector:
                             theme_display_name=theme_profile.display_name,
                         )
 
-                    # Kişi adını sol üst güvenli bölgeye (T2) yerleştir
-                    txt_pos_x = 24.0 if portrait_asset else 26.0
-                    txt_pos_y = 26.0
+                    # Sol üste (X=16%, Y=24%) Kişi / Eser Adı
                     generated_overlays.append({
                         "id": f"ad_txt_{evt.event_id}",
                         "type": "text",
@@ -154,8 +162,8 @@ class LlmDirector:
                         "end": evt.end_sec,
                         "duration": dur,
                         "position": ["left", "top"],
-                        "positionX": txt_pos_x,
-                        "positionY": txt_pos_y,
+                        "positionX": 16.0,
+                        "positionY": 24.0,
                         "fontSize": int(theme_profile.title_font_size_1080p),
                         "font": theme_profile.font_family,
                         "fontFamily": theme_profile.font_family,
@@ -177,7 +185,7 @@ class LlmDirector:
                         "pairedGroupId": pair_group_id,
                     })
 
-                    # Eğer doğrulanmış Wikipedia portresi bulunduysa sağ üst bölgeye (T3) yerleştir
+                    # Sağ üste (X=82%, Y=28%) Doğrulanmış Wikipedia Portresi / Eser Görseli
                     if portrait_asset:
                         chosen_url = str(portrait_asset["url"])
                         self.crawler.used_links.add(chosen_url)
@@ -193,9 +201,9 @@ class LlmDirector:
                             "end": evt.end_sec,
                             "duration": dur,
                             "position": ["right", "top"],
-                            "positionX": 78.0,
+                            "positionX": 82.0,
                             "positionY": 28.0,
-                            "scale": 0.95,
+                            "scale": 0.90,
                             "opacity": 98.0,
                             "animation": styling.get("entry_animation", "fade"),
                             "exitAnimation": styling.get("exit_animation", "fade"),
@@ -212,7 +220,7 @@ class LlmDirector:
                             "pairedGroupId": pair_group_id,
                         })
 
-                    sfx_cfg = theme_profile.allowed_sfx_map.get("PERSON_INTRODUCTION") or {"type": "whoosh", "volume": 0.16}
+                    sfx_cfg = theme_profile.allowed_sfx_map.get("PERSON_INTRODUCTION") or {"type": "whoosh", "volume": 0.15}
                     generated_sfx.append({
                         "id": f"ad_sfx_{evt.event_id}",
                         "type": sfx_cfg["type"],
@@ -222,126 +230,92 @@ class LlmDirector:
                     continue
 
                 # --------------------------------------------------------------
-                # 2. KAVRAM GÖRSEL KARTI (CONCEPT_IMAGE_CARD):
-                # Yalnızca somut görsel sorgusu varsa ara ve VLM ile doğrula; yoksa metin kartına düş!
+                # 2. KÜMÜLATİF LİSTE (PROGRESSIVE_LIST) VE İKİLİ KAVRAM (PAIRED_TERMS):
+                # Sol sütuna alt alta (Y=18%, 27.5%, 37%, 46.5%) dizilir,
+                # Sol sütun (4 satır) dolduğunda Sağ sütuna (X=84%, Y=18%...) geçer!
                 # --------------------------------------------------------------
-                if (
-                    action_type == "CONCEPT_IMAGE_CARD"
-                    and self.enable_web_crawl
-                    and (evt.primary_web_query_tr or evt.secondary_stock_query_en)
-                ):
-                    candidates = self.crawler.gather_verified_candidates(
-                        query_tr=evt.primary_web_query_tr,
-                        query_en=evt.secondary_stock_query_en,
-                        fallback_en=evt.fallback_minimal_query_en,
-                        max_candidates=3,
-                    )
-                    best_asset = self.verifier.select_best_candidate(
-                        candidates=candidates,
-                        spoken_context_tr=evt.text_primary,
-                        concept_title_tr=evt.text_primary,
-                        theme_display_name=theme_profile.display_name,
-                    )
-
-                    if best_asset:
-                        pair_group_id = f"pair_{evt.event_id}"
-                        styling = best_asset.get("styling", {})
-                        chosen_url = str(best_asset["url"])
-                        self.crawler.used_links.add(chosen_url)
-
-                        # Sol üste Kavram Başlığı (T2) + Sağ üste Doğrulanmış Kavram Görseli (T3)
-                        generated_overlays.append({
-                            "id": f"ad_txt_{evt.event_id}",
-                            "type": "text",
-                            "text": evt.text_primary,
-                            "content": evt.text_primary,
-                            "timestamp": evt.start_sec,
-                            "start": evt.start_sec,
-                            "end": evt.end_sec,
-                            "duration": dur,
-                            "position": ["left", "top"],
-                            "positionX": 22.0,
-                            "positionY": 24.0,
-                            "fontSize": int(theme_profile.title_font_size_1080p),
-                            "font": theme_profile.font_family,
-                            "fontFamily": theme_profile.font_family,
-                            "color": theme_profile.text_color_hex,
-                            "strokeColor": theme_profile.stroke_color_hex,
-                            "strokeWidth": theme_profile.stroke_width_px,
-                            "backgroundBox": theme_profile.background_box,
-                            "boxStyle": "rounded" if theme_profile.background_box else "none",
-                            "boxColor": theme_profile.box_color_hex,
-                            "boxBgColor": theme_profile.box_color_hex,
-                            "boxOpacity": theme_profile.box_opacity,
-                            "animation": theme_profile.entry_animation,
-                            "exitAnimation": theme_profile.exit_animation,
-                            "preset": theme_profile.preset_id,
-                            "anchorSlot": "TOP_LEFT_CARD",
-                            "trackId": 2,
-                            "track_id": 2,
-                            "semanticPriority": True,
-                            "pairedGroupId": pair_group_id,
-                        })
-                        generated_overlays.append({
-                            "id": f"ad_img_{evt.event_id}",
-                            "type": "image",
-                            "content": evt.text_primary,
-                            "text": evt.text_primary,
-                            "source": chosen_url,
-                            "timestamp": evt.start_sec,
-                            "start": evt.start_sec,
-                            "end": evt.end_sec,
-                            "duration": dur,
-                            "position": ["right", "top"],
-                            "positionX": 78.0,
-                            "positionY": 28.0,
-                            "scale": 0.95,
-                            "opacity": 96.0,
-                            "animation": styling.get("entry_animation", "fade"),
-                            "exitAnimation": styling.get("exit_animation", "fade"),
-                            "shape": styling.get("mask_shape", "rounded"),
-                            "maskShape": styling.get("mask_shape", "rounded"),
-                            "borderRadius": styling.get("border_radius_px", 18),
-                            "dropShadow": styling.get("drop_shadow", True),
-                            "shadowBlur": styling.get("shadow_blur_px", 18),
-                            "removeBg": styling.get("remove_bg", False),
-                            "anchorSlot": "TOP_RIGHT_CARD",
-                            "trackId": 3,
-                            "track_id": 3,
-                            "semanticPriority": True,
-                            "pairedGroupId": pair_group_id,
-                        })
-                        sfx_cfg = theme_profile.allowed_sfx_map.get("CONCEPT_IMAGE_CARD")
-                        if sfx_cfg:
-                            generated_sfx.append({
-                                "id": f"ad_sfx_{evt.event_id}",
-                                "type": sfx_cfg["type"],
-                                "timestamp": evt.start_sec,
-                                "volume": sfx_cfg["volume"],
-                            })
-                        continue
+                if evt.stack_slot is not None:
+                    slot = int(evt.stack_slot)
+                    if slot < 4:
+                        pos_x = 16.0
+                        pos_y = round(18.0 + slot * 9.5, 1)
+                        slot_id = f"LEFT_STACK_{slot + 1}"
+                        horiz_pos = "left"
                     else:
-                        logger.info(
-                            f"[LlmDirector] '{evt.text_primary}' için doğrulanmış görsel bulunamadı -> "
-                            "Tipografik Vurgu Kartına (KEY_TERM_CALLOUT) dönüştürüldü."
-                        )
-                        action_type = "KEY_TERM_CALLOUT"
-                elif action_type == "CONCEPT_IMAGE_CARD":
-                    action_type = "KEY_TERM_CALLOUT"
+                        pos_x = 84.0
+                        pos_y = round(18.0 + ((slot - 4) % 4) * 9.5, 1)
+                        slot_id = f"RIGHT_STACK_{(slot - 4) + 1}"
+                        horiz_pos = "right"
+
+                    text_color = (
+                        theme_profile.accent_color_hex
+                        if action_type == "PROGRESSIVE_LIST"
+                        else theme_profile.text_color_hex
+                    )
+                    font_sz = max(28, int(theme_profile.title_font_size_1080p) - 4)
+
+                    stack_track_id = 1 + (slot % 5)
+                    generated_overlays.append({
+                        "id": f"ad_txt_{evt.event_id}",
+                        "type": "text",
+                        "text": evt.text_primary,
+                        "content": evt.text_primary,
+                        "timestamp": evt.start_sec,
+                        "start": evt.start_sec,
+                        "end": evt.end_sec,
+                        "duration": dur,
+                        "position": [horiz_pos, "top"],
+                        "positionX": pos_x,
+                        "positionY": pos_y,
+                        "fontSize": font_sz,
+                        "font": theme_profile.font_family,
+                        "fontFamily": theme_profile.font_family,
+                        "color": text_color,
+                        "strokeColor": theme_profile.stroke_color_hex,
+                        "strokeWidth": theme_profile.stroke_width_px,
+                        "backgroundBox": theme_profile.background_box,
+                        "boxStyle": "rounded" if theme_profile.background_box else "none",
+                        "boxColor": theme_profile.box_color_hex,
+                        "boxBgColor": theme_profile.box_color_hex,
+                        "boxOpacity": theme_profile.box_opacity,
+                        "animation": theme_profile.entry_animation,
+                        "exitAnimation": theme_profile.exit_animation,
+                        "preset": theme_profile.preset_id,
+                        "anchorSlot": slot_id,
+                        "trackId": stack_track_id,
+                        "track_id": stack_track_id,
+                        "semanticPriority": True,
+                        "pairedGroupId": evt.group_id or f"stack_{evt.event_id}",
+                        "stackSlot": slot,
+                    })
+
+                    # Yalnızca grubun ilk öğesinde hafif bir ses efekti çal (her kelimede gürültü yapmasın)
+                    if slot == 0:
+                        sfx_cfg = theme_profile.allowed_sfx_map.get(action_type) or {"type": "pop", "volume": 0.13}
+                        generated_sfx.append({
+                            "id": f"ad_sfx_{evt.event_id}",
+                            "type": sfx_cfg["type"],
+                            "timestamp": evt.start_sec,
+                            "volume": sfx_cfg["volume"],
+                        })
+                    continue
 
                 # --------------------------------------------------------------
-                # 3. METİN VE VURGU KARTI (ENUMERATION_CALLOUT, DEFINITION_CALLOUT,
-                #    CHAPTER_TITLE_CARD, KEY_TERM_CALLOUT, STAT_OR_ARTICLE_CALLOUT)
+                # 3. TEKİL KAVRAM VURGUSU (SINGLE_TERM, ENUMERATION_CALLOUT, DEFINITION_CALLOUT):
+                # Sol üst veya Sağ üst güvenli boşlukta çıkar, kelimesi bitince hemen kaybolur!
                 # --------------------------------------------------------------
                 slot_id, pos_x, pos_y, scale_factor, _ = spatial_solver.solve_placement(
                     evt.start_sec, evt.end_sec, is_image_card=False
                 )
-                # Sıralama ("1. ...", "2. ...") ve Madde vurgularında altın sarısı (#FACC15),
-                # tanım ve başlıklarda saf beyaz (#FFFFFF) + kalın siyah kontur (#000000)
-                if action_type in ("ENUMERATION_CALLOUT", "STAT_OR_ARTICLE_CALLOUT"):
-                    text_color = theme_profile.accent_color_hex
-                else:
-                    text_color = theme_profile.text_color_hex
+                # Tekil yazıları yüz bölgesinden (30%..70%) tamamen uzak tut (Sol 16% veya Sağ 84%)
+                pos_x = 16.0 if pos_x < 50.0 else 84.0
+                pos_y = min(26.0, max(18.0, pos_y))
+
+                text_color = (
+                    theme_profile.accent_color_hex
+                    if action_type in ("ENUMERATION_CALLOUT", "STAT_OR_ARTICLE_CALLOUT")
+                    else theme_profile.text_color_hex
+                )
 
                 generated_overlays.append({
                     "id": f"ad_txt_{evt.event_id}",
@@ -352,7 +326,7 @@ class LlmDirector:
                     "start": evt.start_sec,
                     "end": evt.end_sec,
                     "duration": dur,
-                    "position": ["right" if pos_x > 55.0 else ("left" if pos_x < 45.0 else "center"), "top"],
+                    "position": ["right" if pos_x > 50.0 else "left", "top"],
                     "positionX": pos_x,
                     "positionY": pos_y,
                     "fontSize": int(round(theme_profile.title_font_size_1080p * scale_factor)),
@@ -384,13 +358,9 @@ class LlmDirector:
                         "volume": sfx_cfg["volume"],
                     })
 
-        # Kısa bir videoda (< 3 segment) toplam katman sayısı 3'ün altındaysa ve süre >= 15sn ise
-        # orta noktaya bir Vurgu / Özet Kartı ekle ki zaman çizelgesi dengeli dolsun
+        # Kısa test videolarında (< 3 segment, >= 15s) en az 3 katman bulunmasını garanti et
         if len(generated_overlays) < 3 and video_duration >= 15.0 and segments:
             mid_ts = round(video_duration * 0.45, 2)
-            slot_id, pos_x, pos_y, scale_factor, _ = spatial_solver.solve_placement(
-                mid_ts, mid_ts + 3.2, is_image_card=False
-            )
             generated_overlays.append({
                 "id": "ad_txt_mid_summary",
                 "type": "text",
@@ -398,12 +368,12 @@ class LlmDirector:
                 "content": theme_profile.display_name.split("&")[0].strip(),
                 "timestamp": mid_ts,
                 "start": mid_ts,
-                "end": round(mid_ts + 3.2, 2),
-                "duration": 3.2,
-                "position": ["right" if pos_x >= 50.0 else "left", "top"],
-                "positionX": pos_x,
-                "positionY": pos_y,
-                "fontSize": int(round(theme_profile.title_font_size_1080p * scale_factor)),
+                "end": round(mid_ts + 2.4, 2),
+                "duration": 2.4,
+                "position": ["right", "top"],
+                "positionX": 84.0,
+                "positionY": 20.0,
+                "fontSize": int(theme_profile.title_font_size_1080p),
                 "font": theme_profile.font_family,
                 "fontFamily": theme_profile.font_family,
                 "color": theme_profile.text_color_hex,
@@ -417,15 +387,9 @@ class LlmDirector:
                 "animation": theme_profile.entry_animation,
                 "exitAnimation": theme_profile.exit_animation,
                 "preset": theme_profile.preset_id,
-                "anchorSlot": slot_id,
+                "anchorSlot": "TOP_RIGHT_CARD",
                 "trackId": 2,
                 "track_id": 2,
-            })
-            generated_sfx.append({
-                "id": "ad_sfx_mid_summary",
-                "type": "pop",
-                "timestamp": mid_ts,
-                "volume": 0.16,
             })
 
         if not generated_transitions and video_duration >= 10.0 and len(segments) >= 2:

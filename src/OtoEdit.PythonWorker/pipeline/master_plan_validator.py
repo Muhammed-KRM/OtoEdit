@@ -53,11 +53,13 @@ class MasterPlanValidator:
             raw_dur = float(ov.get("duration", 3.5))
             raw_end = float(ov.get("end") if ov.get("end") is not None else (raw_start + raw_dur))
 
-            start = max(0.3, min(safe_duration - 1.2, raw_start))
-            end = min(safe_duration - 0.2, raw_end)
-            if end - start < 1.2:
-                end = min(safe_duration - 0.1, start + 3.0)
-            dur = round(max(1.2, end - start), 2)
+            is_sem = bool(ov.get("semanticPriority")) or (ov.get("stackSlot") is not None)
+            min_allowed_dur = 0.45 if is_sem else 1.2
+            start = max(0.2, min(safe_duration - 0.6, raw_start))
+            end = min(safe_duration - 0.1, raw_end)
+            if end - start < min_allowed_dur:
+                end = min(safe_duration - 0.1, start + (1.4 if is_sem else 3.0))
+            dur = round(max(min_allowed_dur, end - start), 2)
 
             # Kural 1: Tema Saflığı (Akademik/Kurumsal/Belgesel temalarda GIF/Sticker YASAK)
             if ov_type in ("sticker", "gif") and not theme_profile.allow_gifs:
@@ -65,11 +67,12 @@ class MasterPlanValidator:
                 continue
 
             # Kural 2: Minimum Zaman Boşluğu
-            # (Aynı pairedGroupId'ye sahip Kişi Adı + Portre çifti aynı saniyede farklı katmanlarda yer alabilir;
-            #  semanticPriority=True olan 1./2./3. sıralamalar ise 2.8s aralıkla peş peşe gelebilir!)
+            # - Aynı pairedGroupId'ye sahip Kümülatif Liste (Fizik, Kimya, Biyoloji...), İkili Kavram (Tabiat, Fıtrat)
+            #   ve Kişi+Portre çiftleri birlikte ekranda yer alır.
+            # - Kelime-senkronlu (semanticPriority=True) olaylar önceki olay biter bitmez başlayabilir.
             paired_group = str(ov.get("pairedGroupId") or "")
             is_same_pair = bool(paired_group and paired_group == last_paired_group)
-            req_gap = 2.8 if ov.get("semanticPriority") else effective_min_gap
+            req_gap = 0.35 if is_sem else effective_min_gap
 
             if not is_same_pair and (start - last_overlay_start < req_gap) and repaired_overlays:
                 continue
@@ -96,7 +99,7 @@ class MasterPlanValidator:
             if ov_type == "text":
                 raw_text = str(ov.get("text") or ov.get("content") or "")
                 clean_title = extract_turkish_semantic_title(
-                    raw_text, max_chars=theme_profile.max_chars_per_line
+                    raw_text, max_chars=max(36, theme_profile.max_chars_per_line)
                 )
                 if not clean_title:
                     continue

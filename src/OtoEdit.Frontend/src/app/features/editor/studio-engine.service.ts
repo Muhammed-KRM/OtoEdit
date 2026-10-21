@@ -1316,10 +1316,10 @@ export class StudioEngineService {
       return {
         id: 'academic_lecture',
         fontFamily: 'Montserrat',
-        fontSize: 48,
+        fontSize: 36,
         textColor: '#FFFFFF',
         accentColor: '#FACC15',
-        strokeWidth: 5,
+        strokeWidth: 4,
         boxStyle: 'none',
         boxBgColor: 'rgba(15, 23, 42, 0.0)',
         borderRadius: 0,
@@ -1483,14 +1483,14 @@ export class StudioEngineService {
 
     // SafeZone Köşe Yuvaları (Konuşmacının X=50%, Y=28% merkez yüzüne ve Y=85% altyazısına ASLA çarpmaz!)
     const safeTextSlots = [
-      { x: 75, y: 16 }, // Sağ Üst Rozet
-      { x: 25, y: 16 }, // Sol Üst Rozet
-      { x: 76, y: 24 }, // Sağ Üst Kart
-      { x: 24, y: 24 }  // Sol Üst Kart
+      { x: 16, y: 18 }, // Sol Üst Sütun 1
+      { x: 84, y: 18 }, // Sağ Üst Sütun 1
+      { x: 16, y: 27.5 }, // Sol Üst Sütun 2
+      { x: 84, y: 27.5 }  // Sağ Üst Sütun 2
     ];
     const safeImageSlots = [
-      { x: 78, y: 26 }, // Sağ Üst Görsel Kartı
-      { x: 22, y: 26 }  // Sol Üst Görsel Kartı
+      { x: 82, y: 28 }, // Sağ Üst Görsel Kartı
+      { x: 18, y: 28 }  // Sol Üst Görsel Kartı
     ];
 
     // Videonun tamamını (00:00 -> seqDuration) kapsayan Bölüm Orantılı (Chapter-Proportional) Planlama

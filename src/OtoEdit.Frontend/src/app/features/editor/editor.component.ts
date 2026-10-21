@@ -862,7 +862,7 @@ export interface ContextMenuState {
                 <!-- 1B. Normal & Photoshop Stil Metin Kaplaması (Gradient, Çift Kontur, Neon Glow, Pill/Marker) -->
                 <span 
                   *ngIf="ov.type === 'text' && (!ov.curveBend || (ov.curveBend >= -1 && ov.curveBend <= 1))" 
-                  class="font-bold whitespace-nowrap block transition-all"
+                  class="font-bold whitespace-normal break-words block transition-all"
                   [ngStyle]="getTextOverlayStyle(ov)">
                   {{ ov.allCaps ? (ov.content || '').toUpperCase() : ov.content }}
                 </span>
@@ -8215,7 +8215,9 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   getTextOverlayStyle(ov: OverlayItem): any {
     const scale = ov.scale || 1;
-    const fSize = Math.max(12, ((ov.fontSize || 48) * 0.45) * scale);
+    const fSize = Math.max(11, ((ov.fontSize || 36) * 0.42) * scale);
+    const posX = ov.positionX ?? 50;
+    const isSideColumn = posX <= 32 || posX >= 68;
     const angleRad = ((ov.shadowAngle ?? 45) * Math.PI) / 180;
     const dist = ov.shadowDistance ?? 4;
     const dx = Math.round(Math.cos(angleRad) * dist);
@@ -8243,10 +8245,14 @@ export class EditorComponent implements OnInit, OnDestroy {
       'font-size.px': fSize,
       'font-family': ov.font || 'Inter',
       'font-weight': ov.fontWeight || '900',
-      'line-height': ov.lineHeight || 1.2,
+      'line-height': ov.lineHeight || 1.15,
       'text-align': ov.textAlign || 'center',
       'text-transform': ov.allCaps ? 'uppercase' : 'none',
       'letter-spacing.px': ov.letterSpacing || 0,
+      'max-width': isSideColumn ? '24cqi' : '64cqi',
+      'white-space': 'normal',
+      'word-break': 'break-word',
+      'text-wrap': 'balance',
       'paint-order': 'stroke fill',
       '-webkit-text-stroke': ov.strokeWidth ? `${(ov.strokeWidth * 0.45).toFixed(1)}px ${ov.strokeColor || '#000'}` : 'none',
       'text-shadow': shadows.length > 0 ? shadows.join(', ') : 'none'
