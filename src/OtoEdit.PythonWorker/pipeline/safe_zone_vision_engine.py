@@ -73,18 +73,18 @@ class AnchorCandidate:
 
 # 16:9 ve 9:16 için aday çapalar (Tüm koordinatlar 0..100 yüzdelik birimdedir!)
 IMAGE_CARD_ANCHORS: List[AnchorCandidate] = [
-    AnchorCandidate("TOP_RIGHT_CARD", 78.0, 24.0, 26.0, 30.0),
-    AnchorCandidate("TOP_LEFT_CARD", 22.0, 24.0, 26.0, 30.0),
-    AnchorCandidate("RIGHT_THIRD_SPLIT", 77.0, 38.0, 28.0, 36.0),
-    AnchorCandidate("LEFT_THIRD_SPLIT", 23.0, 38.0, 28.0, 36.0),
+    AnchorCandidate("TOP_RIGHT_CARD", 79.0, 26.0, 26.0, 30.0),
+    AnchorCandidate("TOP_LEFT_CARD", 21.0, 26.0, 26.0, 30.0),
+    AnchorCandidate("RIGHT_THIRD_SPLIT", 79.0, 36.0, 26.0, 34.0),
+    AnchorCandidate("LEFT_THIRD_SPLIT", 21.0, 36.0, 26.0, 34.0),
 ]
 
 TEXT_CALLOUT_ANCHORS: List[AnchorCandidate] = [
-    AnchorCandidate("UPPER_RIGHT_BADGE", 75.0, 16.0, 34.0, 13.0),
-    AnchorCandidate("UPPER_LEFT_BADGE", 25.0, 16.0, 34.0, 13.0),
-    AnchorCandidate("TOP_RIGHT_CARD", 76.0, 24.0, 34.0, 14.0),
-    AnchorCandidate("TOP_LEFT_CARD", 24.0, 24.0, 34.0, 14.0),
-    AnchorCandidate("TOP_CENTER_HEADER", 50.0, 11.0, 48.0, 11.0),
+    AnchorCandidate("TOP_RIGHT_CARD", 78.0, 24.0, 28.0, 13.0),
+    AnchorCandidate("TOP_LEFT_CARD", 22.0, 24.0, 28.0, 13.0),
+    AnchorCandidate("UPPER_RIGHT_BADGE", 78.0, 18.0, 28.0, 12.0),
+    AnchorCandidate("UPPER_LEFT_BADGE", 22.0, 18.0, 28.0, 12.0),
+    AnchorCandidate("TOP_CENTER_HEADER", 50.0, 11.0, 44.0, 10.0),
 ]
 
 
@@ -250,14 +250,14 @@ class SafeZoneSpatialSolver:
                     else:
                         clutter_cost = snapshot_info.get("right_clutter", 0.0) * 4.0
 
-                # Ardışık olaylarda sol/sağ çeşitliliği için hafif dengeleme
+                # Ardışık olaylarda sol/sağ çeşitliliği için güçlü dengeleme (YouTube tarzı Sağ <-> Sol geçişi)
                 alternation_bonus = 0.0
                 if self.placed_events:
                     prev_cx = self.placed_events[-1][2].center_x
                     if (prev_cx > 50.0 and anchor.center_x_pct < 50.0) or (
                         prev_cx < 50.0 and anchor.center_x_pct > 50.0
                     ):
-                        alternation_bonus = -0.15
+                        alternation_bonus = -0.55
 
                 total_cost = (
                     (3.5 * torso_overlap)
@@ -331,11 +331,11 @@ class SafeZoneSpatialSolver:
             # 16:9 eğitim videosu varsayılan merkez konuşmacı profili
             avg_cx, avg_cy, raw_w, raw_h = 50.0, 29.0, 18.0, 24.0
 
-        # AutoFlip standardı: +38% alın/saç payı, +25% yan baş hareketi payı
-        hx1 = max(0.0, avg_cx - (raw_w * 0.75))
-        hy1 = max(0.0, avg_cy - (raw_h * 0.88))
-        hx2 = min(100.0, avg_cx + (raw_w * 0.75))
-        hy2 = min(100.0, avg_cy + (raw_h * 0.62))
+        # AutoFlip standardı: +38% alın/saç payı, +20% yan baş hareketi payı
+        hx1 = max(0.0, avg_cx - (raw_w * 0.65))
+        hy1 = max(0.0, avg_cy - (raw_h * 0.85))
+        hx2 = min(100.0, avg_cx + (raw_w * 0.65))
+        hy2 = min(100.0, avg_cy + (raw_h * 0.60))
         head_bbox = BBoxPct(hx1, hy1, hx2, hy2)
 
         # Gövde kutusu (başın altından ekranın altına kadar omuz genişliği)

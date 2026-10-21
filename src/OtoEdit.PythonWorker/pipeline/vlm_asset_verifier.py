@@ -48,17 +48,25 @@ class VLMAssetVerifier:
             if scored:
                 return scored
 
-        # Deterministik Puanlayıcı (Pexels + OpenCV keskinlik ve sıfır metin kirliliği)
+        # Deterministik Puanlayıcı (Wikipedia Portre/Kavram + Pexels + Wikimedia + OpenCV metrikleri)
         best_cand: Optional[Dict[str, Any]] = None
         best_score = 0.0
         for cand in candidates:
             metrics = cand.get("cv_metrics", {})
             src = str(cand.get("source", ""))
-            base_score = 82.0 if src == "pexels_photo" else (78.0 if src == "wikimedia" else 76.0)
-            base_score -= float(metrics.get("text_density", 0.0)) * 100.0
+            if src in ("wikipedia_portrait", "wikipedia_concept"):
+                base_score = 92.0
+            elif src == "pexels_photo":
+                base_score = 84.0
+            elif src == "wikimedia":
+                base_score = 80.0
+            else:
+                # Doğrulanmamış genel web/Bing görseli VLM onayı olmadan 75 barajını geçemez!
+                base_score = 68.0
+            base_score -= float(metrics.get("text_density", 0.0)) * 80.0
             sharpness = float(metrics.get("sharpness", 80.0))
-            if sharpness < 35.0:
-                base_score -= 25.0
+            if sharpness < 25.0:
+                base_score -= 20.0
             if base_score >= self.ACCEPTANCE_THRESHOLD and base_score > best_score:
                 best_score = base_score
                 best_cand = dict(cand)

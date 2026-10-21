@@ -361,7 +361,7 @@ class AnalysisConsumer:
                     return []
 
             def _run_broll():
-                if not auto_broll:
+                if not auto_broll or auto_director:
                     return []
                 logger.info("🧵 Thread: B-Roll katmanı başladı")
                 try:

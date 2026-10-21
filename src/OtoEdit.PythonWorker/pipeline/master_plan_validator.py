@@ -2,11 +2,11 @@
 Aşama 4: MasterPlanValidator.
 Oluşturulan kurgu planını 6 katı mühendislik kuralına göre denetler ve onarır:
 1. Tam süre (00:00 -> son saniye) kapsama kontrolü
-2. Minimum zaman boşluğu (min_gap_between_overlays_sec)
+2. Minimum zaman boşluğu (Eşleştirilmiş Kişi+Portre çiftlerini ve ardışık 1./2./3. sıralamaları korur!)
 3. Altyazı kuşağı (Y ∈ [70%, 95%]) ve konuşmacı yüzü sıfır çarpışma garantisi
 4. Tema saflığı (allow_gifs=False ise tüm sticker/gif'lerin temizlenmesi)
-5. Olaya bağlı mikro-SFX (0.14 - 0.24 ses seviyesi, metronom döngüsü yasağı)
-6. Cümle sınırına mıknatıslanmış (sentence-boundary snapped) bölüm geçişleri
+5. Olaya bağlı seyrek mikro-SFX (0.12 - 0.22 ses seviyesi, metronom döngüsü yasağı)
+6. Cümle sınırına mıknatıslanmış (sentence-boundary snapped) yumuşak bölüm geçişleri
 """
 
 from typing import Any, Dict, List, Tuple
@@ -28,12 +28,16 @@ class MasterPlanValidator:
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         repaired_overlays: List[Dict[str, Any]] = []
         last_overlay_start = -999.0
+        last_paired_group = ""
         safe_duration = max(5.0, float(video_duration or 30.0))
 
         # Kronolojik sırala (hem 'start' hem 'timestamp' destekli)
         sorted_ovs = sorted(
             overlays,
-            key=lambda o: float(o.get("start") if o.get("start") is not None else o.get("timestamp", 0.0)),
+            key=lambda o: (
+                float(o.get("start") if o.get("start") is not None else o.get("timestamp", 0.0)),
+                0 if str(o.get("type", "text")) == "text" else 1,
+            ),
         )
 
         # Kısa videolarda (ör. 35s) min_gap'i video süresine göre esnet ki en az 3 olay sığabilsin
@@ -61,18 +65,23 @@ class MasterPlanValidator:
                 continue
 
             # Kural 2: Minimum Zaman Boşluğu
-            if start - last_overlay_start < effective_min_gap and repaired_overlays:
+            # (Aynı pairedGroupId'ye sahip Kişi Adı + Portre çifti aynı saniyede farklı katmanlarda yer alabilir;
+            #  semanticPriority=True olan 1./2./3. sıralamalar ise 2.8s aralıkla peş peşe gelebilir!)
+            paired_group = str(ov.get("pairedGroupId") or "")
+            is_same_pair = bool(paired_group and paired_group == last_paired_group)
+            req_gap = 2.8 if ov.get("semanticPriority") else effective_min_gap
+
+            if not is_same_pair and (start - last_overlay_start < req_gap) and repaired_overlays:
                 continue
 
             # Kural 3: Altyazı Kuşağı (Y ∈ [70%, 95%]) ve Birim Kontrolü (0..100)
             pos_x = float(ov.get("positionX", 76.0))
             pos_y = float(ov.get("positionY", 20.0))
-            # Eğer yanlışlıkla 0..1 normalize birimde gelmişse 0..100 yüzdelik birime çevir!
             if 0.0 < pos_x <= 1.0 and 0.0 < pos_y <= 1.0:
                 pos_x *= 100.0
                 pos_y *= 100.0
             if subtitles_enabled and pos_y >= 68.0:
-                pos_y = 18.0  # Altyazı kuşağından yukarıdaki güvenli bölgeye taşı
+                pos_y = 22.0
 
             ov["start"] = round(start, 2)
             ov["end"] = round(end, 2)
@@ -97,6 +106,8 @@ class MasterPlanValidator:
                 ov["fontFamily"] = theme_profile.font_family
                 ov["fontSize"] = int(ov.get("fontSize") or theme_profile.title_font_size_1080p)
                 ov["color"] = ov.get("color") or theme_profile.text_color_hex
+                ov["strokeColor"] = ov.get("strokeColor") or theme_profile.stroke_color_hex
+                ov["strokeWidth"] = int(ov.get("strokeWidth") if ov.get("strokeWidth") is not None else theme_profile.stroke_width_px)
                 ov["backgroundBox"] = theme_profile.background_box
                 ov["boxStyle"] = "rounded" if theme_profile.background_box else "none"
                 ov["boxColor"] = theme_profile.box_color_hex
@@ -107,15 +118,19 @@ class MasterPlanValidator:
                 ov["exitAnimation"] = theme_profile.exit_animation
                 ov["trackId"] = int(ov.get("trackId") or ov.get("track_id") or 2)
                 ov["track_id"] = ov["trackId"]
+            else:
+                ov["trackId"] = int(ov.get("trackId") or ov.get("track_id") or 3)
+                ov["track_id"] = ov["trackId"]
 
             repaired_overlays.append(ov)
             last_overlay_start = start
+            last_paired_group = paired_group
 
-        # Kural 5: Yalnızca Olaya Bağlı Mikro-SFX (Metronom döngüsü yok, maks ses 0.24)
+        # Kural 5: Yalnızca Olaya Bağlı Seyrek Mikro-SFX (Metronom döngüsü yok, maks ses 0.24)
         valid_event_times = [float(o["start"]) for o in repaired_overlays] + [
             float(t.get("timestamp", 0.0)) for t in transitions
         ]
-        min_sfx_gap = min(12.0, max(2.5, safe_duration / 6.0))
+        min_sfx_gap = min(24.0, max(2.5, safe_duration / 6.0))
         repaired_sfx: List[Dict[str, Any]] = []
         last_sfx_ts = -999.0
 
@@ -135,10 +150,9 @@ class MasterPlanValidator:
             ts = float(sfx.get("timestamp") if sfx.get("timestamp") is not None else sfx.get("start", 0.0))
             if ts - last_sfx_ts < min_sfx_gap:
                 continue
-            # Bir görsel/metin/geçiş olayına +-0.6sn yakın değilse sil!
             if not any(abs(ts - evt_t) <= 0.6 for evt_t in valid_event_times):
                 continue
-            vol = min(0.24, max(0.12, float(sfx.get("volume", 0.18))))
+            vol = min(0.24, max(0.12, float(sfx.get("volume", 0.16))))
             raw_type = str(sfx.get("type", "whoosh"))
             preset_id, name, def_dur = sfx_preset_map.get(raw_type, ("whoosh-fast", "Whoosh Fast", 0.8))
             repaired_sfx.append({
@@ -157,7 +171,7 @@ class MasterPlanValidator:
 
         # Kural 6: Geçiş (Transitions) Denetimi
         min_tr_edge = min(5.0, max(1.5, safe_duration * 0.08))
-        min_tr_gap = min(25.0, max(4.0, safe_duration * 0.20))
+        min_tr_gap = min(25.0, max(4.0, safe_duration * 0.12))
         repaired_transitions: List[Dict[str, Any]] = []
         last_tr_ts = 0.0
         for idx, tr in enumerate(sorted(transitions, key=lambda t: float(t.get("timestamp", 0.0)))):

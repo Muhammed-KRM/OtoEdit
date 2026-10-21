@@ -38,43 +38,50 @@ class ThemeProfile:
     allowed_transitions: List[str] = field(default_factory=list)
     transition_duration_sec: float = 0.45
     allowed_sfx_map: Dict[str, dict] = field(default_factory=dict)
+    stroke_color_hex: str = "#000000"
+    stroke_width_px: int = 5
 
 
 THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
     "academic_lecture": ThemeProfile(
         id="academic_lecture",
-        display_name="Akademik Ders & Hukuk/Bilim Semineri",
-        preset_id="glass_card_modern",
+        display_name="Akademik Ders, Felsefe & Hukuk/Bilim Anlatımı",
+        preset_id="youtube_clean_stroke",
         font_family="Montserrat",
         secondary_font_family="Inter",
-        title_font_size_1080p=42,
-        text_color_hex="#F8FAFC",
-        accent_color_hex="#38BDF8",
-        secondary_accent_hex="#F59E0B",
-        background_box=True,
+        title_font_size_1080p=48,
+        text_color_hex="#FFFFFF",
+        accent_color_hex="#FACC15",
+        secondary_accent_hex="#38BDF8",
+        background_box=False,
         box_color_hex="#0F172A",
-        box_opacity=0.86,
-        border_color_hex="#334155",
-        border_width_px=2,
-        border_radius_px=14,
-        shadow_blur_px=16,
+        box_opacity=0.0,
+        border_color_hex="#000000",
+        border_width_px=0,
+        border_radius_px=0,
+        shadow_blur_px=12,
         text_case="UPPERCASE_TR",
-        max_chars_per_line=34,
+        max_chars_per_line=38,
         max_lines=2,
-        entry_animation="fade",
+        entry_animation="pop-up",
         exit_animation="fade",
         allow_gifs=False,
         allow_emojis=False,
-        min_gap_between_overlays_sec=24.0,
-        max_overlays_per_minute=2.2,
-        allowed_transitions=["fade", "dissolve", "smoothleft"],
+        min_gap_between_overlays_sec=14.0,
+        max_overlays_per_minute=3.2,
+        allowed_transitions=["fade", "dissolve"],
         transition_duration_sec=0.45,
         allowed_sfx_map={
-            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.18},
-            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.15},
-            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.16},
-            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.16},
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.16},
+            "PERSON_INTRODUCTION": {"type": "whoosh", "volume": 0.16},
+            "ENUMERATION_CALLOUT": {"type": "pop", "volume": 0.14},
+            "DEFINITION_CALLOUT": {"type": "ding", "volume": 0.14},
+            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.14},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.15},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.15},
         },
+        stroke_color_hex="#000000",
+        stroke_width_px=5,
     ),
     "corporate_explainer": ThemeProfile(
         id="corporate_explainer",
@@ -220,14 +227,20 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
 }
 
 
-# Türkçe başlık sonuna asla gelemeyecek bağlaç, edat, zarf ve yarım tamlayan ekleri
+# Türkçe başlık sonuna asla gelemeyecek bağlaç, edat, zarf, yarım fiil ve tamlayan ekleri
 TR_DANGLING_STOPWORDS = {
     "ve", "veya", "ile", "için", "gibi", "kadar", "göre", "karşı",
     "ama", "fakat", "ancak", "lakin", "çünkü", "dolayısıyla", "örneğin",
     "mesela", "yani", "ise", "de", "da", "ki", "bu", "şu", "o", "bir",
-    "olarak", "olan", "olup", "olduğu", "olduğunu", "çevresinde",
-    "kapsamında", "üzerinde", "içerisinde", "hakkında", "tarafından",
-    "arasında", "sonucunda", "nedeniyle", "sebebiyle", "ilgili", "ilişkin",
+    "her", "en", "çok", "daha", "hiç", "hem", "ya", "ne", "nasıl", "neden",
+    "olarak", "olan", "olup", "olduğu", "olduğunu", "olur", "olmaz",
+    "vardır", "yoktur", "değildir", "demektir", "denir", "diyebiliriz",
+    "düşü", "düşünün", "düşünelim", "bakalım", "görüyoruz", "biliyoruz",
+    "eden", "edilen", "yapan", "yapılan", "gelen", "geçen", "bulunan",
+    "intikal", "uğrardı", "şekilde", "anlamda", "noktada", "konuda",
+    "çevresinde", "kapsamında", "üzerinde", "içerisinde", "hakkında",
+    "tarafından", "arasında", "sonucunda", "nedeniyle", "sebebiyle",
+    "ilgili", "ilişkin", "itibariyle", "bakımından", "açısından",
 }
 
 TR_GENITIVE_SUFFIXES = (
@@ -246,33 +259,55 @@ def to_turkish_upper(text: str) -> str:
     return text.replace("i", "İ").replace("ı", "I").upper()
 
 
-def extract_turkish_semantic_title(text: str, max_chars: int = 32) -> str:
+def extract_turkish_semantic_title(text: str, max_chars: int = 34) -> str:
     """
     Cümleden ASLA kelime veya isim tamlaması ortasından kesilmeyen,
     maksimum `max_chars` uzunluğunda tam ve anlamlı bir Türkçe başlık çıkarır.
-    Örn: "Hukuk Muhakemeleri Kanununun çevresinde şekillenen dava şartları..."
-         -> "HUKUK MUHAKEMELERİ KANUNU"
+    Örn:
+      - "Hukuk Muhakemeleri Kanununun çevresinde şekillenen dava şartları..."
+        -> "HUKUK MUHAKEMELERİ KANUNU"
+      - "1. TENZİLİ (TEŞRİ) ŞERİAT" (zaten yapılandırılmış başlık)
+        -> "1. TENZİLİ (TEŞRİ) ŞERİAT"
     """
     if not text or not text.strip():
         return ""
 
-    # Noktalama işaretlerinden ilk anlamlı yan cümleciği ayır
-    clauses = re.split(r"[.!?;:—–\-]+", text.strip())
-    clause = next((c.strip() for c in clauses if len(c.strip()) >= 6), text.strip())
+    raw_stripped = re.sub(r"\s+", " ", text.strip())
 
-    # Sadece harf, rakam ve boşlukları koru
-    cleaned = re.sub(r"[^\w\sğüşıöçĞÜŞİÖÇ0-9/']", " ", clause)
+    # Eğer girdi zaten yapılandırılmış temiz bir başlık ise (örn. "1. ...", "PROF. ...", "KAVRAM: ...")
+    # kelime içi tireleri (-), numaraları (1.) ve parantezleri koruyarak doğrudan büyük harfe çevir!
+    if len(raw_stripped) <= max_chars + 4 and (
+        re.match(r"^(\d+\.|PROF\.|DR\.|HZ\.|İMAM\b|MD\.)", to_turkish_upper(raw_stripped))
+        or (":" in raw_stripped and len(raw_stripped.split()) <= 6)
+        or ("&" in raw_stripped and len(raw_stripped.split()) <= 6)
+        or ("(" in raw_stripped and ")" in raw_stripped and len(raw_stripped.split()) <= 6)
+    ):
+        return to_turkish_upper(raw_stripped[:max_chars + 4].strip())
+
+    # Kelime içi tireleri (Kur'an-ı, Sünnet-i, Bürhan-ı) ve kısaltma noktalarını (1., Prof., Dr., Hz.)
+    # bozmadan yalnızca cümle sonu noktalama işaretlerinden ayır
+    clauses = re.split(
+        r"[!?;:—–]+|(?<!\d)(?<!Prof)(?<!Dr)(?<!Hz)(?<!Md)\.(?!\w)",
+        raw_stripped,
+        flags=re.IGNORECASE,
+    )
+    clause = next((c.strip() for c in clauses if len(c.strip()) >= 6), raw_stripped)
+
+    # Kelime içi tire (-), kesme işareti ('), parantez ve iki noktayı koru
+    cleaned = re.sub(r"[^\w\sğüşıöçĞÜŞİÖÇ0-9/'():&\-]", " ", clause)
     words = [w for w in cleaned.split() if len(w) > 1 or w.isdigit()]
     if not words:
         return ""
 
-    # Baştaki dolgu kelimelerini temizle ("Arkadaşlar", "Şimdi", "Bakın", "Dolayısıyla" vb.)
+    # Baştaki dolgu kelimelerini temizle ("Arkadaşlar", "Şimdi", "Bakın", "Dolayısıyla", "Ve" vb.)
     filler_prefixes = {
         "arkadaşlar", "şimdi", "bakın", "tabii", "elbette", "burada",
         "dolayısıyla", "öncelikle", "mesela", "örneğin", "aslında", "peki",
-        "evet", "bugün", "bugünkü", "dersimizde",
+        "evet", "bugün", "bugünkü", "dersimizde", "ve", "ama", "fakat",
+        "ancak", "çünkü", "yani", "işte", "hatta", "bir", "bu", "şu",
+        "ayrıntılı", "özellikle",
     }
-    while len(words) > 2 and to_turkish_lower(words[0]) in filler_prefixes:
+    while len(words) > 2 and to_turkish_lower(words[0].strip(".,:;")) in filler_prefixes:
         words.pop(0)
 
     # Maksimum 5 kelime ve max_chars sınırı içinde kalacak şekilde tam kelimeleri birleştir
@@ -287,11 +322,11 @@ def extract_turkish_semantic_title(text: str, max_chars: int = 32) -> str:
     if not selected:
         selected = [words[0][:max_chars]]
 
-    # Sondaki asılı kalan bağlaç/edatları ("çevresinde", "ve", "ile", "olarak") temizle
-    while len(selected) > 1 and to_turkish_lower(selected[-1]) in TR_DANGLING_STOPWORDS:
+    # Sondaki asılı kalan bağlaç/edat/yarım fiilleri temizle
+    while len(selected) > 1 and to_turkish_lower(selected[-1].strip(".,:;")) in TR_DANGLING_STOPWORDS:
         selected.pop()
 
-    # Eğer son kelime tamlayan ekiyle ("Kanununun", "Mahkemenin") bitiyorsa yalın hale ("Kanunu") indirge
+    # Eğer son kelime tamlayan ekiyle ("Kanununun", "Mahkemenin", "Varlığın") bitiyorsa yalın hale indirge
     last_lower = to_turkish_lower(selected[-1])
     if last_lower.endswith(("nun", "nün", "nın", "nin")) and len(last_lower) >= 6:
         for suf in ("unun", "ünün", "ının", "inin", "nun", "nün", "nın", "nin"):
@@ -299,6 +334,10 @@ def extract_turkish_semantic_title(text: str, max_chars: int = 32) -> str:
                 stem_len = len(selected[-1]) - (3 if suf.startswith(("u", "ü", "ı", "i")) else len(suf))
                 selected[-1] = selected[-1][:stem_len]
                 break
+
+    # Tekrar kontrol: son kelime hala stopword ise çıkar
+    while len(selected) > 1 and to_turkish_lower(selected[-1].strip(".,:;")) in TR_DANGLING_STOPWORDS:
+        selected.pop()
 
     return to_turkish_upper(" ".join(selected))
 
@@ -313,7 +352,9 @@ def detect_theme_profile_heuristic(full_transcript: str) -> ThemeProfile:
         "kanun", "mahkeme", "dava", "hukuk", "madde", "fıkra", "mevzuat",
         "teori", "hipotez", "ders", "sınav", "fakülte", "kavram", "literatür",
         "analiz", "formül", "denklem", "tarih", "felsefe", "anatomi", "tıp",
-        "anayasa", "yargıtay", "danıştay", "muhakeme", "hüküm",
+        "anayasa", "yargıtay", "danıştay", "muhakeme", "hüküm", "delil",
+        "şeriat", "kelam", "fıkıh", "akaid", "mantık", "kozmolojik", "ontolojik",
+        "gazali", "aristoteles", "farabi", "ibn sina", "içtihat", "icma", "kıyas",
     )
     corporate_kw = (
         "şirket", "yatırım", "bütçe", "strateji", "pazarlama", "müşteri",

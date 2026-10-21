@@ -135,7 +135,9 @@ TRANSKRİPT:
 """
         try:
             raw_response = self.gemini.generate_text(prompt)
-            cleaned = raw_response.strip()
+            if not raw_response:
+                return []
+            cleaned = str(raw_response).strip()
             if cleaned.startswith("```"):
                 lines = cleaned.split("\n")
                 if lines[0].startswith("```"):
@@ -148,7 +150,7 @@ TRANSKRİPT:
             if isinstance(data, list):
                 return data
         except Exception as ex:
-            logger.error(f"Gemini B-Roll anları çıkarılırken hata: {ex}")
+            logger.warning(f"Gemini B-Roll anları çıkarılırken uyarı: {ex}")
 
         # Fallback: Transkriptin gerçek segmentlerinden ve konusuna uygun somut sorgular üret
         from pipeline.theme_profiles import detect_theme_profile_heuristic, extract_turkish_semantic_title

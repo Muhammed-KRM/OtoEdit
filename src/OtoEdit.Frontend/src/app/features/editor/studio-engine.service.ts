@@ -1205,30 +1205,46 @@ export class StudioEngineService {
 
   /**
    * Türkçe cümleden ASLA kelime veya tamlama ortasından bölünmeyen,
-   * bağlaç/edat ile bitmeyen tam ve anlamlı bir kavramsal başlık çıkarır.
+   * bağlaç/edat/yarım fiil ile bitmeyen tam ve anlamlı bir kavramsal başlık çıkarır.
    */
-  extractSemanticTurkishPhrase(rawText: string, maxChars = 32): string {
+  extractSemanticTurkishPhrase(rawText: string, maxChars = 34): string {
     if (!rawText || !rawText.trim()) return '';
-    const clauses = rawText.trim().split(/[.!?;:—–\-]+/);
-    const clause = clauses.find(c => c.trim().length >= 6) || rawText.trim();
-    const cleaned = clause.replace(/[^\w\sğüşıöçĞÜŞİÖÇ0-9/']/g, ' ').trim();
+    const trimmed = rawText.trim().replace(/\s+/g, ' ');
+    if (
+      trimmed.length <= maxChars + 4 &&
+      (/^(\d+\.|PROF\.|DR\.|HZ\.|İMAM\b|MD\.)/i.test(trimmed) ||
+        (trimmed.includes(':') && trimmed.split(/\s+/).length <= 6) ||
+        (trimmed.includes('&') && trimmed.split(/\s+/).length <= 6) ||
+        (trimmed.includes('(') && trimmed.includes(')') && trimmed.split(/\s+/).length <= 6))
+    ) {
+      return trimmed.slice(0, maxChars + 4).toLocaleUpperCase('tr-TR');
+    }
+
+    const clauses = trimmed.split(/[!?;:—–]+|(?<!\d)(?<!Prof)(?<!Dr)(?<!Hz)(?<!Md)\.(?!\w)/i);
+    const clause = clauses.find(c => c.trim().length >= 6) || trimmed;
+    const cleaned = clause.replace(/[^\w\sğüşıöçĞÜŞİÖÇ0-9/'():&\-]/g, ' ').trim();
     const words = cleaned.split(/\s+/).filter(w => w.length > 1 || /^\d+$/.test(w));
     if (!words.length) return '';
 
     const fillers = new Set([
       'arkadaşlar', 'şimdi', 'bakın', 'tabii', 'elbette', 'burada',
       'dolayısıyla', 'öncelikle', 'mesela', 'örneğin', 'aslında', 'peki',
-      'evet', 'bugün', 'bugünkü', 'dersimizde'
+      'evet', 'bugün', 'bugünkü', 'dersimizde', 've', 'ama', 'fakat',
+      'ancak', 'çünkü', 'yani', 'işte', 'hatta', 'bir', 'bu', 'şu',
+      'ayrıntılı', 'özellikle'
     ]);
-    while (words.length > 2 && fillers.has(words[0].toLocaleLowerCase('tr-TR'))) {
+    while (words.length > 2 && fillers.has(words[0].replace(/[.,:;]/g, '').toLocaleLowerCase('tr-TR'))) {
       words.shift();
     }
 
     const danglingStopwords = new Set([
       've', 'veya', 'ile', 'için', 'gibi', 'kadar', 'göre', 'karşı',
       'ama', 'fakat', 'ancak', 'çünkü', 'dolayısıyla', 'ise', 'de', 'da', 'ki',
-      'bu', 'şu', 'bir', 'olarak', 'olan', 'olup', 'olduğu', 'çevresinde',
-      'kapsamında', 'üzerinde', 'içerisinde', 'hakkında', 'tarafından', 'arasında'
+      'bu', 'şu', 'bir', 'her', 'en', 'çok', 'daha', 'hiç', 'olarak', 'olan',
+      'olup', 'olduğu', 'olur', 'olmaz', 'vardır', 'yoktur', 'değildir', 'demektir',
+      'düşü', 'düşünün', 'düşünelim', 'bakalım', 'görüyoruz', 'eden', 'edilen',
+      'intikal', 'uğrardı', 'şekilde', 'anlamda', 'çevresinde', 'kapsamında',
+      'üzerinde', 'içerisinde', 'hakkında', 'tarafından', 'arasında'
     ]);
 
     const selected: string[] = [];
@@ -1242,7 +1258,10 @@ export class StudioEngineService {
     }
     if (!selected.length) selected.push(words[0].slice(0, maxChars));
 
-    while (selected.length > 1 && danglingStopwords.has(selected[selected.length - 1].toLocaleLowerCase('tr-TR'))) {
+    while (
+      selected.length > 1 &&
+      danglingStopwords.has(selected[selected.length - 1].replace(/[.,:;]/g, '').toLocaleLowerCase('tr-TR'))
+    ) {
       selected.pop();
     }
 
@@ -1257,11 +1276,18 @@ export class StudioEngineService {
       }
     }
 
+    while (
+      selected.length > 1 &&
+      danglingStopwords.has(selected[selected.length - 1].replace(/[.,:;]/g, '').toLocaleLowerCase('tr-TR'))
+    ) {
+      selected.pop();
+    }
+
     return selected.join(' ').toLocaleUpperCase('tr-TR');
   }
 
   /**
-   * Transkriptin içeriğinden kilitli ThemeProfile seçer (Akademik/Hukuk, Kurumsal, Teknoloji, Vlog).
+   * Transkriptin içeriğinden kilitli ThemeProfile seçer (Akademik/Felsefe/Hukuk, Kurumsal, Teknoloji, Vlog).
    */
   private detectLockedThemeProfile(segments: Array<{ text: string }>): {
     id: 'academic_lecture' | 'corporate_explainer' | 'tech_review' | 'energetic_vlog';
@@ -1269,6 +1295,7 @@ export class StudioEngineService {
     fontSize: number;
     textColor: string;
     accentColor: string;
+    strokeWidth: number;
     boxStyle: OverlayItem['boxStyle'];
     boxBgColor: string;
     borderRadius: number;
@@ -1281,7 +1308,7 @@ export class StudioEngineService {
     contextualImages: Array<{ url: string; label: string; keywords: RegExp }>;
   } {
     const fullText = segments.map(s => s.text || '').join(' ').toLocaleLowerCase('tr-TR');
-    const isAcademic = /(kanun|mahkeme|dava|hukuk|madde|fıkra|mevzuat|ders|fakülte|teori|kavram|tarih|tıp|anayasa|yargı)/.test(fullText);
+    const isAcademic = /(kanun|mahkeme|dava|hukuk|madde|fıkra|mevzuat|ders|fakülte|teori|kavram|tarih|felsefe|delil|şeriat|kelam|fıkıh|gazali|aristoteles|anayasa|yargı)/.test(fullText);
     const isCorporate = /(şirket|yatırım|bütçe|strateji|müşteri|finans|kurumsal|yönetim|rapor|bilanço)/.test(fullText);
     const isTech = /(yazılım|algoritma|yapay zeka|uygulama|donanım|sunucu|teknoloji|kod|veri)/.test(fullText);
 
@@ -1289,40 +1316,20 @@ export class StudioEngineService {
       return {
         id: 'academic_lecture',
         fontFamily: 'Montserrat',
-        fontSize: 42,
-        textColor: '#F8FAFC',
-        accentColor: '#38BDF8',
-        boxStyle: 'rounded',
-        boxBgColor: 'rgba(15, 23, 42, 0.88)',
-        borderRadius: 14,
-        boxPadding: 16,
-        animation: 'fade',
+        fontSize: 48,
+        textColor: '#FFFFFF',
+        accentColor: '#FACC15',
+        strokeWidth: 5,
+        boxStyle: 'none',
+        boxBgColor: 'rgba(15, 23, 42, 0.0)',
+        borderRadius: 0,
+        boxPadding: 0,
+        animation: 'pop-up',
         exitAnimation: 'fade',
-        allowStickers: false, // Akademik/Hukuk dersinde ateş/roket emojisi KESİNLİKLE YASAK!
-        minGapSec: 22,
-        allowedTransitions: ['fade', 'dissolve', 'smoothleft'],
-        contextualImages: [
-          {
-            url: 'https://images.unsplash.com/photo-1589829545856-d10d557cf95f?auto=format&fit=crop&w=900&q=80',
-            label: 'Hukuk & Adalet Terazisi',
-            keywords: /(hukuk|kanun|adalet|anayasa|mevzuat)/i
-          },
-          {
-            url: 'https://images.unsplash.com/photo-1450101499163-c8848c66ca85?auto=format&fit=crop&w=900&q=80',
-            label: 'Dava Dilekçesi & Resmi Belge',
-            keywords: /(dava|şart|dilekçe|sözleşme|taraf|usul)/i
-          },
-          {
-            url: 'https://images.unsplash.com/photo-1505664194779-8beaceb93744?auto=format&fit=crop&w=900&q=80',
-            label: 'Hukuk Kütüphanesi & İçtihat',
-            keywords: /(mahkeme|hakim|yargı|madde|fıkra|karar)/i
-          },
-          {
-            url: 'https://images.unsplash.com/photo-1434030216411-0b793f4b4173?auto=format&fit=crop&w=900&q=80',
-            label: 'Akademik İnceleme & Notlar',
-            keywords: /.*/
-          }
-        ]
+        allowStickers: false,
+        minGapSec: 14,
+        allowedTransitions: ['fade', 'dissolve'],
+        contextualImages: []
       };
     }
 
@@ -1333,6 +1340,7 @@ export class StudioEngineService {
         fontSize: 44,
         textColor: '#FFFFFF',
         accentColor: '#10B981',
+        strokeWidth: 4,
         boxStyle: 'rounded',
         boxBgColor: 'rgba(17, 24, 39, 0.88)',
         borderRadius: 16,
@@ -1341,19 +1349,8 @@ export class StudioEngineService {
         exitAnimation: 'fade',
         allowStickers: false,
         minGapSec: 18,
-        allowedTransitions: ['fade', 'wipeleft', 'smoothleft'],
-        contextualImages: [
-          {
-            url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?auto=format&fit=crop&w=900&q=80',
-            label: 'Finansal Analiz & Strateji',
-            keywords: /(finans|bütçe|yatırım|rapor|büyüme)/i
-          },
-          {
-            url: 'https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=900&q=80',
-            label: 'Kurumsal Yönetim Toplantısı',
-            keywords: /.*/
-          }
-        ]
+        allowedTransitions: ['fade', 'dissolve'],
+        contextualImages: []
       };
     }
 
@@ -1364,6 +1361,7 @@ export class StudioEngineService {
         fontSize: 44,
         textColor: '#F9FAFB',
         accentColor: '#06B6D4',
+        strokeWidth: 4,
         boxStyle: 'rounded',
         boxBgColor: 'rgba(9, 13, 22, 0.86)',
         borderRadius: 16,
@@ -1372,19 +1370,8 @@ export class StudioEngineService {
         exitAnimation: 'fade',
         allowStickers: false,
         minGapSec: 15,
-        allowedTransitions: ['smoothleft', 'wipeleft', 'circleopen'],
-        contextualImages: [
-          {
-            url: 'https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=900&q=80',
-            label: 'Yazılım Mimarisi & Kod',
-            keywords: /(kod|yazılım|algoritma|uygulama)/i
-          },
-          {
-            url: 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=900&q=80',
-            label: 'Teknoloji & Donanım',
-            keywords: /.*/
-          }
-        ]
+        allowedTransitions: ['fade', 'dissolve'],
+        contextualImages: []
       };
     }
 
@@ -1394,22 +1381,17 @@ export class StudioEngineService {
       fontSize: 48,
       textColor: '#FFFFFF',
       accentColor: '#00E676',
-      boxStyle: 'pill',
-      boxBgColor: 'rgba(17, 17, 17, 0.90)',
-      borderRadius: 22,
-      boxPadding: 18,
+      strokeWidth: 5,
+      boxStyle: 'none',
+      boxBgColor: 'rgba(17, 17, 17, 0.0)',
+      borderRadius: 0,
+      boxPadding: 0,
       animation: 'pop-up',
       exitAnimation: 'fade',
       allowStickers: true,
       minGapSec: 12,
-      allowedTransitions: ['wipeleft', 'slidedown', 'circleopen', 'fade'],
-      contextualImages: [
-        {
-          url: 'https://images.unsplash.com/photo-1492691527719-9d1e07e534b4?auto=format&fit=crop&w=900&q=80',
-          label: 'Sinematik İçerik Üretimi',
-          keywords: /.*/
-        }
-      ]
+      allowedTransitions: ['fade', 'dissolve'],
+      contextualImages: []
     };
   }
 
@@ -1616,7 +1598,7 @@ export class StudioEngineService {
             color: eIdx === 0 ? theme.accentColor : theme.textColor,
             fillType: 'solid',
             strokeColor: '#000000',
-            strokeWidth: 2,
+            strokeWidth: theme.strokeWidth,
             boxStyle: theme.boxStyle,
             boxBgColor: theme.boxBgColor,
             boxPadding: theme.boxPadding,

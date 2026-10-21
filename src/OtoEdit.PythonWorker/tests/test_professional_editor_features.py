@@ -979,5 +979,66 @@ def test_llm_director_20min_lecture_full_coverage_and_image_hash_cache(tmp_path)
         assert p1 != p2
 
 
+def test_youtube_style_person_enumeration_and_definition_triggers(tmp_path):
+    """Verify HolisticAnalyzer + LlmDirector detect Person Introductions (Name + Portrait), Enumerations (1., 2., 3.), and Definitions across split Whisper segments."""
+    from pipeline.llm_director import LlmDirector
+
+    segments = [
+        {"start": 10.0, "end": 13.5, "text": "Eserlerden müessire intikal eden bürhan-ı inni delilini inceliyoruz."},
+        {"start": 45.0, "end": 48.2, "text": "İlk dönem kelamcılarının geliştirdiği hudus delili kainatın başlangıcını açıklar."},
+        {"start": 120.0, "end": 123.5, "text": "İslam düşünce tarihinde İmam Gazali bu ayrımı çok net ortaya koymuştur."},
+        {"start": 210.0, "end": 213.2, "text": "Birincisi tenzili şeriat"},
+        {"start": 213.3, "end": 216.8, "text": "yani teşri şeriattır. İkincisi ise tekvini şeriat."},
+        {"start": 216.9, "end": 220.1, "text": "Yani kainat kitabıdır. Üçüncüsü ise mahiyet."},
+        {"start": 220.2, "end": 223.8, "text": "Yani akli şeriattır ve mantık ilkeleridir."},
+        {"start": 310.0, "end": 313.0, "text": "Hukukta normlar hiyerarşisi ve kaziye-i muhkeme kavramları esastır."},
+    ]
+
+    director = LlmDirector(enable_web_crawl=True, work_dir=str(tmp_path))
+    with patch.object(
+        director.crawler,
+        "gather_person_portrait_candidates",
+        return_value=[{
+            "url": "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e1/Al-Ghazali.png/800px-Al-Ghazali.png",
+            "source": "wikipedia_portrait",
+            "local_path": str(tmp_path / "ghazali.png"),
+            "cv_metrics": {"w": 800, "h": 900, "sharpness": 120.0, "text_density": 0.01},
+        }],
+    ):
+        plan = director.compose_intelligent_plan(
+            segments=segments,
+            cuts=[],
+            video_duration=360.0,
+            subtitles_enabled=True,
+        )
+
+    ovs = plan["overlays"]
+    texts = [o.get("text") for o in ovs if o.get("type") == "text"]
+    images = [o for o in ovs if o.get("type") == "image"]
+
+    # 1. Person Introduction: "İMAM GAZALİ" text on T2 + Wikipedia portrait on T3 at the same timestamp!
+    assert "İMAM GAZALİ" in texts
+    assert len(images) >= 1
+    assert any("Al-Ghazali" in img["source"] and img["trackId"] == 3 for img in images)
+
+    # 2. Enumerations across split 3-second Whisper segments preserved in sequence!
+    assert any(t.startswith("1. TENZİLİ") for t in texts)
+    assert any(t.startswith("2. TEKVİNİ") for t in texts)
+    assert any(t.startswith("3. AKLİ") for t in texts)
+
+    # 3. Definitions detected!
+    assert any("BÜRHAN-I İNNİ" in t for t in texts)
+    assert any("HUDUS DELİLİ" in t for t in texts)
+    assert any("NORMLAR HİYERARŞİSİ" in t for t in texts)
+
+    # 4. YouTube clean stroke style (boxStyle="none", strokeWidth=5)
+    for o in ovs:
+        if o.get("type") == "text":
+            assert o["boxStyle"] == "none"
+            assert o["strokeWidth"] == 5
+            assert o["strokeColor"] == "#000000"
+
+
+
 
 

@@ -32,16 +32,6 @@ class PexelsClient:
             return []
         used = used_links or set()
         if not self.api_key or not requests:
-            from services.stock_media_fallback import StockMediaFallback
-            fallback_url = StockMediaFallback.resolve_stock_image(query, orientation=orientation)
-            if fallback_url and fallback_url not in used:
-                return [{
-                    "url": fallback_url,
-                    "source": "stock_fallback",
-                    "width": 1280,
-                    "height": 720,
-                    "alt": query,
-                }]
             return []
         try:
             resp = requests.get(
@@ -50,6 +40,9 @@ class PexelsClient:
                 params={"query": query, "per_page": per_page, "orientation": orientation},
                 timeout=8,
             )
+            if resp.status_code in (401, 403):
+                self.api_key = ""
+                return []
             if resp.status_code != 200:
                 return []
             candidates: List[Dict[str, Any]] = []
@@ -88,6 +81,9 @@ class PexelsClient:
                 params={"query": query, "per_page": per_page, "orientation": orientation},
                 timeout=10,
             )
+            if resp.status_code in (401, 403):
+                self.api_key = ""
+                return []
             if resp.status_code != 200:
                 return []
             candidates: List[Dict[str, Any]] = []
@@ -150,6 +146,8 @@ class PexelsClient:
                     logger.info(f"Pexels görsel bulundu: query='{query}', url='{photo_url}'")
                     return photo_url
             else:
+                if response.status_code in (401, 403):
+                    self.api_key = ""
                 logger.warning(f"Pexels API yanıt kodu {response.status_code} ({response.text[:120]}), fallback devreye giriyor...")
         except Exception as e:
             logger.error(f"Pexels API istek hatası ({query}): {e}, fallback devreye giriyor...")
