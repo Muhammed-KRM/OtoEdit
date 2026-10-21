@@ -71,40 +71,57 @@ class WebImageCrawler:
         self,
         wiki_title_tr: str,
         wiki_title_en: str = "",
-        max_candidates: int = 2,
+        max_candidates: int = 3,
     ) -> List[Dict[str, Any]]:
         """
-        Kişi / Alim / Filozof tanıtımlarında (PERSON_INTRODUCTION) doğrudan
-        Türkçe ve İngilizce Wikipedia biyografi sayfasındaki portre/minyatür/fotoğrafı indirir.
+        Kişi / Alim / Filozof ve Eser tanıtımlarında (PERSON_INTRODUCTION / WORK_INTRODUCTION)
+        Türkçe ve İngilizce Wikipedia özet görsellerini, madde içi görselleri (generator=images)
+        ve Wikimedia Commons adaylarını toplar; OpenCV barkod/boş kapak filtresinden geçirir.
         """
         raw_pool: List[Dict[str, Any]] = []
+        # 1. ÖNCE Türkçe ve İngilizce Wikipedia ana özet (Lead Infobox) görselleri
         if wiki_title_tr:
             raw_pool.extend(
                 self._search_wikipedia_summary_image(
                     wiki_title_tr, lang="tr", source_tag="wikipedia_portrait"
                 )
             )
-        if wiki_title_en and len(raw_pool) < max_candidates:
+        if wiki_title_en:
             raw_pool.extend(
                 self._search_wikipedia_summary_image(
                     wiki_title_en, lang="en", source_tag="wikipedia_portrait"
                 )
             )
-        if not raw_pool and (wiki_title_en or wiki_title_tr):
+        # 2. Ardından konu başlığı ile örtüşen madde içi görseller (generator=images)
+        if wiki_title_tr:
+            raw_pool.extend(
+                self._search_wikipedia_article_images(
+                    wiki_title_tr, lang="tr", source_tag="wikipedia_portrait", limit=4
+                )
+            )
+        if wiki_title_en:
+            raw_pool.extend(
+                self._search_wikipedia_article_images(
+                    wiki_title_en, lang="en", source_tag="wikipedia_portrait", limit=4
+                )
+            )
+        if wiki_title_en or wiki_title_tr:
             q = wiki_title_en or wiki_title_tr
-            raw_pool.extend(self._search_wikimedia_images(f"{q} portrait", limit=2))
+            raw_pool.extend(self._search_wikimedia_images(q, limit=4))
 
         verified: List[Dict[str, Any]] = []
+        seen_urls: Set[str] = set()
         for item in raw_pool:
             url = str(item.get("url", ""))
-            if not url or url in self.used_links:
+            if not url or url in self.used_links or url in seen_urls:
                 continue
+            seen_urls.add(url)
             local_path = self._download_candidate(url)
             if not local_path:
                 continue
             passed, metrics = self._passes_opencv_prefilter(local_path, is_portrait=True)
             if not passed:
-                logger.info(f"[WebImageCrawler] Portre OpenCV filtresinden geçemedi ({url}): {metrics}")
+                logger.info(f"[WebImageCrawler] Portre/Eser OpenCV filtresinden geçemedi ({url}): {metrics}")
                 continue
             item["local_path"] = local_path
             item["cv_metrics"] = metrics
@@ -217,31 +234,120 @@ class WebImageCrawler:
             thumb_url = str((data.get("thumbnail") or {}).get("source") or "")
             orig_url = str((data.get("originalimage") or {}).get("source") or "")
 
-            # Önce 640px genişlikli Wikipedia thumbnail'ini, yoksa hazır thumbnail veya orijinal URL'yi aday listesine ekle
+            # Önce Wikimedia standart adım genişliği (960px) veya hazır thumbnail/orijinal URL'yi aday listesine ekle
             candidate_urls: List[str] = []
             if thumb_url and not thumb_url.lower().endswith((".svg", ".gif")):
-                url_640 = re.sub(r"/\d+px-", "/640px-", thumb_url)
-                if url_640 != thumb_url:
-                    candidate_urls.append(url_640)
-                candidate_urls.append(thumb_url)
+                # KRİTİK KURAL: PDF veya DjVu taramalarının 1. sayfası (page1-...) çoğunlukla
+                # kütüphane dış siyah cildi ve barkod etiketidir (Örn: Mecelle-yi_ahkâm-ı_adliyye_1869.pdf).
+                # Bu durumda page1'i reddet ve iç unvan/hat sayfalarını (page3, page5, page7) aday yap!
+                if re.search(r"/page1-\d+px-.*\.(pdf|djvu)\.jpg", thumb_url, re.IGNORECASE):
+                    logger.info(f"[WebImageCrawler] PDF/DjVu 1. sayfa (dış cilt/barkod riski) atlandı, iç sayfalar deneniyor: {thumb_url}")
+                    for inner_p in ("page3-", "page5-", "page7-"):
+                        candidate_urls.append(re.sub(r"/page1-", f"/{inner_p}", thumb_url, flags=re.IGNORECASE))
+                else:
+                    url_960 = re.sub(r"/\d+px-", "/960px-", thumb_url)
+                    if url_960 != thumb_url:
+                        candidate_urls.append(url_960)
+                    candidate_urls.append(thumb_url)
             if orig_url and orig_url.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
-                if orig_url not in candidate_urls:
+                if not re.search(r"\.(pdf|djvu)\b", orig_url, re.IGNORECASE) and orig_url not in candidate_urls:
                     candidate_urls.append(orig_url)
 
             out_items: List[Dict[str, Any]] = []
             for cu in candidate_urls:
                 lower_u = cu.lower()
-                if any(bad in lower_u for bad in ("map_", "flag_of", "coat_of_arms", "signature", "autograph", "locator")):
+                if any(bad in lower_u for bad in ("map_", "flag_of", "coat_of_arms", "signature", "autograph", "locator", "commons-logo", "wikidata-logo")):
                     continue
                 out_items.append({
                     "url": cu,
                     "source": source_tag,
+                    "is_lead_summary": True,
                     "alt": str(data.get("title") or title),
                     "description": str(data.get("description") or ""),
                 })
             return out_items
         except Exception as exc:
             logger.debug(f"[WebImageCrawler] Wikipedia summary hatası ({lang}:{title}): {exc}")
+            return []
+
+    def _search_wikipedia_article_images(
+        self, title: str, lang: str = "tr", source_tag: str = "wikipedia_portrait", limit: int = 4
+    ) -> List[Dict[str, Any]]:
+        """
+        MediaWiki `generator=images` + `prop=imageinfo` uç noktasını kullanarak madde içindeki
+        diğer tüm anlamlı görselleri ve Commons extmetadata açıklamalarını çeker.
+        """
+        if not title or not title.strip():
+            return []
+        try:
+            data = self._http_get_json(
+                f"https://{lang}.wikipedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "titles": title.strip(),
+                    "generator": "images",
+                    "gimlimit": limit + 6,
+                    "prop": "imageinfo",
+                    "iiprop": "url|dimensions|mime|extmetadata",
+                    "iiurlwidth": 640,
+                    "format": "json",
+                    "redirects": 1,
+                },
+                headers=self.WIKI_HEADERS,
+                timeout=5,
+            )
+            if not isinstance(data, dict):
+                return []
+            pages = (data.get("query") or {}).get("pages") or {}
+            out: List[Dict[str, Any]] = []
+            bad_tokens = (
+                "map", "flag", "coat_of_arms", "signature", "autograph", "locator",
+                "commons-logo", "wikidata", "disambig", "icon", "symbol", "crystal_clear",
+                "nuvola", "kit_body", "kit_left", "kit_right", "increase", "decrease",
+                "mohammed_splits", "jonah_and_the_whale", "portal",
+            )
+            fold_map = str.maketrans("çğıöşüâîûÇĞİÖŞÜÂÎÛ", "cgiosuaiuCGIOSUAIU")
+            subject_stems = [
+                tok[:4]
+                for tok in re.split(r"[\s_\-]+", title.translate(fold_map).lower())
+                if len(tok) >= 4
+            ]
+            for p in pages.values():
+                file_title = str(p.get("title") or "")
+                lower_t = file_title.translate(fold_map).lower()
+                if any(bt in lower_t for bt in bad_tokens):
+                    continue
+                ii = (p.get("imageinfo") or [{}])[0]
+                extmeta = ii.get("extmetadata") or {}
+                desc = str((extmeta.get("ImageDescription") or {}).get("value") or "")
+                obj_name = str((extmeta.get("ObjectName") or {}).get("value") or file_title)
+                clean_desc = re.sub(r"<[^>]+>", " ", desc).strip()
+                combined_meta = f"{lower_t} {obj_name.translate(fold_map).lower()} {clean_desc.translate(fold_map).lower()}"
+                if subject_stems and not any(st in combined_meta for st in subject_stems):
+                    continue
+                mime = str(ii.get("mime") or "").lower()
+                thumb_url = str(ii.get("thumburl") or ii.get("url") or "")
+                w, h = int(ii.get("thumbwidth") or ii.get("width") or 0), int(ii.get("thumbheight") or ii.get("height") or 0)
+                if not thumb_url or min(w, h) < 180:
+                    continue
+                if "svg" in mime or "gif" in mime:
+                    continue
+                # Eğer PDF/DjVu ise page1 yerine page3 kullan
+                if re.search(r"/page1-\d+px-.*\.(pdf|djvu)\.jpg", thumb_url, re.IGNORECASE):
+                    thumb_url = re.sub(r"/page1-", "/page3-", thumb_url, flags=re.IGNORECASE)
+                out.append({
+                    "url": thumb_url,
+                    "source": source_tag,
+                    "width": w,
+                    "height": h,
+                    "alt": obj_name,
+                    "description": clean_desc[:240],
+                })
+                if len(out) >= limit:
+                    break
+            return out
+        except Exception as exc:
+            logger.debug(f"[WebImageCrawler] Wikipedia article images hatası ({lang}:{title}): {exc}")
             return []
 
     def _search_bing_images(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
@@ -373,7 +479,7 @@ class WebImageCrawler:
             return False, {"reason": "unreadable"}
 
         h, w = img.shape[:2]
-        min_dim = 250 if is_portrait else 420
+        min_dim = 180 if is_portrait else 420
         if min(w, h) < min_dim:
             return False, {"reason": "low_res", "w": w, "h": h}
 
@@ -405,4 +511,59 @@ class WebImageCrawler:
         if text_density > max_text_density:
             return False, {"reason": "slide_or_document_text_clutter", "text_density": round(text_density, 3)}
 
+        # 4. Kütüphane Barkod Etiketi ve Simsiyah/Boş Kitap Kapağı Anomali Kontrolü
+        has_anomaly, anomaly_reason = self._detect_barcode_or_blank_cover_anomaly(img, gray)
+        if has_anomaly:
+            return False, {"reason": anomaly_reason, "w": w, "h": h, "sharpness": round(sharpness, 1)}
+
         return True, {"w": w, "h": h, "sharpness": round(sharpness, 1), "text_density": round(text_density, 3)}
+
+    @staticmethod
+    def _detect_barcode_or_blank_cover_anomaly(img_bgr: Any, gray: Any) -> Tuple[bool, str]:
+        """
+        Taranmış kütüphane kitap ciltlerini (simsiyah/boş kapak + beyaz kütüphane barkod etiketi)
+        ve düşük entropili boş kapakları OpenCV ile tespit edip veto eder.
+        """
+        if cv2 is None or np is None:
+            return False, "clean"
+        h, w = gray.shape[:2]
+        if h < 64 or w < 64:
+            return True, "image_too_small"
+
+        dark_ratio = float(np.mean(gray < 52))
+        mid_tone_ratio = float(np.mean((gray >= 60) & (gray <= 190)))
+
+        # Shannon entropisi
+        hist = cv2.calcHist([gray], [0], None, [64], [0, 256]).ravel()
+        prob = hist / max(1.0, float(np.sum(hist)))
+        prob = prob[prob > 0]
+        entropy = float(-np.sum(prob * np.log2(prob)))
+
+        # 1. Simsiyah / boş kapak kontrolü
+        if dark_ratio > 0.60 and mid_tone_ratio < 0.24:
+            return True, f"blank_dark_cover(dark={dark_ratio:.2f},mid={mid_tone_ratio:.2f})"
+        if entropy < 3.6 and mid_tone_ratio < 0.20:
+            return True, f"low_entropy_blank_cover(entropy={entropy:.2f})"
+
+        # 2. Kütüphane barkod etiketi tespiti (Parlak beyaz dikdörtgen ROI içinde dikey Sobel Gx >> Gy)
+        _, bright_mask = cv2.threshold(gray, 185, 255, cv2.THRESH_BINARY)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (9, 5))
+        closed = cv2.morphologyEx(bright_mask, cv2.MORPH_CLOSE, kernel)
+        contours, _ = cv2.findContours(closed, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        img_area = float(h * w)
+        for cnt in contours:
+            x, y, cw, ch = cv2.boundingRect(cnt)
+            patch_area_ratio = float(cw * ch) / img_area
+            aspect = float(cw) / max(1.0, float(ch))
+            if 0.006 <= patch_area_ratio <= 0.32 and 0.75 <= aspect <= 7.0:
+                roi = gray[y : y + ch, x : x + cw]
+                gx = np.abs(cv2.Sobel(roi, cv2.CV_32F, 1, 0, ksize=3))
+                gy = np.abs(cv2.Sobel(roi, cv2.CV_32F, 0, 1, ksize=3))
+                mean_gx = float(np.mean(gx))
+                mean_gy = float(np.mean(gy))
+                vert_dominance = mean_gx / (mean_gy + 1.0)
+                if mean_gx > 25.0 and vert_dominance > 1.70 and dark_ratio > 0.32:
+                    return True, f"library_barcode_sticker_detected(vert={vert_dominance:.2f},dark={dark_ratio:.2f})"
+
+        return False, "clean"

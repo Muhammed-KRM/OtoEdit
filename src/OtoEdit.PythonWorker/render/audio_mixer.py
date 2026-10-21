@@ -88,8 +88,16 @@ class AudioMixer:
             logger.error(f"AudioMixer hatası: {ex}, orijinal ses akışı korunuyor")
             return speech_audio_stream
 
-    @staticmethod
-    def _resolve_local_sfx_asset(clip: Dict[str, Any], raw_source: str) -> Optional[str]:
+    SFX_PRESET_ALIASES: Dict[str, str] = {
+        "keyboard-type": "keyboard-typing",
+        "keyboard": "keyboard-typing",
+        "ding": "ding-bright",
+        "pop": "pop-bubble",
+        "whoosh": "whoosh-fast",
+    }
+
+    @classmethod
+    def _resolve_local_sfx_asset(cls, clip: Dict[str, Any], raw_source: str) -> Optional[str]:
         """
         Yerel assets/sfx/ dizinindeki gerçek stüdyo SFX dosyalarını (.wav / .ogg)
         presetId, synthPreset veya /assets/sfx/ yoluna göre öncelikli olarak çözer.
@@ -102,9 +110,13 @@ class AudioMixer:
         if not preset_id and raw_source.startswith("sfx://"):
             preset_id = raw_source.replace("sfx://", "").strip("/")
 
-        if preset_id:
+        candidate_ids = [preset_id] if preset_id else []
+        if preset_id in cls.SFX_PRESET_ALIASES:
+            candidate_ids.append(cls.SFX_PRESET_ALIASES[preset_id])
+
+        for cid in candidate_ids:
             for ext in (".wav", ".ogg", ""):
-                cand = os.path.join(sfx_assets_dir, f"{preset_id}{ext}")
+                cand = os.path.join(sfx_assets_dir, f"{cid}{ext}")
                 if os.path.isfile(cand):
                     return cand
 

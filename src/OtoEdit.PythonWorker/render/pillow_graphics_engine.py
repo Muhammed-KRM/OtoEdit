@@ -717,11 +717,12 @@ class PillowGraphicsEngine:
             return output_path
 
         display_text = text.upper() if all_caps else text
-        if "\n" not in display_text and len(display_text) > 16 and " " in display_text and abs(curve_bend) <= 1.0:
+        wrap_char_threshold = 12 if int(font_size) >= 52 else (14 if int(font_size) >= 44 else 16)
+        if "\n" not in display_text and len(display_text) > wrap_char_threshold and " " in display_text and abs(curve_bend) <= 1.0:
             words_list = display_text.split()
             wrapped_lines: List[str] = []
             cur_line = ""
-            max_line_chars = max(16, int(len(display_text) * 0.56))
+            max_line_chars = max(wrap_char_threshold, int(len(display_text) * 0.56))
             for w in words_list:
                 cand = f"{cur_line} {w}".strip() if cur_line else w
                 if cur_line and len(cand) > max_line_chars:

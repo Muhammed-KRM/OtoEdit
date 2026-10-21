@@ -601,10 +601,12 @@ export class StudioEngineService {
     { id: 'cyber-powerdown', name: 'Sistem Kapanışı (Power Down)', category: 'cinematic', icon: '🔌', duration: 0.80, synthPreset: 'sub-bass-drop', description: 'Enerji kesilmesi ve kapanış efekti', peaks: [0.9, 0.8, 0.65, 0.5, 0.3, 0.1] },
     { id: 'drone-dark', name: 'Karanlık Atmosfer Drone', category: 'cinematic', icon: '🌑', duration: 1.80, synthPreset: 'swoosh-deep', description: 'Gizemli hikayeler için arka plan gerilim dokusu', peaks: [0.3, 0.6, 0.8, 0.85, 0.8, 0.7, 0.4, 0.2] },
 
-    // --- UI / BİLDİRİM & TEKNOLOJİ (16) ---
+    // --- UI / BİLDİRİM & TEKNOLOJİ (18) ---
+    { id: 'ding-bright', name: 'Ding Parlak Çan (Tın)', category: 'ui', icon: '🔔', duration: 0.90, synthPreset: 'ding-bright', description: 'Kişi ve eser tanıtım kartları için kristal tın sesi', peaks: [1.0, 0.9, 0.75, 0.6, 0.45, 0.3, 0.2, 0.1, 0.05] },
     { id: 'ding-bell', name: 'Ding Parlak Çan', category: 'ui', icon: '🔔', duration: 0.90, synthPreset: 'ding-bell', description: 'Önemli fikir, ipucu veya doğru cevap çanı', peaks: [1.0, 0.9, 0.75, 0.6, 0.45, 0.3, 0.2, 0.1, 0.05] },
     { id: 'cash-register', name: 'Kasa / Para Sesi (Ka-Ching)', category: 'ui', icon: '💰', duration: 0.80, synthPreset: 'cash-register', description: 'Fiyat, kazanç ve finans vurguları için kasa çanı', peaks: [0.9, 0.4, 1.0, 0.85, 0.6, 0.4, 0.2, 0.1] },
     { id: 'camera-shutter', name: 'Kamera Deklanşör (Shutter)', category: 'ui', icon: '📸', duration: 0.35, synthPreset: 'camera-shutter', description: 'Fotoğraf/ekran görüntüsü ve dondurulmuş kare efekti', peaks: [0.95, 0.3, 0.85, 0.2, 0.05] },
+    { id: 'keyboard-type', name: 'Mekanik Klavye (Sıralama)', category: 'ui', icon: '⌨️', duration: 0.45, synthPreset: 'keyboard-type', description: 'Alt alta sıralanan liste maddeleri için daktilo/klavye sesi', peaks: [0.85, 0.2, 0.95, 0.15, 0.80, 0.2, 0.90, 0.1] },
     { id: 'keyboard-typing', name: 'Mekanik Klavye (Daktilo)', category: 'ui', icon: '⌨️', duration: 0.85, synthPreset: 'keyboard-typing', description: 'Daktilo animasyonlu yazılar için tuş tıkırtısı', peaks: [0.8, 0.2, 0.9, 0.15, 0.75, 0.2, 0.85, 0.1, 0.9, 0.2] },
     { id: 'mouse-click', name: 'Çift Fare Tıklaması', category: 'ui', icon: '🖱️', duration: 0.30, synthPreset: 'mouse-click', description: 'Buton, abone ol ve UI etkileşim sesi', peaks: [0.9, 0.1, 0.95, 0.1] },
     { id: 'success-chime', name: 'Başarı / Seviye Atlama', category: 'ui', icon: '🏆', duration: 0.80, synthPreset: 'success-chime', description: 'Olumlu sonuç ve onay akoru', peaks: [0.6, 0.75, 0.9, 1.0, 0.85, 0.6, 0.3, 0.1] },
@@ -930,7 +932,15 @@ export class StudioEngineService {
    */
   playSfxPreset(presetId: string, volume = 0.85, customUrl?: string): void {
     try {
-      const cleanId = (presetId || 'whoosh-fast').trim();
+      const rawId = (presetId || 'whoosh-fast').trim();
+      const wavIdMap: Record<string, string> = {
+        'keyboard-type': 'keyboard-typing',
+        'keyboard': 'keyboard-typing',
+        'ding': 'ding-bright',
+        'pop': 'pop-bubble',
+        'whoosh': 'whoosh-fast'
+      };
+      const cleanId = wavIdMap[rawId] || rawId;
       const targetUrl =
         customUrl && (customUrl.startsWith('http') || customUrl.startsWith('/assets/') || customUrl.startsWith('/api/'))
           ? customUrl
@@ -1022,12 +1032,18 @@ export class StudioEngineService {
           data[i] = Math.sin(2 * Math.PI * freq * t) * env * 0.9;
           break;
         }
+        case 'ding-bright':
         case 'ding-bell':
         case 'cash-register': {
           const env = Math.exp(-t * 4.5);
-          const f1 = (synthFamily === 'cash-register' && t > 0.12 ? 2093 : 1318.5) * pitchMod;
+          const f1 = (synthFamily === 'cash-register' && t > 0.12 ? 2093 : 1567.98) * pitchMod;
           const f2 = f1 * 2.0;
-          data[i] = (Math.sin(2 * Math.PI * f1 * t) * 0.65 + Math.sin(2 * Math.PI * f2 * t) * 0.35) * env;
+          const f3 = f1 * 3.0;
+          data[i] = (
+            Math.sin(2 * Math.PI * f1 * t) * 0.60 +
+            Math.sin(2 * Math.PI * f2 * t) * 0.28 +
+            Math.sin(2 * Math.PI * f3 * t) * 0.12 * Math.exp(-t * 8.0)
+          ) * env;
           break;
         }
         case 'sub-bass-drop':
@@ -1046,12 +1062,31 @@ export class StudioEngineService {
           break;
         }
         case 'camera-shutter':
-        case 'mouse-click':
-        case 'keyboard-typing': {
-          const clickPeriod = synthFamily === 'keyboard-typing' ? 0.14 : 0.12;
+        case 'mouse-click': {
+          const clickPeriod = 0.12;
           const localT = t % clickPeriod;
           const env = Math.exp(-localT * 65);
           data[i] = (Math.random() * 2 - 1) * env * 0.9;
+          break;
+        }
+        case 'keyboard-type':
+        case 'keyboard-typing': {
+          const strokeTimes = [0.0, 0.075, 0.145, 0.225, 0.31, 0.39, 0.48, 0.57, 0.66, 0.75];
+          let sampleVal = 0;
+          for (let k = 0; k < strokeTimes.length; k++) {
+            const dt = t - strokeTimes[k];
+            if (dt >= 0 && dt < 0.068) {
+              const clickFreq = (2400 + ((k * 317) % 700)) * pitchMod;
+              const thockFreq = (420 + ((k * 131) % 160)) * pitchMod;
+              const clickEnv = Math.exp(-dt * 175);
+              const thockEnv = Math.exp(-dt * 58);
+              const clickWave = Math.sin(2 * Math.PI * clickFreq * dt) * clickEnv * 0.45;
+              const thockWave = Math.sin(2 * Math.PI * thockFreq * dt) * thockEnv * 0.40;
+              const burstNoise = (Math.random() * 2 - 1) * Math.exp(-dt * 115) * 0.30;
+              sampleVal += (clickWave + thockWave + burstNoise);
+            }
+          }
+          data[i] = Math.max(-0.95, Math.min(0.95, sampleVal));
           break;
         }
         case 'digital-glitch':

@@ -9,8 +9,12 @@ Oluşturulan kurgu planını 6 katı mühendislik kuralına göre denetler ve on
 6. Cümle sınırına mıknatıslanmış (sentence-boundary snapped) yumuşak bölüm geçişleri
 """
 
-from typing import Any, Dict, List, Tuple
-from pipeline.theme_profiles import ThemeProfile, extract_turkish_semantic_title
+from typing import Any, Dict, List, Set, Tuple
+from pipeline.theme_profiles import (
+    ThemeProfile,
+    extract_turkish_semantic_title,
+    resolve_sub_theme,
+)
 from utils.logger import get_logger
 
 logger = get_logger("MasterPlanValidator")
@@ -95,7 +99,13 @@ class MasterPlanValidator:
             if not ov.get("id"):
                 ov["id"] = f"ad_ov_{idx + 1}"
 
-            # Kural 4: Metin Başlığı Doğrulaması ve Kilitli Tema Stili
+            # Kural 4: Metin Başlığı Doğrulaması, Dinamik Font Korunumu ve Mini-Tema Stili
+            action_type = str(
+                ov.get("actionType")
+                or ("PROGRESSIVE_LIST" if ov.get("stackSlot") is not None else "SINGLE_TERM")
+            )
+            sub_theme = resolve_sub_theme(theme_profile, action_type)
+
             if ov_type == "text":
                 raw_text = str(ov.get("text") or ov.get("content") or "")
                 clean_title = extract_turkish_semantic_title(
@@ -108,20 +118,32 @@ class MasterPlanValidator:
                 ov["font"] = theme_profile.font_family
                 ov["fontFamily"] = theme_profile.font_family
                 ov["fontSize"] = int(ov.get("fontSize") or theme_profile.title_font_size_1080p)
+                ov["maxWidthCqi"] = int(ov.get("maxWidthCqi") or (30 if ov.get("stackSlot") is not None else 32))
+                ov["lineHeight"] = float(ov.get("lineHeight") or 1.14)
                 ov["color"] = ov.get("color") or theme_profile.text_color_hex
                 ov["strokeColor"] = ov.get("strokeColor") or theme_profile.stroke_color_hex
-                ov["strokeWidth"] = int(ov.get("strokeWidth") if ov.get("strokeWidth") is not None else theme_profile.stroke_width_px)
+                ov["strokeWidth"] = int(
+                    ov.get("strokeWidth")
+                    if ov.get("strokeWidth") is not None
+                    else theme_profile.stroke_width_px
+                )
                 ov["backgroundBox"] = theme_profile.background_box
                 ov["boxStyle"] = "rounded" if theme_profile.background_box else "none"
                 ov["boxColor"] = theme_profile.box_color_hex
                 ov["boxBgColor"] = theme_profile.box_color_hex
                 ov["boxOpacity"] = theme_profile.box_opacity
                 ov["preset"] = theme_profile.preset_id
-                ov["animation"] = theme_profile.entry_animation
-                ov["exitAnimation"] = theme_profile.exit_animation
+                ov["actionType"] = action_type
+                ov["subThemeRole"] = sub_theme.role_id
+                ov["animation"] = ov.get("animation") or sub_theme.entry_animation
+                ov["exitAnimation"] = ov.get("exitAnimation") or sub_theme.exit_animation
                 ov["trackId"] = int(ov.get("trackId") or ov.get("track_id") or 2)
                 ov["track_id"] = ov["trackId"]
             else:
+                ov["actionType"] = action_type
+                ov["subThemeRole"] = sub_theme.role_id
+                ov["animation"] = ov.get("animation") or sub_theme.entry_animation
+                ov["exitAnimation"] = ov.get("exitAnimation") or sub_theme.exit_animation
                 ov["trackId"] = int(ov.get("trackId") or ov.get("track_id") or 3)
                 ov["track_id"] = ov["trackId"]
 
@@ -129,52 +151,9 @@ class MasterPlanValidator:
             last_overlay_start = start
             last_paired_group = paired_group
 
-        # Kural 5: Yalnızca Olaya Bağlı Seyrek Mikro-SFX (Metronom döngüsü yok, maks ses 0.24)
-        valid_event_times = [float(o["start"]) for o in repaired_overlays] + [
-            float(t.get("timestamp", 0.0)) for t in transitions
-        ]
-        min_sfx_gap = min(24.0, max(2.5, safe_duration / 6.0))
-        repaired_sfx: List[Dict[str, Any]] = []
-        last_sfx_ts = -999.0
-
-        sfx_preset_map = {
-            "whoosh": ("whoosh-fast", "Whoosh Fast", 0.8),
-            "pop": ("pop-bubble", "Pop Bubble", 0.5),
-            "ding": ("ding-bright", "Ding Bright", 1.1),
-            "impact": ("whoosh-fast", "Impact Whoosh", 0.9),
-        }
-
-        for idx, sfx in enumerate(
-            sorted(
-                sfx_list,
-                key=lambda s: float(s.get("timestamp") if s.get("timestamp") is not None else s.get("start", 0.0)),
-            )
-        ):
-            ts = float(sfx.get("timestamp") if sfx.get("timestamp") is not None else sfx.get("start", 0.0))
-            if ts - last_sfx_ts < min_sfx_gap:
-                continue
-            if not any(abs(ts - evt_t) <= 0.6 for evt_t in valid_event_times):
-                continue
-            vol = min(0.24, max(0.12, float(sfx.get("volume", 0.16))))
-            raw_type = str(sfx.get("type", "whoosh"))
-            preset_id, name, def_dur = sfx_preset_map.get(raw_type, ("whoosh-fast", "Whoosh Fast", 0.8))
-            repaired_sfx.append({
-                "id": sfx.get("id") or f"ad_sfx_{idx + 1}",
-                "name": sfx.get("name") or name,
-                "presetId": sfx.get("presetId") or preset_id,
-                "type": raw_type,
-                "category": raw_type if raw_type in ("whoosh", "pop", "ding") else "whoosh",
-                "sourceUrl": sfx.get("sourceUrl") or f"sfx://{preset_id}",
-                "timestamp": round(ts, 2),
-                "start": round(ts, 2),
-                "duration": float(sfx.get("duration") or def_dur),
-                "volume": round(vol, 2),
-            })
-            last_sfx_ts = ts
-
-        # Kural 6: Geçiş (Transitions) Denetimi
+        # Kural 5: Geçiş (Transitions) Denetimi (Sola kaydırmalı 'smoothleft' + Konu/Açıklama sınırları)
         min_tr_edge = min(5.0, max(1.5, safe_duration * 0.08))
-        min_tr_gap = min(25.0, max(4.0, safe_duration * 0.12))
+        min_tr_gap = min(20.0, max(4.0, safe_duration * 0.015))
         repaired_transitions: List[Dict[str, Any]] = []
         last_tr_ts = 0.0
         for idx, tr in enumerate(sorted(transitions, key=lambda t: float(t.get("timestamp", 0.0)))):
@@ -183,7 +162,7 @@ class MasterPlanValidator:
                 continue
             if ts - last_tr_ts < min_tr_gap and repaired_transitions:
                 continue
-            tr_type = str(tr.get("type") or theme_profile.allowed_transitions[0])
+            tr_type = str(tr.get("type") or "smoothleft")
             if tr_type not in theme_profile.allowed_transitions:
                 tr_type = theme_profile.allowed_transitions[0]
             repaired_transitions.append({
@@ -197,4 +176,93 @@ class MasterPlanValidator:
             })
             last_tr_ts = ts
 
+        # Kural 6: 1-e-1 Görsel-İşitsel Senkrezis (Audio-Visual Synchresis)
+        # "Ya ikisinde de gelmeli ya hiç gelmemeli ve ikisinde de aynı ses gelmeli":
+        # - 24s kör SFX makası kaldırıldı!
+        # - Onaylanan HER metin katmanına kendi Mini-Tema SFX'i (ding-bright, keyboard-type, pop-bubble)
+        #   ve onaylanan HER sahne geçişine (t - 0.10s) 'whoosh-fast' SFX'i %100 deterministik bağlanır.
+        sfx_preset_map = {
+            "whoosh": ("whoosh-fast", "Whoosh Hızlı Geçiş", 0.42, "whoosh"),
+            "whoosh-fast": ("whoosh-fast", "Whoosh Hızlı Geçiş", 0.42, "whoosh"),
+            "pop": ("pop-bubble", "Pop Baloncuk (Kavram)", 0.25, "pop"),
+            "pop-bubble": ("pop-bubble", "Pop Baloncuk (Kavram)", 0.25, "pop"),
+            "ding": ("ding-bright", "Ding Parlak Çan (Tın)", 0.90, "ui"),
+            "ding-bright": ("ding-bright", "Ding Parlak Çan (Tın)", 0.90, "ui"),
+            "keyboard": ("keyboard-type", "Mekanik Klavye (Daktilo)", 0.45, "ui"),
+            "keyboard-type": ("keyboard-type", "Mekanik Klavye (Daktilo)", 0.45, "ui"),
+            "keyboard-typing": ("keyboard-type", "Mekanik Klavye (Daktilo)", 0.45, "ui"),
+            "impact": ("whoosh-fast", "Impact Whoosh", 0.45, "whoosh"),
+        }
+
+        repaired_sfx: List[Dict[str, Any]] = []
+        seen_paired_sfx_groups: Set[str] = set()
+
+        for idx, ov in enumerate(repaired_overlays):
+            ov_id = str(ov.get("id") or f"ov_{idx + 1}")
+            ov_type = str(ov.get("type", "text"))
+            paired_grp = str(ov.get("pairedGroupId") or "")
+            stack_slot = ov.get("stackSlot")
+
+            # Kişi+Portre çiftinde (stackSlot None ve aynı pairedGroupId) sesi yalnızca 1 kez tetikle
+            if paired_grp and stack_slot is None:
+                if paired_grp in seen_paired_sfx_groups:
+                    continue
+                seen_paired_sfx_groups.add(paired_grp)
+
+            action_type = str(
+                ov.get("actionType")
+                or (
+                    "PROGRESSIVE_LIST"
+                    if stack_slot is not None
+                    else ("CONCEPT_IMAGE_CARD" if ov_type == "image" else "SINGLE_TERM")
+                )
+            )
+            sub_theme = resolve_sub_theme(theme_profile, action_type)
+            ts = round(float(ov["start"]), 2)
+            preset_id, name, def_dur, cat = sfx_preset_map.get(
+                sub_theme.sfx_preset_id, ("pop-bubble", "Pop Baloncuk (Kavram)", 0.25, "pop")
+            )
+            repaired_sfx.append({
+                "id": f"ad_sfx_{ov_id}",
+                "name": name,
+                "title": name,
+                "presetId": preset_id,
+                "synthPreset": preset_id,
+                "type": sub_theme.sfx_type,
+                "category": cat,
+                "sourceUrl": f"sfx://{preset_id}",
+                "timestamp": ts,
+                "start": ts,
+                "duration": round(float(sub_theme.sfx_duration or def_dur), 2),
+                "volume": round(float(sub_theme.sfx_volume), 2),
+                "subThemeRole": sub_theme.role_id,
+                "boundOverlayId": ov_id,
+            })
+
+        # Onaylanan her sahne geçişine (t - 0.10s) 'whoosh-fast' kaydırma sesi bağla
+        for tr_idx, tr in enumerate(repaired_transitions):
+            tr_ts = float(tr.get("timestamp") or tr.get("boundaryTime") or 0.0)
+            sfx_ts = round(max(0.05, tr_ts - 0.10), 2)
+            if not any(
+                abs(float(s["start"]) - sfx_ts) < 0.18 and s["presetId"] == "whoosh-fast"
+                for s in repaired_sfx
+            ):
+                repaired_sfx.append({
+                    "id": f"ad_sfx_tr_{tr_idx + 1}",
+                    "name": "Whoosh Hızlı Geçiş",
+                    "title": "Whoosh Hızlı Geçiş",
+                    "presetId": "whoosh-fast",
+                    "synthPreset": "whoosh-fast",
+                    "type": "whoosh",
+                    "category": "whoosh",
+                    "sourceUrl": "sfx://whoosh-fast",
+                    "timestamp": sfx_ts,
+                    "start": sfx_ts,
+                    "duration": 0.42,
+                    "volume": 0.20,
+                    "subThemeRole": "TOPIC_TRANSITION",
+                    "isTransitionSfx": True,
+                })
+
+        repaired_sfx.sort(key=lambda s: float(s["start"]))
         return repaired_overlays, repaired_sfx, repaired_transitions

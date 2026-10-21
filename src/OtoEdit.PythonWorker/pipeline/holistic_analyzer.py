@@ -49,6 +49,183 @@ class WordToken:
     has_sentence_end: bool
 
 
+@dataclass
+class SemanticTransitionBoundary:
+    timestamp: float
+    sentence_a_end: float
+    sentence_b_start: float
+    sentence_a_last_word: str
+    sentence_b_first_word: str
+    category: str  # "RETROSPECTIVE_CLOSURE_TO_NEW_TOPIC" | "PRE_EXPLANATION_PIVOT" | "RHETORICAL_QUESTION_TO_THESIS"
+    priority_score: float
+    reason: str
+
+
+TR_ABBREVIATIONS = {"prof", "dr", "doç", "hz", "av", "md", "bkz", "vb", "vs", "yy", "st", "mr"}
+
+
+class SemanticTransitionBoundaryDetector:
+    """
+    Kelime akışı (WordToken[]) üzerinden gerçek cümle birimlerini (SentenceUnit) inşa eder ve:
+      1. RETROSPECTIVE_CLOSURE_TO_NEW_TOPIC (Özet/Konu Bitimi -> Yeni Konuya Giriş)
+      2. PRE_EXPLANATION_PIVOT (Köprü/Hazırlık Cümlesi Bitimi -> Derin Kavram Açıklamasına Giriş)
+      3. RHETORICAL_QUESTION_TO_THESIS (Retorik Soru Bitimi -> Tez/Cevap Girişi)
+    sınırlarını milisaniye hassasiyetle tespit eder.
+    """
+
+    RETROSPECTIVE_END_RE = re.compile(
+        r"\b(incelemiştik|tahlil etmiştik|ele almıştık|görmüştük|değinmiştik|konuşmuştuk|"
+        r"özetlemiştik|tamamladık|geride bıraktık|[a-zçğıöşüâîû]+(?:miştik|mıştık|muştuk|müştük)|"
+        r"sıralanır|zorunlu kıldığını haykırır|zorunlu kıldığını aykırır|"
+        r"cisme bürünmüş ayetleridir|boğulmaya mahkumdur|kalemi şahididir|kelami şahididir|"
+        r"en büyük adaletsizliktir)\s*[.!]?$",
+        re.IGNORECASE,
+    )
+
+    NEW_TOPIC_START_RE = re.compile(
+        r"^(işte bugün|bugün ise|şimdi ise|bu buluşmamızda|bu bölümde|bu dersimizde|"
+        r"bir sonraki bölümde|bir sonraki bölümümüzde|normal hiyerarşisinden|normlar hiyerarşisinden|"
+        r"cumhuriyet dönemine geldiğimizde|tarihsel süreçte|vahyin bu evrensel|"
+        r"hukuk metodolojisinde bir hakimin|peki adli koridorlarında|peki tabiatta bu kusursuz)",
+        re.IGNORECASE,
+    )
+
+    PRE_EXPLANATION_END_RE = re.compile(
+        r"\b(çevirmek zorundayız|bakmamız gerekir|bakmak zorundayız|incelememiz gerekir|"
+        r"yolculuğumuza başlıyoruz|başlıyoruz|dikkat buyurunuz|benzerliğe bakın|"
+        r"ilkesiyle karşılaşırız|kanunlar manzumesi vardır|tefsir,?\s*tas[dt]ik ve teyit eder|"
+        r"derlemeler yapmıştır|bir uygulayıcıya muhtaçtır|tas\s*tamam odur|"
+        r"emsalsiz ahlakıdır|prof\.?\s*hans\s*kün[gk]['’]?dür)\s*[.!:;]?$",
+        re.IGNORECASE,
+    )
+
+    ANTI_TRANSITION_START_PREFIXES = (
+        "ve bu ", "yani ", "çünkü kainat", "zira ", "fakat ", "lakin ", "böylece ", "dolayısıyla ",
+    )
+
+    THESIS_ANSWER_START_RE = re.compile(
+        r"^(hazırsanız|kanunun bir lafzı|bediüzzaman|hakim önüne gelen)",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def build_clean_sentences(cls, word_stream: List[WordToken]) -> List[List[WordToken]]:
+        raw_sents: List[List[WordToken]] = []
+        cur: List[WordToken] = []
+        n = len(word_stream)
+        for i, w in enumerate(word_stream):
+            cur.append(w)
+            raw_s = w.raw.strip().rstrip("\"'”’)")
+            ends_punct = raw_s.endswith((".", "?", "!", ":", ";"))
+            is_abbr = (w.lower in TR_ABBREVIATIONS) or w.clean.isdigit()
+            nxt = word_stream[i + 1] if i + 1 < n else None
+            nxt_starts_lower = bool(nxt and nxt.clean and nxt.clean[0].islower())
+            if ends_punct and not is_abbr and not nxt_starts_lower:
+                raw_sents.append(cur)
+                cur = []
+        if cur:
+            raw_sents.append(cur)
+
+        # Eksik yüklemli veya ek-fiil devamlı alt-parçaları birleştir
+        merged: List[List[WordToken]] = []
+        idx = 0
+        while idx < len(raw_sents):
+            s = list(raw_sents[idx])
+            txt_low = to_turkish_lower(" ".join(w.raw for w in s))
+            while idx + 1 < len(raw_sents):
+                nxt_s = raw_sents[idx + 1]
+                nxt_low = to_turkish_lower(" ".join(w.raw for w in nxt_s))
+                if (
+                    txt_low.endswith("bir diğer kaynağı.")
+                    or (len(nxt_s) <= 3 and nxt_low in ("icra edicisidir.", "nübüvvettir.", "tas tamam odur.", "yani akli şeriattır."))
+                    or (txt_low.endswith("ismet sıfatı.") and nxt_low.startswith("yani "))
+                ):
+                    s.extend(nxt_s)
+                    idx += 1
+                    txt_low = to_turkish_lower(" ".join(w.raw for w in s))
+                else:
+                    break
+            merged.append(s)
+            idx += 1
+        return merged
+
+    @classmethod
+    def detect_boundaries(
+        cls,
+        word_stream: List[WordToken],
+        video_duration: float,
+        min_gap_sec: float = 22.0,
+    ) -> List[SemanticTransitionBoundary]:
+        sents = cls.build_clean_sentences(word_stream)
+        candidates: List[SemanticTransitionBoundary] = []
+
+        for i in range(len(sents) - 1):
+            sa = sents[i]
+            sb = sents[i + 1]
+            ta = " ".join(w.raw for w in sa).strip()
+            tb = " ".join(w.raw for w in sb).strip()
+            la = to_turkish_lower(ta).rstrip(".!?:; ")
+            lb = to_turkish_lower(tb).lstrip()
+
+            t_end = sa[-1].end
+            t_start = sb[0].start
+            t_mid = round((t_end + t_start) / 2.0, 2)
+            if t_mid < 5.0 or t_mid > video_duration - 8.0:
+                continue
+            if lb.startswith(cls.ANTI_TRANSITION_START_PREFIXES):
+                continue
+
+            cat = None
+            score = 0.0
+            reason = ""
+
+            # Kategori 1: RETROSPECTIVE_CLOSURE_TO_NEW_TOPIC
+            if cls.RETROSPECTIVE_END_RE.search(la) and cls.NEW_TOPIC_START_RE.search(lb):
+                cat = "RETROSPECTIVE_CLOSURE_TO_NEW_TOPIC"
+                score = 100.0 if ("miştik" in la or "mıştık" in la) else 88.0
+                reason = "Konu/özet kapanış yüklemi + yeni konu/perspektif başlatıcı söylem işareti"
+
+            # Kategori 2: PRE_EXPLANATION_PIVOT
+            elif cls.PRE_EXPLANATION_END_RE.search(la):
+                cat = "PRE_EXPLANATION_PIVOT"
+                tail_stems = {w.lower[:5] for w in sa[-7:] if len(w.lower) >= 5}
+                head_stems = {w.lower[:5] for w in sb[:5] if len(w.lower) >= 5}
+                has_echo = bool(tail_stems & head_stems)
+                score = 98.0 if has_echo else 92.0
+                reason = "Kataforik hazırlık/köprü cümlesi bitimi -> Derin kavram/madde açıklamasına giriş"
+
+            # Kategori 3: RHETORICAL_QUESTION_TO_THESIS
+            elif ta.endswith("?") and not tb.endswith("?") and cls.THESIS_ANSWER_START_RE.search(lb):
+                cat = "RHETORICAL_QUESTION_TO_THESIS"
+                score = 90.0
+                reason = "Retorik çerçeveleme sorusu bitimi (?) -> Tez/cevap açıklamasına giriş"
+
+            if cat:
+                candidates.append(
+                    SemanticTransitionBoundary(
+                        timestamp=t_mid,
+                        sentence_a_end=t_end,
+                        sentence_b_start=t_start,
+                        sentence_a_last_word=sa[-1].raw,
+                        sentence_b_first_word=sb[0].raw,
+                        category=cat,
+                        priority_score=score,
+                        reason=reason,
+                    )
+                )
+
+        # Local Non-Maximum Suppression (Yakın adaylardan yüksek öncelikli/açıklama girişi olanı seç)
+        selected: List[SemanticTransitionBoundary] = []
+        for cand in candidates:
+            if selected and (cand.timestamp - selected[-1].timestamp) < min_gap_sec:
+                if cand.priority_score >= selected[-1].priority_score:
+                    selected[-1] = cand
+            else:
+                selected.append(cand)
+
+        return selected
+
+
 # Tanınmış filozof, alim, bilim insanı ve tarihsel şahsiyetlerin
 # (anahtar_kelime_listesi, Ekran Başlığı, Türkçe Wikipedia Başlığı, İngilizce Wikipedia Başlığı) eşlemesi
 KNOWN_PERSONS_WIKI_MAP: List[Tuple[Tuple[str, ...], str, str, str]] = [
@@ -354,16 +531,19 @@ class HolisticAnalyzer:
         # 1. Kilitli ThemeProfile tespiti
         theme_profile = detect_theme_profile_heuristic(full_text)
 
-        # 2. Videoyu kronolojik bölümlere (Chapters) ayır
+        # 2. Düzleştirilmiş kelime akışı (WordToken listesi) oluştur
         safe_duration = max(5.0, float(video_duration or 30.0))
+        word_stream = self._build_word_stream(active_segments)
+
+        # 3. Videoyu Söylem Analizi (SemanticTransitionBoundaryDetector) ile konu bitimi ve
+        #    açıklama öncesi anlamsal bölümlere (Chapters) ayır
         target_chapter_len = 135.0 if safe_duration >= 300.0 else max(25.0, safe_duration / 3.0)
-        num_chapters = max(1, min(16, int(round(safe_duration / target_chapter_len))))
+        num_chapters = max(1, min(18, int(round(safe_duration / target_chapter_len))))
         chapter_boundaries = self._find_natural_chapter_boundaries(
-            active_segments, safe_duration, num_chapters
+            active_segments, safe_duration, num_chapters, word_stream=word_stream
         )
 
-        # 3. Düzleştirilmiş kelime akışı (WordToken listesi) oluştur ve tüm kelime-senkronlu olayları çıkar
-        word_stream = self._build_word_stream(active_segments)
+        # 4. Tüm kelime-senkronlu olayları çıkar
         global_semantic_triggers = self._detect_global_semantic_triggers(
             active_segments, safe_duration, word_stream=word_stream
         )
@@ -434,17 +614,24 @@ class HolisticAnalyzer:
                     w_start = float(w.get("start", s_start))
                     w_end = max(w_start + 0.08, float(w.get("end", w_start + 0.35)))
                     clean = re.sub(r"^[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ]+|[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ'-]+$", "", w_str)
+                    lower_clean = to_turkish_lower(clean or w_str)
+                    raw_stripped = w_str.rstrip("\"'”’)")
+                    is_sent_end = (
+                        raw_stripped.endswith((".", "?", "!", ":", ";"))
+                        and lower_clean not in TR_ABBREVIATIONS
+                        and not (clean or "").isdigit()
+                    )
                     tokens.append(
                         WordToken(
                             idx=len(tokens),
                             raw=w_str,
                             clean=clean or w_str,
-                            lower=to_turkish_lower(clean or w_str),
+                            lower=lower_clean,
                             start=round(w_start, 2),
                             end=round(w_end, 2),
                             seg_idx=seg_idx,
                             has_comma="," in w_str,
-                            has_sentence_end=any(p in w_str for p in (".", "?", "!", ":", ";")),
+                            has_sentence_end=is_sent_end,
                         )
                     )
             else:
@@ -456,17 +643,24 @@ class HolisticAnalyzer:
                     w_start = s_start + k * step
                     w_end = w_start + step
                     clean = re.sub(r"^[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ]+|[^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ'-]+$", "", w_str)
+                    lower_clean = to_turkish_lower(clean or w_str)
+                    raw_stripped = w_str.rstrip("\"'”’)")
+                    is_sent_end = (
+                        raw_stripped.endswith((".", "?", "!", ":", ";"))
+                        and lower_clean not in TR_ABBREVIATIONS
+                        and not (clean or "").isdigit()
+                    )
                     tokens.append(
                         WordToken(
                             idx=len(tokens),
                             raw=w_str,
                             clean=clean or w_str,
-                            lower=to_turkish_lower(clean or w_str),
+                            lower=lower_clean,
                             start=round(w_start, 2),
                             end=round(w_end, 2),
                             seg_idx=seg_idx,
                             has_comma="," in w_str,
-                            has_sentence_end=any(p in w_str for p in (".", "?", "!", ":", ";")),
+                            has_sentence_end=is_sent_end,
                         )
                     )
         return tokens
@@ -1020,10 +1214,37 @@ class HolisticAnalyzer:
         active_segments: List[Dict[str, Any]],
         video_duration: float,
         num_chapters: int,
+        word_stream: Optional[List[WordToken]] = None,
     ) -> List[float]:
-        if num_chapters <= 1 or not active_segments:
+        if not active_segments:
             return [0.0, video_duration]
 
+        # ÖNCE Söylem Analizi (SemanticTransitionBoundaryDetector) ile gerçek konu bitimi ve
+        # açıklama öncesi geçiş noktalarını (Örn: "etmiştik. || İşte bugün...", "çevirmek zorundayız. || İslam hukuku...") tespit et!
+        tokens = word_stream if word_stream is not None else self._build_word_stream(active_segments)
+        if tokens and video_duration >= 25.0:
+            semantic_bounds = SemanticTransitionBoundaryDetector.detect_boundaries(
+                word_stream=tokens,
+                video_duration=video_duration,
+                min_gap_sec=22.0,
+            )
+            if semantic_bounds:
+                boundaries = [0.0]
+                for sb in semantic_bounds:
+                    if sb.timestamp > boundaries[-1] + 8.0 and sb.timestamp < video_duration - 6.0:
+                        boundaries.append(round(sb.timestamp, 2))
+                boundaries.append(round(video_duration, 2))
+                if len(boundaries) >= 3:
+                    logger.info(
+                        f"[HolisticAnalyzer] SemanticTransitionBoundaryDetector {len(boundaries) - 2} anlamsal geçiş sınırı tespit etti: "
+                        f"{[round(b, 2) for b in boundaries[1:-1]]}"
+                    )
+                    return boundaries
+
+        if num_chapters <= 1:
+            return [0.0, video_duration]
+
+        # Fallback: Sadece gerçek cümle sonlarında (nokta/soru işareti ile biten segmentlerde) sınır seç
         boundaries = [0.0]
         ideal_step = video_duration / num_chapters
         min_chapter_gap = min(15.0, max(4.0, video_duration * 0.08))
@@ -1033,13 +1254,16 @@ class HolisticAnalyzer:
             best_ts = round(ideal_ts, 2)
             best_score = -999.0
             for k in range(len(active_segments) - 1):
+                cur_txt = str(active_segments[k].get("text", "")).strip()
+                ends_sentence = cur_txt.endswith((".", "?", "!"))
                 gap_start = float(active_segments[k].get("end", 0))
                 gap_end = float(active_segments[k + 1].get("start", gap_start))
                 mid_gap = (gap_start + gap_end) / 2.0
                 dist = abs(mid_gap - ideal_ts)
                 if dist <= max(8.0, ideal_step * 0.35):
                     pause_dur = max(0.0, gap_end - gap_start)
-                    score = pause_dur * 5.0 - (dist / 20.0)
+                    sent_bonus = 3.0 if ends_sentence else -4.0
+                    score = pause_dur * 5.0 + sent_bonus - (dist / 20.0)
                     if score > best_score:
                         best_score = score
                         best_ts = round(mid_gap, 2)

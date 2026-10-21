@@ -859,12 +859,12 @@ export interface ContextMenuState {
                   </text>
                 </svg>
 
-                <!-- 1B. Normal & Photoshop Stil Metin Kaplaması (Gradient, Çift Kontur, Neon Glow, Pill/Marker) -->
+                <!-- 1B. Normal & Photoshop Stil Metin Kaplaması (Gradient, Çift Kontur, Neon Glow, Pill/Marker, Typewriter) -->
                 <span 
                   *ngIf="ov.type === 'text' && (!ov.curveBend || (ov.curveBend >= -1 && ov.curveBend <= 1))" 
                   class="font-bold whitespace-normal break-words block transition-all"
                   [ngStyle]="getTextOverlayStyle(ov)">
-                  {{ ov.allCaps ? (ov.content || '').toUpperCase() : ov.content }}
+                  {{ getRenderedOverlayText(ov) }}
                 </span>
 
                 <!-- 2. Görsel / B-Roll / Sticker / GIF / PiP Video Kaplaması -->
@@ -7469,7 +7469,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     const classes: string[] = [];
 
     if (playheadSeq < startSeq + 0.35) {
-      if (anim === 'fade') classes.push('animate-fade-in');
+      if (anim === 'fade' || anim === 'typewriter') classes.push('animate-fade-in');
       else if (anim === 'pop-up') classes.push('animate-scale-in');
       else if (anim === 'bounce') classes.push('animate-bounce-in');
       else if (anim === 'zoom-crash') classes.push('animate-zoom-crash');
@@ -8213,11 +8213,29 @@ export class EditorComponent implements OnInit, OnDestroy {
     return `M 20,90 Q 250,${ctrlY.toFixed(1)} 480,90`;
   }
 
+  getRenderedOverlayText(ov: OverlayItem): string {
+    const raw = ov.allCaps ? (ov.content || '').toLocaleUpperCase('tr-TR') : (ov.content || '');
+    if (!raw) return '';
+    if (ov.animation !== 'typewriter') return raw;
+
+    const playheadSeq = this.getPlayheadSeqTime();
+    const startSeq = this.getOverlaySeqStart(ov);
+    const elapsed = Math.max(0, playheadSeq - startSeq);
+    const typeDur = Math.min(0.55, Math.max(0.28, raw.length * 0.032));
+    if (elapsed >= typeDur) return raw;
+
+    const progress = Math.max(0.08, Math.min(1, elapsed / typeDur));
+    const charCount = Math.max(1, Math.ceil(raw.length * progress));
+    return raw.slice(0, charCount);
+  }
+
   getTextOverlayStyle(ov: OverlayItem): any {
     const scale = ov.scale || 1;
-    const fSize = Math.max(11, ((ov.fontSize || 36) * 0.42) * scale);
+    const rawFontSize = ov.fontSize || 48;
+    const fSize = Math.max(14, (rawFontSize * 0.46) * scale);
     const posX = ov.positionX ?? 50;
-    const isSideColumn = posX <= 32 || posX >= 68;
+    const isSideColumn = posX <= 34 || posX >= 66;
+    const sideMaxWidth = (ov as any).maxWidthCqi ? `${(ov as any).maxWidthCqi}cqi` : '31cqi';
     const angleRad = ((ov.shadowAngle ?? 45) * Math.PI) / 180;
     const dist = ov.shadowDistance ?? 4;
     const dx = Math.round(Math.cos(angleRad) * dist);
@@ -8249,7 +8267,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       'text-align': ov.textAlign || 'center',
       'text-transform': ov.allCaps ? 'uppercase' : 'none',
       'letter-spacing.px': ov.letterSpacing || 0,
-      'max-width': isSideColumn ? '24cqi' : '64cqi',
+      'max-width': isSideColumn ? sideMaxWidth : '64cqi',
       'white-space': 'normal',
       'word-break': 'break-word',
       'text-wrap': 'balance',

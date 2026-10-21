@@ -9,6 +9,86 @@ from typing import Dict, List
 
 
 @dataclass(frozen=True)
+class SubThemeRule:
+    role_id: str                # "PERSON_OR_WORK_CARD" | "PROGRESSIVE_LIST" | "SINGLE_OR_PAIRED_TERM" | "TOPIC_TRANSITION"
+    entry_animation: str        # "pop-up" | "typewriter" | "slide-up"
+    exit_animation: str         # "fade"
+    sfx_type: str               # "ding" | "keyboard" | "pop" | "whoosh"
+    sfx_preset_id: str          # "ding-bright" | "keyboard-type" | "pop-bubble" | "whoosh-fast"
+    sfx_name: str               # "Ding Parlak Çan (Tın)" | "Mekanik Klavye (Daktilo)" | "Pop Baloncuk" | "Whoosh Hızlı Geçiş"
+    sfx_volume: float           # 0.14 .. 0.20
+    sfx_duration: float         # 0.25 .. 0.90
+    use_accent_color: bool = False
+
+
+DEFAULT_ROLE_SUB_THEMES: Dict[str, SubThemeRule] = {
+    # Mini-Tema A: Kişi / Eser Tanıtımı -> Aniden belirir (pop-up) + "Tın" sesi (ding-bright)
+    "PERSON_OR_WORK_CARD": SubThemeRule(
+        role_id="PERSON_OR_WORK_CARD",
+        entry_animation="pop-up",
+        exit_animation="fade",
+        sfx_type="ding",
+        sfx_preset_id="ding-bright",
+        sfx_name="Ding Parlak Çan (Tın)",
+        sfx_volume=0.18,
+        sfx_duration=0.90,
+        use_accent_color=False,
+    ),
+    # Mini-Tema B: Alt Alta Kümülatif Sıralama -> Yavaşça yazılır (typewriter) + Klavye sesi (keyboard-type)
+    "PROGRESSIVE_LIST": SubThemeRule(
+        role_id="PROGRESSIVE_LIST",
+        entry_animation="typewriter",
+        exit_animation="fade",
+        sfx_type="keyboard",
+        sfx_preset_id="keyboard-type",
+        sfx_name="Mekanik Klavye (Daktilo)",
+        sfx_volume=0.14,
+        sfx_duration=0.45,
+        use_accent_color=True,
+    ),
+    # Mini-Tema C: Tekil veya İkili Kavram Vurgusu -> Kayarak/Pop belirir (slide-up) + Tok Pop (pop-bubble)
+    "SINGLE_OR_PAIRED_TERM": SubThemeRule(
+        role_id="SINGLE_OR_PAIRED_TERM",
+        entry_animation="slide-up",
+        exit_animation="fade",
+        sfx_type="pop",
+        sfx_preset_id="pop-bubble",
+        sfx_name="Pop Baloncuk (Kavram)",
+        sfx_volume=0.15,
+        sfx_duration=0.25,
+        use_accent_color=False,
+    ),
+    # Mini-Tema D: Konu Bitimi / Sahne Geçişi -> Sola kayarak geçiş (smoothleft) + Whoosh (whoosh-fast)
+    "TOPIC_TRANSITION": SubThemeRule(
+        role_id="TOPIC_TRANSITION",
+        entry_animation="slide-left",
+        exit_animation="fade",
+        sfx_type="whoosh",
+        sfx_preset_id="whoosh-fast",
+        sfx_name="Whoosh Hızlı Geçiş",
+        sfx_volume=0.20,
+        sfx_duration=0.42,
+        use_accent_color=True,
+    ),
+}
+
+ACTION_TO_SUB_THEME_ROLE: Dict[str, str] = {
+    "PERSON_INTRODUCTION": "PERSON_OR_WORK_CARD",
+    "WORK_INTRODUCTION": "PERSON_OR_WORK_CARD",
+    "STAT_OR_ARTICLE_CALLOUT": "PERSON_OR_WORK_CARD",
+    "PROGRESSIVE_LIST": "PROGRESSIVE_LIST",
+    "PAIRED_TERMS": "SINGLE_OR_PAIRED_TERM",
+    "SINGLE_TERM": "SINGLE_OR_PAIRED_TERM",
+    "ENUMERATION_CALLOUT": "SINGLE_OR_PAIRED_TERM",
+    "DEFINITION_CALLOUT": "SINGLE_OR_PAIRED_TERM",
+    "KEY_TERM_CALLOUT": "SINGLE_OR_PAIRED_TERM",
+    "CHAPTER_TITLE_CARD": "TOPIC_TRANSITION",
+    "CONCEPT_IMAGE_CARD": "TOPIC_TRANSITION",
+    "TOPIC_TRANSITION": "TOPIC_TRANSITION",
+}
+
+
+@dataclass(frozen=True)
 class ThemeProfile:
     id: str
     display_name: str
@@ -42,6 +122,15 @@ class ThemeProfile:
     stroke_width_px: int = 5
 
 
+def resolve_sub_theme(theme_profile: ThemeProfile, action_type: str) -> SubThemeRule:
+    """
+    Verilen kurgusal olay tipi (action_type) için kilitli Mini-Tema kuralını döndürür.
+    Böylece tüm videoda aynı rol her zaman %100 aynı animasyon ve aynı SFX ile çalışır.
+    """
+    role_key = ACTION_TO_SUB_THEME_ROLE.get(action_type, "SINGLE_OR_PAIRED_TERM")
+    return DEFAULT_ROLE_SUB_THEMES.get(role_key, DEFAULT_ROLE_SUB_THEMES["SINGLE_OR_PAIRED_TERM"])
+
+
 THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
     "academic_lecture": ThemeProfile(
         id="academic_lecture",
@@ -49,7 +138,7 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         preset_id="youtube_clean_stroke",
         font_family="Montserrat",
         secondary_font_family="Inter",
-        title_font_size_1080p=36,
+        title_font_size_1080p=52,
         text_color_hex="#FFFFFF",
         accent_color_hex="#FACC15",
         secondary_accent_hex="#38BDF8",
@@ -69,23 +158,24 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=False,
         min_gap_between_overlays_sec=14.0,
         max_overlays_per_minute=4.5,
-        allowed_transitions=["fade", "dissolve"],
+        allowed_transitions=["smoothleft", "wipeleft", "fade", "dissolve"],
         transition_duration_sec=0.45,
         allowed_sfx_map={
-            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.15},
-            "PERSON_INTRODUCTION": {"type": "whoosh", "volume": 0.16},
-            "WORK_INTRODUCTION": {"type": "whoosh", "volume": 0.16},
-            "PROGRESSIVE_LIST": {"type": "pop", "volume": 0.12},
-            "PAIRED_TERMS": {"type": "pop", "volume": 0.13},
-            "SINGLE_TERM": {"type": "pop", "volume": 0.14},
-            "ENUMERATION_CALLOUT": {"type": "pop", "volume": 0.13},
-            "DEFINITION_CALLOUT": {"type": "ding", "volume": 0.14},
-            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.14},
-            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.15},
-            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.15},
+            "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.20},
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.20},
+            "PERSON_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
+            "WORK_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
+            "PROGRESSIVE_LIST": {"type": "keyboard", "presetId": "keyboard-type", "volume": 0.14},
+            "PAIRED_TERMS": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
+            "SINGLE_TERM": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
+            "ENUMERATION_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
+            "DEFINITION_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
+            "KEY_TERM_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.20},
         },
         stroke_color_hex="#000000",
-        stroke_width_px=4,
+        stroke_width_px=5,
     ),
     "corporate_explainer": ThemeProfile(
         id="corporate_explainer",
@@ -93,7 +183,7 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         preset_id="glass_card_modern",
         font_family="Inter",
         secondary_font_family="Roboto",
-        title_font_size_1080p=44,
+        title_font_size_1080p=52,
         text_color_hex="#FFFFFF",
         accent_color_hex="#10B981",
         secondary_accent_hex="#3B82F6",
@@ -113,13 +203,17 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=False,
         min_gap_between_overlays_sec=18.0,
         max_overlays_per_minute=3.0,
-        allowed_transitions=["fade", "wipeleft", "smoothleft"],
-        transition_duration_sec=0.40,
+        allowed_transitions=["smoothleft", "wipeleft", "fade"],
+        transition_duration_sec=0.45,
         allowed_sfx_map={
-            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.20},
-            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.18},
-            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.18},
-            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.18},
+            "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.20},
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.20},
+            "PERSON_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
+            "WORK_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
+            "PROGRESSIVE_LIST": {"type": "keyboard", "presetId": "keyboard-type", "volume": 0.14},
+            "KEY_TERM_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.16},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.18},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
         },
     ),
     "tech_review": ThemeProfile(
@@ -128,7 +222,7 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         preset_id="apple_minimal",
         font_family="Inter",
         secondary_font_family="Roboto",
-        title_font_size_1080p=44,
+        title_font_size_1080p=52,
         text_color_hex="#F9FAFB",
         accent_color_hex="#06B6D4",
         secondary_accent_hex="#8B5CF6",
@@ -149,12 +243,16 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         min_gap_between_overlays_sec=14.0,
         max_overlays_per_minute=3.8,
         allowed_transitions=["smoothleft", "wipeleft", "circleopen"],
-        transition_duration_sec=0.38,
+        transition_duration_sec=0.42,
         allowed_sfx_map={
-            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.22},
-            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.20},
-            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.20},
-            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.20},
+            "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.20},
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.22},
+            "PERSON_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
+            "WORK_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
+            "PROGRESSIVE_LIST": {"type": "keyboard", "presetId": "keyboard-type", "volume": 0.15},
+            "KEY_TERM_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.18},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.20},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "presetId": "ding-bright", "volume": 0.20},
         },
     ),
     "cinematic_documentary": ThemeProfile(
@@ -163,7 +261,7 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         preset_id="cinematic_serif",
         font_family="Playfair Display",
         secondary_font_family="Montserrat",
-        title_font_size_1080p=46,
+        title_font_size_1080p=54,
         text_color_hex="#FEF3C7",
         accent_color_hex="#D97706",
         secondary_accent_hex="#92400E",
@@ -183,13 +281,17 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=False,
         min_gap_between_overlays_sec=22.0,
         max_overlays_per_minute=2.5,
-        allowed_transitions=["dissolve", "fade", "fadeblack"],
-        transition_duration_sec=0.60,
+        allowed_transitions=["smoothleft", "dissolve", "fade", "fadeblack"],
+        transition_duration_sec=0.50,
         allowed_sfx_map={
-            "CHAPTER_TITLE_CARD": {"type": "whoosh", "volume": 0.18},
-            "KEY_TERM_CALLOUT": {"type": "whoosh", "volume": 0.14},
-            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.16},
-            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.15},
+            "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.18},
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.18},
+            "PERSON_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.16},
+            "WORK_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.16},
+            "PROGRESSIVE_LIST": {"type": "keyboard", "presetId": "keyboard-type", "volume": 0.14},
+            "KEY_TERM_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.14},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.16},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "presetId": "ding-bright", "volume": 0.15},
         },
     ),
     "energetic_vlog": ThemeProfile(
@@ -198,7 +300,7 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         preset_id="hormozi_pill",
         font_family="Montserrat",
         secondary_font_family="Anton",
-        title_font_size_1080p=50,
+        title_font_size_1080p=58,
         text_color_hex="#FFFFFF",
         accent_color_hex="#00E676",
         secondary_accent_hex="#FFD700",
@@ -218,14 +320,18 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=True,
         min_gap_between_overlays_sec=9.0,
         max_overlays_per_minute=5.5,
-        allowed_transitions=["wipeleft", "slidedown", "circleopen", "fade"],
-        transition_duration_sec=0.35,
+        allowed_transitions=["smoothleft", "wipeleft", "slidedown", "circleopen", "fade"],
+        transition_duration_sec=0.40,
         allowed_sfx_map={
-            "CHAPTER_TITLE_CARD": {"type": "impact", "volume": 0.24},
-            "KEY_TERM_CALLOUT": {"type": "pop", "volume": 0.22},
-            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "volume": 0.22},
-            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "volume": 0.20},
-            "EMPHASIS_STICKER": {"type": "pop", "volume": 0.20},
+            "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.22},
+            "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.24},
+            "PERSON_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.20},
+            "WORK_INTRODUCTION": {"type": "ding", "presetId": "ding-bright", "volume": 0.20},
+            "PROGRESSIVE_LIST": {"type": "keyboard", "presetId": "keyboard-type", "volume": 0.16},
+            "KEY_TERM_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.20},
+            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.22},
+            "STAT_OR_ARTICLE_CALLOUT": {"type": "ding", "presetId": "ding-bright", "volume": 0.20},
+            "EMPHASIS_STICKER": {"type": "pop", "presetId": "pop-bubble", "volume": 0.20},
         },
     ),
 }

@@ -8,6 +8,7 @@ Hem 16:9 yatay hem 9:16 dikey videolarda:
 """
 
 from dataclasses import dataclass
+import math
 import os
 from typing import Any, Dict, List, Optional, Tuple
 from utils.logger import get_logger
@@ -69,6 +70,82 @@ class AnchorCandidate:
     center_y_pct: float
     base_w_pct: float
     base_h_pct: float
+
+
+@dataclass(frozen=True)
+class DynamicTypographySpec:
+    font_size_1080p: int
+    max_width_cqi: int
+    position_x_pct: float
+    position_y_pct: float
+    scale_factor: float
+    line_height: float
+    estimated_lines: int
+    anchor_slot: str
+    placed_bbox: BBoxPct
+
+
+class DynamicTypographySizer:
+    """
+    Metnin bağlam rolüne (stack_count: Tekil=1, İkili=2, Liste>=3),
+    kelime sayısına / en uzun kelime harf sayısına ve konuşmacının yüz/gövde
+    güvenli koridor genişliğine göre optimal fontSize (1080p) ve maxWidthCqi hesaplar.
+    """
+
+    @staticmethod
+    def compute(
+        text: str,
+        stack_count: int = 1,
+        stack_slot: Optional[int] = None,
+        action_type: str = "SINGLE_TERM",
+        corridor_width_pct: float = 33.5,
+    ) -> Tuple[int, int, float, int]:
+        """
+        Döndürür: (font_size_1080p, max_width_cqi, line_height, estimated_lines)
+        """
+        clean = " ".join((text or "").strip().split())
+        words = clean.split() if clean else ["METİN"]
+        total_len = len(clean)
+        max_word_len = max((len(w) for w in words), default=6)
+
+        # 1. Bağlam Rolüne (stack_count & action_type) göre taban boyut ve sınırlar
+        if action_type in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION", "CONCEPT_IMAGE_CARD"):
+            f_base, f_min, f_max = 56.0, 48, 58
+            max_w_cqi = 32
+        elif stack_count <= 1 and stack_slot is None:
+            # Tekil Vurgu (SINGLE_TERM, DEFINITION_CALLOUT, ENUMERATION_CALLOUT)
+            f_base, f_min, f_max = 62.0, 54, 62
+            max_w_cqi = 32
+        elif stack_count == 2:
+            # İkili Kavram (PAIRED_TERMS: örn. TABİAT / FITRAT)
+            f_base, f_min, f_max = 54.0, 48, 54
+            max_w_cqi = 30
+        else:
+            # Kümülatif Sıralı Liste (PROGRESSIVE_LIST: stack_count >= 3)
+            f_base, f_min, f_max = 46.0, 42, 46
+            max_w_cqi = 30
+
+        # Güvenli koridor genişliği cqi üst sınırını aşmasın
+        effective_cqi = int(min(max_w_cqi, max(26, math.floor(corridor_width_pct))))
+
+        # 2. Toplam karakter uzunluğu sönümlemesi (10 karaktere kadar 0 ceza)
+        len_penalty = max(0.0, (total_len - 10) * 0.45)
+
+        # 3. En uzun tekil kelimenin 1080p koridoruna taşmadan sığma sınırı
+        avail_px_1080p = 1920.0 * (effective_cqi / 100.0) * 0.92
+        word_cap_px = avail_px_1080p / (max(6, max_word_len) * 0.62)
+
+        raw_size = min(f_base - len_penalty, word_cap_px)
+        # Çok uzun tekil kelimelerde (13+ harf) yüz kutusuna taşmaması için alt sınırı 4px esnet
+        effective_min = max(38, f_min - 4) if (max_word_len >= 13 or total_len >= 24) else f_min
+        final_font_size = int(round(max(effective_min, min(f_max, raw_size))))
+
+        # 4. Tahmini satır sayısı (1 veya 2 satır)
+        chars_per_line_cap = max(10, int(avail_px_1080p / max(1.0, final_font_size * 0.60)))
+        est_lines = 2 if (len(words) >= 2 and total_len > chars_per_line_cap) else 1
+        line_height = 1.12 if est_lines > 1 else 1.15
+
+        return final_font_size, effective_cqi, line_height, est_lines
 
 
 # 16:9 ve 9:16 için aday çapalar (Tüm koordinatlar 0..100 yüzdelik birimdedir!)
@@ -331,19 +408,131 @@ class SafeZoneSpatialSolver:
             # 16:9 eğitim videosu varsayılan merkez konuşmacı profili
             avg_cx, avg_cy, raw_w, raw_h = 50.0, 29.0, 18.0, 24.0
 
-        # AutoFlip standardı: +38% alın/saç payı, +20% yan baş hareketi payı
-        hx1 = max(0.0, avg_cx - (raw_w * 0.65))
-        hy1 = max(0.0, avg_cy - (raw_h * 0.85))
-        hx2 = min(100.0, avg_cx + (raw_w * 0.65))
-        hy2 = min(100.0, avg_cy + (raw_h * 0.60))
+        # Bölge A (face_bbox / head_bbox): +38% alın/saç payı, +20% yan baş hareketi payı
+        # KESİN YASAK (Hard Veto = ∞, %0 çakışma izni)
+        hx1 = max(0.0, avg_cx - (raw_w * 0.68))
+        hy1 = max(0.0, avg_cy - (raw_h * 0.88))
+        hx2 = min(100.0, avg_cx + (raw_w * 0.68))
+        hy2 = min(52.0, avg_cy + (raw_h * 0.58))
         head_bbox = BBoxPct(hx1, hy1, hx2, hy2)
 
-        # Gövde kutusu (başın altından ekranın altına kadar omuz genişliği)
-        torso_half_w = raw_w * 1.35
+        # Bölge B (torso_bbox): Çene/boyun altından (Y >= 52%) ekranın altına kadar omuz/gövde
+        # YUMUŞAK CEZA (Soft Cost): Zorunda kalmadıkça kapatılmaz (1-3 satır tamamen Y < 52% üst boşlukta kalır)
+        torso_half_w = raw_w * 1.38
+        torso_y1 = max(52.0, hy2)
         torso_bbox = BBoxPct(
             max(0.0, avg_cx - torso_half_w),
-            hy2,
+            torso_y1,
             min(100.0, avg_cx + torso_half_w),
-            min(96.0, hy2 + raw_h * 2.2),
+            min(96.0, torso_y1 + raw_h * 2.0),
         )
         return head_bbox, torso_bbox
+
+    def solve_dynamic_typography_and_placement(
+        self,
+        text: str,
+        start_sec: float,
+        end_sec: float,
+        stack_count: int = 1,
+        stack_slot: Optional[int] = None,
+        action_type: str = "SINGLE_TERM",
+    ) -> DynamicTypographySpec:
+        """
+        Konuşmacının yüz (Hard Veto) ve gövde (Soft Cost) bölgelerini dikkate alarak
+        hem en uygun (positionX, positionY) koordinatlarını hem de bağlama uygun
+        optimal (fontSize, maxWidthCqi) değerlerini hesaplar.
+        """
+        head_bbox, torso_bbox = self._estimate_speaker_boxes(start_sec, end_sec)
+        left_corridor_w = max(24.0, (head_bbox.x1 - 1.5) - 2.0)
+        right_corridor_w = max(24.0, 98.0 - (head_bbox.x2 + 1.5))
+
+        if stack_slot is not None:
+            slot = int(stack_slot)
+            if slot < 4:
+                corridor_w = left_corridor_w
+                pos_x = round((2.0 + (head_bbox.x1 - 1.5)) / 2.0, 1)
+                row = slot
+                side_prefix = "LEFT_STACK"
+            else:
+                corridor_w = right_corridor_w
+                pos_x = round(((head_bbox.x2 + 1.5) + 98.0) / 2.0, 1)
+                row = (slot - 4) % 4
+                side_prefix = "RIGHT_STACK"
+
+            if stack_count == 2:
+                # İkili kavram (örn. TABİAT / FITRAT): Y=20% ve Y=33% (gövdeye %0 temas!)
+                pos_y = round(20.0 + row * 13.0, 1)
+            else:
+                # 3+ sıralı liste: Satır 1 (16%), Satır 2 (27%), Satır 3 (38%) omuz üstünde,
+                # yalnızca Satır 4 (49%) omuz dış eğimine hafif yaklaşır
+                pos_y = round(16.0 + row * 11.0, 1)
+
+            font_sz, max_cqi, line_h, est_lines = DynamicTypographySizer.compute(
+                text=text,
+                stack_count=stack_count,
+                stack_slot=slot,
+                action_type=action_type,
+                corridor_width_pct=corridor_w,
+            )
+            box_h = 8.5 if est_lines == 1 else 12.0
+            rect = BBoxPct(
+                max(2.0, pos_x - max_cqi / 2.0),
+                max(2.0, pos_y - box_h / 2.0),
+                min(98.0, pos_x + max_cqi / 2.0),
+                min(98.0, pos_y + box_h / 2.0),
+            )
+            return DynamicTypographySpec(
+                font_size_1080p=font_sz,
+                max_width_cqi=max_cqi,
+                position_x_pct=pos_x,
+                position_y_pct=pos_y,
+                scale_factor=1.0,
+                line_height=line_h,
+                estimated_lines=est_lines,
+                anchor_slot=f"{side_prefix}_{row + 1}",
+                placed_bbox=rect,
+            )
+
+        # Tekil kavram veya Kişi/Eser tanıtımı
+        if action_type in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION"):
+            corridor_w = left_corridor_w
+            pos_x = round((2.0 + (head_bbox.x1 - 1.5)) / 2.0, 1)
+            pos_y = 24.0
+            slot_id = "TOP_LEFT_CARD"
+            sc = 1.0
+            rect = BBoxPct(2.5, 16.0, max(30.0, head_bbox.x1 - 1.5), 32.0)
+            self.placed_events.append((start_sec, end_sec, rect))
+        else:
+            slot_id, raw_x, raw_y, sc, rect = self.solve_placement(
+                start_sec=start_sec,
+                end_sec=end_sec,
+                is_image_card=False,
+            )
+            is_left = raw_x < 50.0
+            corridor_w = left_corridor_w if is_left else right_corridor_w
+            pos_x = (
+                round((2.0 + (head_bbox.x1 - 1.5)) / 2.0, 1)
+                if is_left
+                else round(((head_bbox.x2 + 1.5) + 98.0) / 2.0, 1)
+            )
+            # Tekil kavramları omuz üstü boşluğun tam ortasına (Y=22.0%) sabitle (gövdeye %0 temas!)
+            pos_y = 22.0 if raw_y > 26.0 else raw_y
+
+        font_sz, max_cqi, line_h, est_lines = DynamicTypographySizer.compute(
+            text=text,
+            stack_count=1,
+            stack_slot=None,
+            action_type=action_type,
+            corridor_width_pct=corridor_w,
+        )
+        return DynamicTypographySpec(
+            font_size_1080p=font_sz,
+            max_width_cqi=max_cqi,
+            position_x_pct=pos_x,
+            position_y_pct=pos_y,
+            scale_factor=sc,
+            line_height=line_h,
+            estimated_lines=est_lines,
+            anchor_slot=slot_id,
+            placed_bbox=rect,
+        )

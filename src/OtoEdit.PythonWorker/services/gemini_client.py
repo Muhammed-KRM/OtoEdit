@@ -150,6 +150,38 @@ class GeminiClient:
             logger.warning(f"generate_vision hatası: {e}")
         return None
 
+    def verify_image_with_vision(
+        self,
+        image_path: str,
+        concept_title: str,
+        spoken_context: str,
+        theme_display_name: str = "Akademik Ders",
+    ) -> Optional[Dict[str, Any]]:
+        """
+        İndirilen görseli Base64 olarak Multimodal VLM'e göndererek görselde tam olarak
+        ne olduğunu, barkodlu/boş kapak olup olmadığını ve aranan kişi/eserle gerçekten
+        ilgili olup olmadığını doğrular.
+        """
+        if not self.is_available() or not image_path or not os.path.exists(image_path):
+            return None
+        prompt = (
+            f"Video Teması: {theme_display_name}\n"
+            f"Aranan Kişi/Eser/Kavram: {concept_title}\n"
+            f"Konuşmacının Cümlesi: {spoken_context}\n\n"
+            "Bu görseli dikkatlice incele ve şu soruları yanıtla:\n"
+            "1. Görselde tam olarak ne görünüyor? (literal_description)\n"
+            "2. Görsel simsiyah/boş bir kitap kapağı, kütüphane barkod etiketi, okunaksız belge taraması veya filigranlı stok görsel mi? (is_blank_cover_or_barcode: true/false)\n"
+            "3. Görsel izleyiciye gerçekten aranan kişi/eser/kavramı ({concept_title}) doğru ve anlamlı biçimde temsil ediyor mu? (matches_target_entity: true/false)\n"
+            "4. 0-100 arası uygunluk puanı (weighted_score). Eğer barkodlu kapak, boş cilt veya alakasız bir görsel ise fatal_veto: true ve weighted_score: 0 ver.\n"
+            "SADECE JSON döndür:\n"
+            '{"literal_description": "...", "is_blank_cover_or_barcode": false, "matches_target_entity": true, "weighted_score": 88, "fatal_veto": false, "mask_shape": "rounded", "remove_bg": false}'
+        )
+        raw = self.generate_vision(prompt, image_path, max_retries=1)
+        if not raw:
+            return None
+        parsed = self._safe_parse_json(raw)
+        return parsed if isinstance(parsed, dict) else None
+
     def find_viral_clips(self, transcript_text: str, duration: float) -> List[Dict[str, Any]]:
         """Transkriptten en viral 30sn (Reels) ve 90sn (Shorts) bölümleri çıkarır."""
         if not self.is_available() or not transcript_text.strip():

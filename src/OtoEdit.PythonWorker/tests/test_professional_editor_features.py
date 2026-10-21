@@ -1072,14 +1072,67 @@ def test_youtube_style_person_enumeration_and_definition_triggers(tmp_path):
     assert abs(by_text["TABİAT"]["end"] - 575.27) < 0.05
     assert abs(by_text["FITRAT"]["end"] - 575.27) < 0.05
 
-    # 4. Progressive list "FİZİK, KİMYA, BİYOLOJİ, TIP" on Left Column (X=16.0) + "ASTRONOMİ" on Right Column (X=84.0), all ending at 584.94s!
+    # 4. Progressive list "FİZİK, KİMYA, BİYOLOJİ, TIP" on Left Column (X ∈ [15..20]) + "ASTRONOMİ" on Right Column (X ∈ [80..85]), all ending at 584.94s!
     for idx_sci, sci in enumerate(["FİZİK", "KİMYA", "BİYOLOJİ", "TIP"]):
         assert sci in by_text
-        assert by_text[sci]["positionX"] == 16.0
+        assert 15.0 <= by_text[sci]["positionX"] <= 20.0
+        assert by_text[sci]["animation"] == "typewriter"
+        assert 42 <= by_text[sci]["fontSize"] <= 46
         assert abs(by_text[sci]["end"] - 584.94) < 0.05
     assert "ASTRONOMİ" in by_text
-    assert by_text["ASTRONOMİ"]["positionX"] == 84.0
+    assert 80.0 <= by_text["ASTRONOMİ"]["positionX"] <= 85.0
+    assert by_text["ASTRONOMİ"]["animation"] == "typewriter"
     assert abs(by_text["ASTRONOMİ"]["end"] - 584.94) < 0.05
+
+    # 5. Dynamic Typography Sizing: Single term "TEKVİNÎ ŞERİAT" (54-62px) > Paired "TABİAT" (48-54px) > List "FİZİK" (42-46px)
+    assert 54 <= tekvini_ov["fontSize"] <= 62
+    assert 48 <= by_text["TABİAT"]["fontSize"] <= 54
+    assert tekvini_ov["fontSize"] > by_text["TABİAT"]["fontSize"] > by_text["FİZİK"]["fontSize"]
+
+    # 6. 1-to-1 Role-Based Mini-Theme SFX Synchresis:
+    # - Person introduction ("İMAM GAZALİ") -> ding-bright
+    # - Every progressive list item ("FİZİK", "KİMYA", "BİYOLOJİ", "TIP", "ASTRONOMİ") -> keyboard-type
+    # - Paired/Single terms ("TABİAT", "FITRAT", "TEKVİNÎ ŞERİAT") -> pop-bubble
+    sfx_by_ts = {round(float(s["start"]), 2): s for s in plan["sfx_list"]}
+    assert sfx_by_ts[round(by_text["İMAM GAZALİ"]["start"], 2)]["presetId"] == "ding-bright"
+    for sci in ["FİZİK", "KİMYA", "BİYOLOJİ", "TIP", "ASTRONOMİ"]:
+        assert sfx_by_ts[round(by_text[sci]["start"], 2)]["presetId"] == "keyboard-type"
+    assert sfx_by_ts[round(by_text["TABİAT"]["start"], 2)]["presetId"] == "pop-bubble"
+    assert sfx_by_ts[round(by_text["FITRAT"]["start"], 2)]["presetId"] == "pop-bubble"
+
+
+def test_barcode_and_blank_cover_detector_and_semantic_transitions():
+    """Verify VisualRelevanceVerifierV2 rejects dark covers with white barcode stickers and SemanticTransitionBoundaryDetector finds exact discourse boundaries."""
+    import numpy as np
+    from services.web_image_crawler import WebImageCrawler
+    from pipeline.holistic_analyzer import HolisticAnalyzer, SemanticTransitionBoundaryDetector
+
+    # 1. Create a synthetic black book cover (640x800) with two white library barcode stickers
+    black_cover = np.full((800, 640, 3), 15, dtype=np.uint8)
+    # White sticker patch with vertical black barcode stripes
+    black_cover[60:150, 380:580] = 245
+    for x in range(395, 565, 6):
+        black_cover[70:140, x : x + 3] = 10
+    gray_cover = black_cover[:, :, 0]
+    has_anom, reason = WebImageCrawler._detect_barcode_or_blank_cover_anomaly(black_cover, gray_cover)
+    assert has_anom is True
+    assert "blank_dark_cover" in reason or "barcode" in reason
+
+    # 2. Verify SemanticTransitionBoundaryDetector catches User Example 1 ("etmiştik. || İşte bugün") and Example 2 ("çevirmek zorundayız. || İslam hukuku")
+    analyzer = HolisticAnalyzer(enable_llm_planning=False)
+    sample_segs = [
+        {"start": 35.0, "end": 41.86, "text": "İspat teorisinde bürhan-ı limmi metodolojisini ve yakin mertebelerini tahlil etmiştik."},
+        {"start": 42.08, "end": 52.0, "text": "İşte bugün mahkeme salonlarında işleyen bu yöntemi kainat kitabına tatbik edeceğiz."},
+        {"start": 338.0, "end": 347.04, "text": "İşte bu noktada gözlerimizi İslam hukukunun normatif yapısına çevirmek zorundayız."},
+        {"start": 347.56, "end": 358.0, "text": "İslam hukuku normatif düzenini Edille-i Şer'iyye dediğimiz dört temel kaynak üzerine inşa eder."},
+    ]
+    ws = analyzer._build_word_stream(sample_segs)
+    bounds = SemanticTransitionBoundaryDetector.detect_boundaries(ws, video_duration=400.0, min_gap_sec=20.0)
+    assert len(bounds) == 2
+    assert abs(bounds[0].timestamp - 41.97) < 0.25
+    assert bounds[0].category == "RETROSPECTIVE_CLOSURE_TO_NEW_TOPIC"
+    assert abs(bounds[1].timestamp - 347.30) < 0.25
+    assert bounds[1].category == "PRE_EXPLANATION_PIVOT"
 
 
 
