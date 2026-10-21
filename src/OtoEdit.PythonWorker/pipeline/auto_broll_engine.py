@@ -68,35 +68,40 @@ class AutoBrollEngine:
                 logger.warning(f"Pexels görsel bulunamadı: '{search_query}'")
                 continue
 
-            # 3. Format ve konuma göre overlay ayarları
+            # 3. Format ve konuma göre overlay ayarları (0..100 yüzdelik koordinat sistemi!)
             if video_format_str == "9:16":
                 pos = ["center", "top"]
-                pos_x = 0.5
-                pos_y = 0.25
-                scale = 0.50
+                pos_x = 50.0
+                pos_y = 22.0
+                scale = 1.0
             elif video_format_str == "1:1":
-                pos = ["right", "top"]
-                pos_x = 0.70
-                pos_y = 0.30
-                scale = 0.40
+                pos = ["right" if idx % 2 == 1 else "left", "top"]
+                pos_x = 74.0 if idx % 2 == 1 else 26.0
+                pos_y = 24.0
+                scale = 0.95
             else:
-                pos = ["right", "top"]
-                pos_x = 0.75
-                pos_y = 0.25
-                scale = 0.35
+                pos = ["right" if idx % 2 == 1 else "left", "top"]
+                pos_x = 78.0 if idx % 2 == 1 else 22.0
+                pos_y = 24.0
+                scale = 1.0
 
             overlay = OverlayItem(
                 id=f"overlay_auto_broll_{idx}",
                 type="image",
-                content=f"{concept_tr} ({search_query})",
+                content=f"{concept_tr}",
                 source=photo_url,
                 timestamp=round(timestamp, 2),
                 duration=round(duration, 2),
-                animation="pop-up",
+                animation="fade",
+                exitAnimation="fade",
                 position=pos,
                 positionX=pos_x,
                 positionY=pos_y,
                 scale=scale,
+                shape="rounded",
+                borderRadius=18,
+                dropShadow=True,
+                shadowBlur=18,
                 track_id=2
             )
             overlays.append(overlay)
@@ -145,8 +150,24 @@ TRANSKRİPT:
         except Exception as ex:
             logger.error(f"Gemini B-Roll anları çıkarılırken hata: {ex}")
 
-        # Fallback: Ekrana belirli aralıklarla transkriptten basit terimler atama
-        return [
-            {"timestamp": 2.0, "duration": 3.5, "concept": "Konu Girişi", "search_query": "technology workspace"},
-            {"timestamp": min(max(4.0, transcript.duration - 5.0), 15.0), "duration": 4.0, "concept": "Önemli Nokta", "search_query": "digital innovation"}
-        ]
+        # Fallback: Transkriptin gerçek segmentlerinden ve konusuna uygun somut sorgular üret
+        from pipeline.theme_profiles import detect_theme_profile_heuristic, extract_turkish_semantic_title
+        from pipeline.holistic_analyzer import HolisticAnalyzer
+
+        theme = detect_theme_profile_heuristic(transcript.full_text)
+        helper = HolisticAnalyzer()
+        fallback_items: List[Dict[str, Any]] = []
+        segs = getattr(transcript, "segments", []) or []
+        step = max(1, len(segs) // 4)
+        for s in segs[::step][:4]:
+            st = float(getattr(s, "start", 2.0) if not isinstance(s, dict) else s.get("start", 2.0))
+            txt = str(getattr(s, "text", "") if not isinstance(s, dict) else s.get("text", ""))
+            title = extract_turkish_semantic_title(txt, 28) or "Kavram Görseli"
+            _wq, stock_q, _fq = helper._build_visual_queries(title, txt, theme.id)
+            fallback_items.append({
+                "timestamp": round(max(1.5, st), 2),
+                "duration": 3.8,
+                "concept": title,
+                "search_query": stock_q,
+            })
+        return fallback_items
