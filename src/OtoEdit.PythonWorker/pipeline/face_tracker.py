@@ -46,14 +46,18 @@ class FaceTracker:
                     results = face_detection.process(rgb)
 
                     current_face_x = 0.5
-                    current_face_y = 0.5
+                    current_face_y = 0.30
+                    current_face_w = 0.18
+                    current_face_h = 0.24
 
                     if results.detections:
                         # En yüksek güven skoruna sahip ilk yüzü al
                         best_detection = results.detections[0]
                         bbox = best_detection.location_data.relative_bounding_box
-                        current_face_x = bbox.xmin + (bbox.width / 2.0)
-                        current_face_y = bbox.ymin + (bbox.height / 2.0)
+                        current_face_w = max(0.05, min(0.8, float(bbox.width)))
+                        current_face_h = max(0.05, min(0.8, float(bbox.height)))
+                        current_face_x = float(bbox.xmin) + (current_face_w / 2.0)
+                        current_face_y = float(bbox.ymin) + (current_face_h / 2.0)
 
                     # Deadzone & EMA Filtresi
                     delta = abs(current_face_x - previous_x)
@@ -66,8 +70,13 @@ class FaceTracker:
 
                     tracking_data.append({
                         "timestamp": timestamp,
+                        "time": timestamp,
                         "raw_x": round(current_face_x, 4),
                         "raw_y": round(current_face_y, 4),
+                        "center_x": round(smoothed_x, 4),
+                        "center_y": round(current_face_y, 4),
+                        "width": round(current_face_w, 4),
+                        "height": round(current_face_h, 4),
                         "smoothed_crop_x": round(smoothed_x, 4)
                     })
 

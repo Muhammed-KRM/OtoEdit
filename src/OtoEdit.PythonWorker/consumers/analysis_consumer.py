@@ -253,10 +253,11 @@ class AnalysisConsumer:
                 return res
 
             def _run_face():
-                if video_format not in (1, 2):  # Yalnızca 9:16 veya 1:1 formatında yüz takibi gerekir
+                if video_format not in (1, 2) and not auto_director:
                     return []
                 logger.info("🧵 Thread: Yüz takibi başladı")
-                res = self.face_tracker.track(local_video_path)
+                sample_interval = 1.5 if video_format not in (1, 2) else 0.4
+                res = self.face_tracker.track(local_video_path, sample_interval_sec=sample_interval)
                 logger.info(f"🧵 Thread: Yüz takibi bitti ({len(res)} veri)")
                 return res
 
@@ -409,6 +410,7 @@ class AnalysisConsumer:
                 video_duration=getattr(analysis, "duration", None),
                 subtitles_enabled=auto_subtitles,
                 auto_director=auto_director,
+                video_path=local_video_path,
             )
 
             # 💾 REDIS ÖNBELLEĞE KAYDET
