@@ -92,7 +92,15 @@ export interface OverlayItem {
   source?: string;
   originalSource?: string;
   timestamp: number;
+  /** Görünür Sekans Zamanı (Ripple Timeline başlangıç saniyesi - 0ms kaymasız hizalama için) */
+  seqTimestamp?: number;
   duration: number;
+  /** Video katmanları (type === 'video') için: Tam ekran B-Roll (true) veya PiP (false) */
+  fullScreen?: boolean;
+  /** Video katmanları için ses seviyesi (0 - 100) */
+  volume?: number;
+  /** Video katmanları için kaynak video içindeki başlangıç ofseti (saniye) */
+  trimStart?: number;
   font?: string;
   fontSize?: number;
   fontWeight?: string | number;
@@ -205,7 +213,15 @@ export interface SuggestionItem {
   content: string;
   sourceUrl?: string;
   timestamp: number;
+  /** Görünür Sekans Zamanı (Ripple Timeline başlangıç saniyesi - 0ms kaymasız hizalama için) */
+  seqTimestamp?: number;
   duration: number;
+  /** Video katmanları (type === 'video') için: Tam ekran B-Roll (true) veya PiP (false) */
+  fullScreen?: boolean;
+  /** Video katmanları için ses seviyesi (0 - 100) */
+  volume?: number;
+  /** Video katmanları için kaynak video içindeki başlangıç ofseti (saniye) */
+  trimStart?: number;
   reason?: string;
   category?: string;
   confidence?: number;

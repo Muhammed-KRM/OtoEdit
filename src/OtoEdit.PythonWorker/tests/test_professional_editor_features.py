@@ -848,3 +848,26 @@ def test_split_keep_segments_at_transitions_and_no_ping_pong_zoom(tmp_path):
     assert "crop=iw/1.250:ih/1.250" in cmd_2_str, "Clip with explicit zoom=1.25 must apply crop/scale zoom!"
 
 
+def test_timeline_mapper_seq_timestamp_and_nearest_cut_boundary(tmp_path):
+    """Verify TimelineMapper never drops overlays falling inside a cut and honors seqTimestamp, and ImageOverlay offsets video PTS with setpts."""
+    from render.timeline_mapper import TimelineMapper
+    from render.image_overlay import ImageOverlay
+
+    # Keep segments: [0..17.91] (17.91s), cut [17.91..32.27], keep [32.27..50.0]
+    keep_segments = [(0.0, 17.91), (32.27, 50.0)]
+    overlays = [
+        # 1. Overlay whose raw timestamp (22.97) fell inside cut [17.91..32.27] -> must snap to 0.0 / 17.91 instead of being dropped!
+        {"id": "ov_cut_boundary", "type": "image", "timestamp": 22.97, "duration": 16.47},
+        # 2. Overlay with explicit seqTimestamp = 3.24 -> must use seqTimestamp directly!
+        {"id": "ov_seq_explicit", "type": "text", "timestamp": 36.11, "seqTimestamp": 3.24, "duration": 4.0},
+    ]
+
+    remapped = TimelineMapper.remap_overlays(overlays, keep_segments)
+    assert len(remapped) == 2
+    assert remapped[0]["id"] == "ov_cut_boundary"
+    assert abs(float(remapped[0]["timestamp"]) - 17.91) < 0.01
+    assert remapped[1]["id"] == "ov_seq_explicit"
+    assert abs(float(remapped[1]["timestamp"]) - 3.24) < 0.01
+
+
+

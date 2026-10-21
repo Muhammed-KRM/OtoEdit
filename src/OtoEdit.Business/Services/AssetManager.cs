@@ -18,15 +18,15 @@ public class AssetManager : IAssetService
     private readonly IFileStorageService _fileStorageService;
     private readonly ILogger<AssetManager> _logger;
 
-    public const long MaxFileSize = 52428800; // 50MB
+    public const long MaxFileSize = 53687091200L; // 50GB
     public static readonly HashSet<string> AllowedExtensions = new(StringComparer.OrdinalIgnoreCase)
     {
         // Resimler
-        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg",
+        ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".bmp", ".avif",
         // Sesler
-        ".mp3", ".wav", ".aac", ".m4a", ".ogg",
-        // B-Roll / Kısa Videolar
-        ".mp4", ".mov", ".webm"
+        ".mp3", ".wav", ".aac", ".m4a", ".ogg", ".flac",
+        // B-Roll / Videolar
+        ".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".flv", ".wmv"
     };
 
     public AssetManager(
@@ -54,7 +54,7 @@ public class AssetManager : IAssetService
 
         if (file.Length > MaxFileSize)
         {
-            throw new BusinessException("Medya boyutu maksimum 50MB olabilir.");
+            throw new BusinessException("Medya boyutu maksimum 50GB olabilir.");
         }
 
         var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
@@ -65,12 +65,14 @@ public class AssetManager : IAssetService
 
         var assetId = Guid.NewGuid();
         var objectKey = $"assets/{projectId}/{assetId}{ext}";
+        var resolvedMime = (string.IsNullOrWhiteSpace(file.ContentType) || file.ContentType.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase))
+            ? GetDefaultContentType(ext)
+            : file.ContentType;
 
         // 1. MinIO S3 bucket'ına stream ile yükle
         using (var stream = file.OpenReadStream())
         {
-            var contentType = string.IsNullOrWhiteSpace(file.ContentType) ? GetDefaultContentType(ext) : file.ContentType;
-            await _fileStorageService.UploadFileAsync(objectKey, stream, contentType, cancellationToken);
+            await _fileStorageService.UploadFileAsync(objectKey, stream, resolvedMime, cancellationToken);
         }
 
         // 2. Presigned URL oluştur
@@ -82,7 +84,7 @@ public class AssetManager : IAssetService
             Id = assetId,
             ProjectId = projectId,
             DosyaAdi = file.FileName,
-            MimeTuru = string.IsNullOrWhiteSpace(file.ContentType) ? GetDefaultContentType(ext) : file.ContentType,
+            MimeTuru = resolvedMime,
             StorageKey = objectKey,
             Url = presignedUrl,
             BoyutByte = file.Length,
@@ -119,12 +121,15 @@ public class AssetManager : IAssetService
         foreach (var a in assets)
         {
             var freshUrl = await GetSanitizedPresignedUrlAsync(a.StorageKey, cancellationToken);
+            var mime = (string.IsNullOrWhiteSpace(a.MimeTuru) || a.MimeTuru.Equals("application/octet-stream", StringComparison.OrdinalIgnoreCase))
+                ? GetDefaultContentType(Path.GetExtension(a.DosyaAdi).ToLowerInvariant())
+                : a.MimeTuru;
             result.Add(new ProjectAssetDto
             {
                 Id = a.Id,
                 ProjectId = a.ProjectId,
                 DosyaAdi = a.DosyaAdi,
-                MimeTuru = a.MimeTuru,
+                MimeTuru = mime,
                 Url = freshUrl,
                 BoyutByte = a.BoyutByte,
                 YuklemeTarihi = a.YuklemeTarihi
@@ -210,9 +215,16 @@ public class AssetManager : IAssetService
         ".aac" => "audio/aac",
         ".m4a" => "audio/mp4",
         ".ogg" => "audio/ogg",
-        ".mp4" => "video/mp4",
+        ".mp4" or ".m4v" => "video/mp4",
         ".mov" => "video/quicktime",
         ".webm" => "video/webm",
+        ".mkv" => "video/x-matroska",
+        ".avi" => "video/x-msvideo",
+        ".flv" => "video/x-flv",
+        ".wmv" => "video/x-ms-wmv",
+        ".flac" => "audio/flac",
+        ".bmp" => "image/bmp",
+        ".avif" => "image/avif",
         _ => "application/octet-stream"
     };
 }

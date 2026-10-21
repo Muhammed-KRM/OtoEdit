@@ -19,8 +19,8 @@ public class AssetsController : ControllerBase
     /// Projeye görsel, ses veya video gibi harici medya dosyası yükler.
     /// </summary>
     [HttpPost]
-    [RequestSizeLimit(52428800)] // 50MB
-    [RequestFormLimits(MultipartBodyLengthLimit = 52428800)]
+    [RequestSizeLimit(53687091200L)] // 50GB
+    [RequestFormLimits(MultipartBodyLengthLimit = 53687091200L)]
     [ProducesResponseType(typeof(ProjectAssetDto), StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]

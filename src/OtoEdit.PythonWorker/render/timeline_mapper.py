@@ -82,10 +82,31 @@ class TimelineMapper:
         return best_range
 
     @staticmethod
+    def remap_timestamp_nearest(t: float, keep_segments: List[Tuple[float, float]], actual_durations: Optional[List[float]] = None) -> float:
+        """
+        Orijinal videodaki 't' saniyesini kesilmiş videodaki en yakın sekans saniyesine dönüştürür
+        (Frontend getVisTimeFromRawTime ile %100 birebir aynı davranış).
+        """
+        if not keep_segments:
+            return round(max(0.0, t), 3)
+
+        accumulated_duration = 0.0
+        for i, (start, end) in enumerate(keep_segments):
+            expected_dur = end - start
+            actual_dur = actual_durations[i] if actual_durations and i < len(actual_durations) else expected_dur
+            if t < start:
+                return round(accumulated_duration, 3)
+            if start <= t <= end:
+                return round(accumulated_duration + (t - start), 3)
+            accumulated_duration += actual_dur
+
+        return round(accumulated_duration, 3)
+
+    @staticmethod
     def remap_overlays(overlays: List[Dict[str, Any]], keep_segments: List[Tuple[float, float]], actual_durations: Optional[List[float]] = None) -> List[Dict[str, Any]]:
         """
-        Kullanıcının eklediği metin, logo ve görsel kaplamaların zamanlarını yeni videoya göre ayarlar.
-        Kesilen bölgelerde kalan objeler otomatik olarak elenir.
+        Kullanıcının eklediği metin, logo, video ve görsel kaplamaların zamanlarını yeni videoya göre ayarlar.
+        Eğer seqTimestamp mevcutsa doğrudan sekans zamanını kullanır; değilse en yakın görünür zamana haritalar.
         """
         if not overlays:
             return []
@@ -94,18 +115,29 @@ class TimelineMapper:
 
         remapped_overlays = []
         for ov in overlays:
+            seq_ts = ov.get("seqTimestamp") if ov.get("seqTimestamp") is not None else ov.get("seq_timestamp")
+            if seq_ts is not None:
+                try:
+                    new_t = round(max(0.0, float(seq_ts)), 3)
+                    new_ov = dict(ov)
+                    new_ov["timestamp"] = new_t
+                    remapped_overlays.append(new_ov)
+                    continue
+                except (ValueError, TypeError):
+                    pass
+
             try:
                 orig_t = float(ov.get("timestamp", 0.0))
             except (ValueError, TypeError):
                 continue
 
             new_t = TimelineMapper.remap_timestamp(orig_t, keep_segments, actual_durations=actual_durations)
-            if new_t is not None:
-                new_ov = dict(ov)
-                new_ov["timestamp"] = new_t
-                remapped_overlays.append(new_ov)
-            else:
-                logger.debug(f"Overlay kesilen bölgede kaldığı için elendi: {ov.get('content') or ov.get('source') or ov}")
+            if new_t is None:
+                new_t = TimelineMapper.remap_timestamp_nearest(orig_t, keep_segments, actual_durations=actual_durations)
+
+            new_ov = dict(ov)
+            new_ov["timestamp"] = new_t
+            remapped_overlays.append(new_ov)
 
         logger.info(f"TimelineMapper: {len(overlays)} overlay -> {len(remapped_overlays)} korunan overlay dönüştürüldü.")
         return remapped_overlays

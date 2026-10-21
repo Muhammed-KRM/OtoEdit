@@ -195,27 +195,34 @@ class ImageOverlay:
             duration = float(ov.get("duration", 4.0))
             end_t = start_t + duration
             scale = float(ov.get("scale", 0.3))
+            is_fullscreen = bool(ov.get("fullScreen") or ov.get("full_screen"))
+            trim_start = max(0.0, float(ov.get("trimStart") or ov.get("trim_start") or 0.0))
             position = ov.get("position", ["center", "center"])
             animation = ov.get("animation", "fade")
             loop_anim = ov.get("loopAnimation") or ov.get("loop_anim")
             keyframes = ov.get("keyframes")
 
             if is_video:
-                img_input = ffmpeg.input(local_path, ss=0, t=duration)
+                img_input = ffmpeg.input(local_path, ss=trim_start, t=duration)
+                img_input = img_input.filter("setpts", f"PTS-STARTPTS+{start_t:.3f}/TB")
             elif is_animated:
                 img_input = ffmpeg.input(local_path, ignore_loop=0)
             else:
                 img_input = ffmpeg.input(local_path)
 
-            # UI'da scale=1.0 demek, 860px genişliğindeki player'da 160px genişlik kaplamak demek (160/860 = ~%18.6).
-            base_ui_ratio = 160.0 / 860.0
-            scale_w = int(base_w * base_ui_ratio * scale)
-            scale_w = scale_w if scale_w % 2 == 0 else scale_w + 1
-            img_input = img_input.filter("scale", max(2, scale_w), -1)
+            if is_fullscreen:
+                scale_w = base_w if base_w % 2 == 0 else base_w + 1
+                img_input = img_input.filter("scale", max(2, scale_w), -1)
+            else:
+                # UI'da scale=1.0 demek, 860px genişliğindeki player'da 160px genişlik kaplamak demek (160/860 = ~%18.6).
+                base_ui_ratio = (200.0 / 860.0) if is_video else (160.0 / 860.0)
+                scale_w = int(base_w * base_ui_ratio * scale)
+                scale_w = scale_w if scale_w % 2 == 0 else scale_w + 1
+                img_input = img_input.filter("scale", max(2, scale_w), -1)
 
             # Döndürme (Rotation)
             rotation_deg = float(ov.get("rotation") or 0.0)
-            if abs(rotation_deg) > 0.1:
+            if abs(rotation_deg) > 0.1 and not is_fullscreen:
                 rad = rotation_deg * 3.14159265 / 180.0
                 img_input = img_input.filter("rotate", f"{rad:.4f}", ow="rotw(iw)", oh="roth(ih)", c="none")
 
@@ -228,7 +235,10 @@ class ImageOverlay:
                 or (animation and str(animation).lower() not in ("", "none", "fade"))
             )
 
-            if pos_x is not None and pos_y is not None and not has_dynamic_motion:
+            if is_fullscreen:
+                x_expr = "(W-w)/2"
+                y_expr = "(H-h)/2"
+            elif pos_x is not None and pos_y is not None and not has_dynamic_motion:
                 center_px_x = int((float(pos_x) / 100.0) * base_w)
                 center_px_y = int((float(pos_y) / 100.0) * base_h)
                 x_expr = f"{center_px_x} - (w/2)"

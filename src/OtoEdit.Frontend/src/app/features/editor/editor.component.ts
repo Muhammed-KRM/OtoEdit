@@ -40,6 +40,14 @@ export interface ContextMenuState {
     <app-navbar [projectTitle]="project()?.ad"></app-navbar>
 
     <main class="h-[calc(100vh-65px)] flex flex-col bg-dark-950 text-slate-100 overflow-hidden select-none" (click)="closeContextMenu()">
+      <!-- Global Gizli Medya Yükleme Inputu (Her Sekmeden ve Sağ Panelden Tetiklenebilir) -->
+      <input
+        #assetFileInput
+        type="file"
+        (change)="onAssetFileSelected($event)"
+        accept="image/*,video/*,audio/*,.mp4,.mov,.webm,.mkv,.avi,.m4v,.png,.jpg,.jpeg,.gif,.webp,.mp3,.wav,.aac,.m4a,.ogg"
+        class="hidden" />
+
       <!-- Üst Bar: Navigasyon, EDL Durumu, Hızlı Bilgi ve Render -->
       <header class="h-11 px-5 bg-dark-900/95 border-b border-slate-800 flex items-center justify-between shrink-0 z-20">
         <div class="flex items-center gap-4">
@@ -155,73 +163,100 @@ export interface ContextMenuState {
               <span class="text-[10px] font-mono text-brand-cyan">{{ assets().length }} Dosya</span>
             </div>
 
-            <input #assetFileInput type="file" (change)="onAssetFileSelected($event)" accept="image/*,video/*,audio/*" class="hidden" />
-
             <div 
-              (click)="triggerAssetUpload()"
+              (click)="triggerAssetUpload('default')"
               (dragover)="onAssetDragOver($event)"
               (dragleave)="onAssetDragLeave($event)"
               (drop)="onAssetDrop($event)"
               [ngClass]="isDragOver() ? 'border-brand-cyan bg-brand-cyan/10 scale-[1.02]' : 'border-slate-700 hover:border-slate-500 bg-dark-900/60'"
-              class="p-4 rounded-xl border-2 border-dashed text-center space-y-1.5 cursor-pointer transition-all duration-150">
+              class="p-3.5 rounded-xl border-2 border-dashed text-center space-y-2 cursor-pointer transition-all duration-150">
               <div *ngIf="isUploadingAsset()" class="py-2 flex flex-col items-center gap-2">
                 <div class="w-5 h-5 border-2 border-brand-cyan border-t-transparent rounded-full animate-spin"></div>
-                <span class="text-xs text-brand-cyan font-bold">Yükleniyor...</span>
+                <span class="text-xs text-brand-cyan font-bold">Medya Yükleniyor & Ekleniyor...</span>
               </div>
-              <div *ngIf="!isUploadingAsset()">
-                <span class="text-2xl block mb-1">📤</span>
-                <p class="text-xs text-slate-200 font-medium">
-                  <span class="text-brand-cyan font-bold">Dosya Seçin</span> veya buraya sürükleyin
-                </p>
-                <p class="text-[9px] text-slate-500">PNG, JPG, MP4, MP3 (Maks 50MB)</p>
+              <div *ngIf="!isUploadingAsset()" class="space-y-2">
+                <div>
+                  <span class="text-2xl block mb-0.5">📤</span>
+                  <p class="text-xs text-slate-200 font-medium">
+                    <span class="text-brand-cyan font-bold">Dosya Seçin</span> veya buraya sürükleyin
+                  </p>
+                  <p class="text-[9px] text-slate-400">MP4, MOV, MKV, PNG, JPG, GIF, MP3, WAV</p>
+                </div>
+                <div class="grid grid-cols-2 gap-1.5 pt-1" (click)="$event.stopPropagation()">
+                  <button
+                    type="button"
+                    (click)="triggerAssetUpload('broll')"
+                    class="py-1.5 px-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 border border-emerald-500/40 text-[9px] font-extrabold cursor-pointer transition-colors"
+                    title="İmlecin olduğu saniyeye Tam Ekran B-Roll video katmanı olarak ekler">
+                    🎬 + B-Roll Video Yükle
+                  </button>
+                  <button
+                    type="button"
+                    (click)="triggerAssetUpload('pip')"
+                    class="py-1.5 px-2 rounded-lg bg-brand-cyan/20 hover:bg-brand-cyan text-brand-cyan hover:text-slate-950 border border-brand-cyan/40 text-[9px] font-extrabold cursor-pointer transition-colors"
+                    title="İmlecin olduğu saniyeye taşınabilir/boyutlandırılabilir PiP katman olarak ekler">
+                    🖼️ + PiP Katmana Yükle
+                  </button>
+                </div>
               </div>
             </div>
 
-            <!-- Yüklenen Dosyalar -->
+            <!-- Yüklenen Dosyalar (Her Zaman Görünür Ekleme Butonları) -->
             <div *ngIf="assets().length > 0" class="space-y-1.5 pt-1">
               <div class="grid grid-cols-2 gap-2">
                 <div 
                   *ngFor="let asset of assets()"
-                  class="aspect-video bg-dark-900 border border-slate-700/80 rounded-lg overflow-hidden relative group hover:border-brand-cyan transition-all">
-                  <img *ngIf="asset.mimeTuru.startsWith('image/')" [src]="asset.url" [alt]="asset.dosyaAdi" class="w-full h-full object-cover" />
-                  <div *ngIf="!asset.mimeTuru.startsWith('image/')" class="w-full h-full flex flex-col items-center justify-center bg-dark-800 p-1 text-center">
-                    <span class="text-lg">{{ asset.mimeTuru.startsWith('audio/') ? '🎵' : '🎬' }}</span>
-                    <span class="text-[8px] text-slate-300 truncate w-full mt-1">{{ asset.dosyaAdi }}</span>
+                  class="bg-dark-900 border border-slate-700/80 rounded-lg overflow-hidden flex flex-col hover:border-brand-cyan transition-all shadow">
+                  <div class="aspect-video relative bg-dark-950 overflow-hidden">
+                    <img *ngIf="isImageAsset(asset)" [src]="asset.url" [alt]="asset.dosyaAdi" class="w-full h-full object-cover" />
+                    <video *ngIf="isVideoAsset(asset)" [src]="asset.url" muted preload="metadata" class="w-full h-full object-cover"></video>
+                    <div *ngIf="!isImageAsset(asset) && !isVideoAsset(asset)" class="w-full h-full flex flex-col items-center justify-center bg-dark-800 p-1 text-center">
+                      <span class="text-lg">🎵</span>
+                    </div>
+                    <button
+                      type="button"
+                      (click)="$event.stopPropagation(); deleteAsset(asset.id)"
+                      class="absolute top-1 right-1 w-5 h-5 rounded bg-black/75 hover:bg-rose-600 text-slate-300 hover:text-white text-[9px] flex items-center justify-center cursor-pointer"
+                      title="Medyayı Sil">
+                      ✕
+                    </button>
+                    <div class="absolute bottom-0 inset-x-0 bg-black/75 backdrop-blur-xs px-1.5 py-0.5 truncate text-[8px] text-slate-200 font-medium">
+                      {{ asset.dosyaAdi }}
+                    </div>
                   </div>
 
-                  <!-- Hover Kontrolleri -->
-                  <div class="absolute inset-0 bg-dark-950/90 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
-                    <button 
-                      *ngIf="selectedOverlay()?.type === 'image' && asset.mimeTuru.startsWith('image/')"
-                      (click)="$event.stopPropagation(); assignAssetToSelectedOverlay(asset)"
-                      class="px-2 py-0.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-[9px] rounded w-full cursor-pointer">
-                      🎯 Seçiliye Ata
-                    </button>
-                    <button 
-                      *ngIf="asset.mimeTuru.startsWith('video/')"
-                      (click)="$event.stopPropagation(); appendAssetVideoToMainTrack(asset)"
-                      class="px-2 py-0.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[9px] rounded w-full cursor-pointer">
-                      🎬 Ana Videoya (V1) Ekle
-                    </button>
-                    <button 
-                      *ngIf="asset.mimeTuru.startsWith('audio/')"
-                      (click)="$event.stopPropagation(); addAssetAudioToSfxTrack(asset)"
-                      class="px-2 py-0.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[9px] rounded w-full cursor-pointer">
-                      🔊 SFX (A2) Ekle
-                    </button>
-                    <button 
+                  <!-- Her Zaman Görünür Hızlı Ekleme Butonları -->
+                  <div class="p-1 bg-dark-900 border-t border-slate-800 flex flex-col gap-1">
+                    <div *ngIf="isVideoAsset(asset)" class="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        (click)="$event.stopPropagation(); addAssetOverlay(asset, undefined, true)"
+                        class="py-1 px-1 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-[8px] rounded cursor-pointer truncate"
+                        title="İmlecin olduğu saniyeye Tam Ekran B-Roll video katmanı olarak ekle">
+                        🎬 B-Roll Ekle
+                      </button>
+                      <button
+                        type="button"
+                        (click)="$event.stopPropagation(); addAssetOverlay(asset, undefined, false)"
+                        class="py-1 px-1 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-extrabold text-[8px] rounded cursor-pointer truncate"
+                        title="İmlecin olduğu saniyeye PiP video katmanı olarak ekle">
+                        🖼️ PiP Katman
+                      </button>
+                    </div>
+                    <button
+                      *ngIf="isImageAsset(asset)"
+                      type="button"
                       (click)="$event.stopPropagation(); addAssetOverlay(asset)"
-                      class="px-2 py-0.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-bold text-[9px] rounded w-full cursor-pointer">
-                      + {{ asset.mimeTuru.startsWith('video/') ? 'PiP Katman (T1)' : 'Katman Ekle' }}
+                      class="py-1 px-1.5 bg-brand-cyan hover:bg-cyan-400 text-slate-950 font-extrabold text-[9px] rounded w-full cursor-pointer">
+                      + 🖼️ Katmana Ekle
                     </button>
-                    <button 
-                      (click)="$event.stopPropagation(); deleteAsset(asset.id)"
-                      class="px-2 py-0.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-300 text-[8px] rounded w-full cursor-pointer">
-                      Sil
+                    <button
+                      *ngIf="isAudioAsset(asset)"
+                      type="button"
+                      (click)="$event.stopPropagation(); addAssetAudioToSfxTrack(asset)"
+                      class="py-1 px-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-[9px] rounded w-full cursor-pointer">
+                      + 🔊 SFX (A2) Ekle
                     </button>
-                  </div>
-                  <div class="absolute bottom-0 inset-x-0 bg-black/60 backdrop-blur-xs px-1 py-0.5 truncate text-[8px] text-slate-300">
-                    {{ asset.dosyaAdi }}
                   </div>
                 </div>
               </div>
@@ -722,6 +757,28 @@ export interface ContextMenuState {
                 class="w-full h-full object-contain rounded pointer-events-auto transition-none">
               </video>
 
+              <!-- V1'e Eklenen Harici Video Klibi Canlı Oynatıcısı (External V1 Clip Monitor) -->
+              <video
+                *ngIf="activeExternalV1Clip() as extClip"
+                [src]="extClip.sourceUrl"
+                autoplay
+                playsinline
+                [muted]="false"
+                [style.filter]="videoPreviewCombinedFilter()"
+                [style.clipPath]="videoPreviewClipPath()"
+                [style.transform]="videoPreviewTransform()"
+                [style.opacity]="videoPreviewOpacity()"
+                class="absolute inset-0 w-full h-full object-contain bg-black rounded pointer-events-none z-15">
+              </video>
+
+              <!-- A->B Sahne Geçişi Çıkış Karesi Yakalayıcısı (Dual-Layer Outgoing Frame A Snapshot Canvas) -->
+              <canvas
+                #transitionSnapshotCanvas
+                [class.hidden]="!activeTransitionEffect() || !hasTransitionSnapshot()"
+                [ngStyle]="activeTransitionEffect()?.outgoingCanvasStyle || {}"
+                class="absolute inset-0 w-full h-full object-contain rounded pointer-events-none z-18 transition-none">
+              </canvas>
+
               <!-- Canlı Sahne Geçiş Efekti (Transition Overlay) -->
               <div 
                 *ngIf="activeTransitionEffect() as trEffect"
@@ -732,25 +789,28 @@ export interface ContextMenuState {
                 </span>
               </div>
 
-              <!-- Dinamik Aktif Metin & Görsel Overlay Önizlemesi (Photoshop & CapCut Studio) -->
+              <!-- Dinamik Aktif Metin & Görsel & Video Overlay Önizlemesi (Photoshop & CapCut Studio) -->
               <div 
                 *ngFor="let ov of activeOverlays(); trackBy: trackByOverlayId" 
                 (mousedown)="onCanvasDragStart($event, ov.id)"
                 (click)="$event.stopPropagation(); selectOverlay(ov.id)"
                 (contextmenu)="openOverlayContextMenu($event, ov)"
-                [style.top]="getOverlayTop(ov)"
-                [style.left]="getOverlayLeft(ov)"
+                [style.top]="(ov.type === 'video' && ov.fullScreen) ? '0%' : getOverlayTop(ov)"
+                [style.left]="(ov.type === 'video' && ov.fullScreen) ? '0%' : getOverlayLeft(ov)"
+                [style.width]="(ov.type === 'video' && ov.fullScreen) ? '100%' : 'auto'"
+                [style.height]="(ov.type === 'video' && ov.fullScreen) ? '100%' : 'auto'"
                 [style.zIndex]="getOverlayZIndex(ov)"
                 [style.mixBlendMode]="ov.blendMode || 'normal'"
-                class="absolute transition-none cursor-move hover:ring-2 hover:ring-brand-cyan rounded p-1 -translate-x-1/2 -translate-y-1/2 select-none"
+                class="absolute transition-none hover:ring-2 hover:ring-brand-cyan rounded select-none"
                 [ngClass]="[
+                   (ov.type === 'video' && ov.fullScreen) ? 'inset-0 p-0 translate-x-0 translate-y-0 cursor-pointer' : 'p-1 -translate-x-1/2 -translate-y-1/2 cursor-move',
                    selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''
                 ]"
                 [style.color]="ov.color || '#FFFFFF'"
                 [style.backgroundColor]="ov.backgroundColor || 'transparent'"
                 [style.fontFamily]="ov.font || 'Inter, sans-serif'">
                 
-                <div [ngClass]="getOverlayAnimationClass(ov)" [style.transform]="getOverlay3DTransform(ov)">
+                <div [ngClass]="[getOverlayAnimationClass(ov), (ov.type === 'video' && ov.fullScreen) ? 'w-full h-full' : '']" [style.transform]="getOverlay3DTransform(ov)">
                 
                 <!-- 1A. Yay / Kavisli (Curved SVG TextPath) Metin Kaplaması -->
                 <svg 
@@ -811,19 +871,22 @@ export interface ContextMenuState {
                 <div 
                   *ngIf="ov.type === 'image' || ov.type === 'sticker' || ov.type === 'gif' || ov.type === 'video'" 
                   class="relative group transition-transform duration-75"
+                  [ngClass]="(ov.type === 'video' && ov.fullScreen) ? 'w-full h-full' : ''"
                   [style.opacity]="(ov.opacity ?? 100) / 100">
                   <video
                     *ngIf="ov.type === 'video' && ov.source"
+                    [attr.data-overlay-id]="ov.id"
                     [src]="ov.source"
-                    autoplay
-                    muted
-                    loop
                     playsinline
-                    class="pointer-events-none object-contain rounded-lg border border-brand-cyan/40 shadow-xl"
-                    [style.width]="(200 * (ov.scale || 1.0) / 8.6) + 'cqi'"
+                    preload="auto"
+                    (loadedmetadata)="syncOverlayVideos(true)"
+                    class="overlay-video-el pointer-events-none"
+                    [ngClass]="ov.fullScreen ? 'w-full h-full object-contain bg-black rounded' : 'object-contain rounded-lg border border-brand-cyan/40 shadow-xl'"
+                    [style.width]="ov.fullScreen ? '100%' : ((220 * (ov.scale || 0.75) / 8.6) + 'cqi')"
+                    [style.height]="ov.fullScreen ? '100%' : 'auto'"
                     [style.filter]="getImageOverlayFilter(ov)"
                     [style.clipPath]="getImageClipPath(ov)"
-                    style="height: auto; max-width: none;">
+                    style="max-width: none;">
                   </video>
                   <img 
                     *ngIf="ov.type !== 'video' && ov.source" 
@@ -918,13 +981,15 @@ export interface ContextMenuState {
 
           <!-- CapCut Stili Monitör Alt Kontrol / Transport Barı -->
           <div class="h-11 w-full max-w-[860px] bg-dark-900/90 border border-slate-800 rounded-xl px-4 flex items-center justify-between select-none shadow-lg mt-2 shrink-0">
-            <!-- Sol: Zaman Göstergesi -->
-            <div class="flex items-center gap-2.5 font-mono text-xs text-slate-400">
-              <span class="text-white font-semibold">{{ currentTime() | duration }}</span>
+            <!-- Sol: Zaman Göstergesi (Timeline Cetveli ile 1:1 Senkron) -->
+            <div class="flex items-center gap-2 font-mono text-xs text-slate-400">
+              <span class="text-white font-semibold" title="Zaman Çizelgesi Konumu">
+                {{ (isAnyRippleActive() ? getVisTimeFromRawTime(currentTime()) : currentTime()) | duration }}
+              </span>
               <span class="text-slate-600">/</span>
-              <span>{{ totalDuration() | duration }}</span>
-              <span class="text-brand-cyan font-bold text-[11px] ml-1.5 px-2 py-0.5 rounded bg-brand-cyan/10 border border-brand-cyan/20">
-                Net: {{ visibleDuration() | duration }}
+              <span>{{ (isAnyRippleActive() ? visibleDuration() : totalDuration()) | duration }}</span>
+              <span *ngIf="isAnyRippleActive()" class="text-slate-400 font-normal text-[10px] ml-1 px-1.5 py-0.5 rounded bg-dark-800 border border-slate-700" title="Ham Video Süresi">
+                Ham: {{ currentTime() | duration }} / {{ totalDuration() | duration }}
               </span>
             </div>
 
@@ -1001,18 +1066,18 @@ export interface ContextMenuState {
             <div class="flex items-center justify-between border-b border-slate-800 pb-2">
               <div class="flex items-center gap-1.5">
                 <h3 class="text-xs font-bold text-slate-200 uppercase tracking-wider">Stüdyo Özellikleri</h3>
-                <span [ngClass]="inspectorData.type === 'text' ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30'" class="px-2 py-0.5 rounded text-[9px] font-bold uppercase border">
-                  {{ inspectorData.type === 'text' ? 'T Tipografi' : '🖼️ Photoshop & AI' }}
+                <span [ngClass]="inspectorData.type === 'text' ? 'bg-sky-500/20 text-sky-400 border-sky-500/30' : (inspectorData.type === 'video' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' : 'bg-purple-500/20 text-purple-400 border-purple-500/30')" class="px-2 py-0.5 rounded text-[9px] font-bold uppercase border">
+                  {{ inspectorData.type === 'text' ? 'T Tipografi' : (inspectorData.type === 'video' ? '🎬 Video Klip' : '🖼️ Photoshop & AI') }}
                 </span>
               </div>
               <button type="button" (click)="selectedOverlayId.set(null)" class="text-slate-500 hover:text-white text-xs px-1.5 py-0.5 rounded hover:bg-dark-800 cursor-pointer" title="Seçimi Kapat">✕</button>
             </div>
 
-            <!-- Ortak: İçerik & Zamanlama -->
+            <!-- Ortak: İçerik & Zamanlama (Timeline Cetveli İle 1:1 Senkron Saniye) -->
             <div class="space-y-2 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
               <div class="space-y-1">
                 <label class="text-[10px] text-slate-400 uppercase font-semibold">
-                  {{ inspectorData.type === 'image' ? 'Görsel / Çıkartma Başlığı' : 'Metin İçeriği' }}
+                  {{ inspectorData.type === 'video' ? 'Video Klip Başlığı' : (inspectorData.type === 'image' ? 'Görsel / Çıkartma Başlığı' : 'Metin İçeriği') }}
                 </label>
                 <textarea 
                   [(ngModel)]="inspectorData.content" 
@@ -1023,11 +1088,51 @@ export interface ContextMenuState {
               <div class="grid grid-cols-2 gap-2">
                 <div class="space-y-0.5">
                   <label class="text-[9px] text-slate-400 uppercase font-semibold">Başlangıç (sn)</label>
-                  <input type="number" step="0.1" [(ngModel)]="inspectorData.timestamp" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white focus:border-brand-cyan font-mono" />
+                  <input type="number" step="0.1" [(ngModel)]="inspectorData.seqTimestamp" (ngModelChange)="onInspectorSeqStartChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white focus:border-brand-cyan font-mono" />
                 </div>
                 <div class="space-y-0.5">
                   <label class="text-[9px] text-slate-400 uppercase font-semibold">Süre (sn)</label>
                   <input type="number" step="0.1" [(ngModel)]="inspectorData.duration" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1 text-xs text-white focus:border-brand-cyan font-mono" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Özel: Video Katmanı Kontrolleri (Tam Ekran B-Roll vs PiP, Ses Seviyesi, Başlangıç Kırpma) -->
+            <div *ngIf="inspectorData.type === 'video'" class="p-2.5 bg-gradient-to-br from-emerald-950/50 to-dark-950 rounded-xl border border-emerald-500/35 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-bold text-emerald-300 uppercase">🎬 Video Görünüm Modu</span>
+                <span class="text-[9px] font-mono text-slate-400">{{ inspectorData.fullScreen ? 'Tam Ekran B-Roll' : 'PiP Katman' }}</span>
+              </div>
+              <div class="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  (click)="inspectorData.fullScreen = false; onInspectorChange(); saveInspector()"
+                  [ngClass]="!inspectorData.fullScreen ? 'bg-brand-cyan text-slate-950 font-extrabold border-brand-cyan' : 'bg-dark-900 text-slate-300 border-slate-700'"
+                  class="py-1.5 px-2 rounded-lg border text-[10px] cursor-pointer transition-all">
+                  🖼️ PiP (Serbest Kutu)
+                </button>
+                <button
+                  type="button"
+                  (click)="inspectorData.fullScreen = true; onInspectorChange(); saveInspector()"
+                  [ngClass]="inspectorData.fullScreen ? 'bg-emerald-400 text-slate-950 font-extrabold border-emerald-400' : 'bg-dark-900 text-slate-300 border-slate-700'"
+                  class="py-1.5 px-2 rounded-lg border text-[10px] cursor-pointer transition-all">
+                  📺 Tam Ekran B-Roll
+                </button>
+              </div>
+              <div class="grid grid-cols-2 gap-2 pt-1 border-t border-slate-800/70 text-[9px] text-slate-300">
+                <div>
+                  <div class="flex justify-between">
+                    <span>🔊 Klip Sesi</span>
+                    <span class="text-emerald-300 font-mono font-bold">%{{ inspectorData.volume ?? 100 }}</span>
+                  </div>
+                  <input type="range" min="0" max="100" step="5" [(ngModel)]="inspectorData.volume" (ngModelChange)="onInspectorChange()" class="w-full accent-emerald-400 cursor-pointer" />
+                </div>
+                <div>
+                  <div class="flex justify-between">
+                    <span>✂️ İç Başlangıç (Trim)</span>
+                    <span class="text-amber-300 font-mono font-bold">{{ inspectorData.trimStart || 0 }}sn</span>
+                  </div>
+                  <input type="number" min="0" step="0.5" [(ngModel)]="inspectorData.trimStart" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded p-1 text-[10px] text-white font-mono" />
                 </div>
               </div>
             </div>
@@ -1349,9 +1454,9 @@ export interface ContextMenuState {
             </ng-container>
 
             <!-- ========================================================================= -->
-            <!-- B. GÖRSEL & AI STICKER STÜDYOSU (4 SEKMELİ PHOTOSHOP MOTORU)              -->
+            <!-- B. GÖRSEL, PiP VİDEO & AI STICKER STÜDYOSU (4 SEKMELİ PHOTOSHOP MOTORU)   -->
             <!-- ========================================================================= -->
-            <ng-container *ngIf="inspectorData.type === 'image'">
+            <ng-container *ngIf="inspectorData.type === 'image' || inspectorData.type === 'video' || inspectorData.type === 'sticker' || inspectorData.type === 'gif'">
               <!-- 4 Sekmeli Bar -->
               <div class="grid grid-cols-4 gap-1 p-1 bg-dark-950 rounded-xl border border-slate-800 text-[9px] font-bold">
                 <button type="button" (click)="imageInspectorTab.set('ai')" [ngClass]="imageInspectorTab() === 'ai' ? 'bg-purple-500 text-white shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">✂️ AI Sticker</button>
@@ -1949,10 +2054,16 @@ export interface ContextMenuState {
                   <span>⚡</span>
                   <span>Sahne Geçiş Efekti Ekle / Düzenle (45 Efekt)</span>
                 </button>
-                <button type="button" (click)="activeTab.set('media')" class="w-full py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors">
-                  <span>🎬</span>
-                  <span>+ Başka Video Klibi Ekle (V1 / PiP)</span>
-                </button>
+                <div class="grid grid-cols-2 gap-1.5">
+                  <button type="button" (click)="triggerAssetUpload('broll')" class="py-1.5 px-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 text-emerald-300 border border-emerald-500/40 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors" title="İmlecin olduğu saniyeye Tam Ekran B-Roll video katmanı ekler">
+                    <span>🎬</span>
+                    <span>+ B-Roll Video</span>
+                  </button>
+                  <button type="button" (click)="triggerAssetUpload('pip')" class="py-1.5 px-2 rounded-lg bg-brand-cyan/20 hover:bg-brand-cyan/35 text-brand-cyan border border-brand-cyan/40 text-[10px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors" title="İmlecin olduğu saniyeye PiP video katmanı ekler">
+                    <span>🖼️</span>
+                    <span>+ PiP Video</span>
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -1985,11 +2096,14 @@ export interface ContextMenuState {
             </div>
 
             <div class="pt-2 flex flex-col gap-2">
-              <button (click)="addTextOverlay()" class="w-full py-2 rounded-lg bg-brand-cyan text-slate-900 font-bold text-xs hover:bg-cyan-400 transition-colors shadow-glow-sm flex items-center justify-center gap-1.5">
+              <button (click)="addTextOverlay()" class="w-full py-2 rounded-lg bg-brand-cyan text-slate-900 font-bold text-xs hover:bg-cyan-400 transition-colors shadow-glow-sm flex items-center justify-center gap-1.5 cursor-pointer">
                 <span class="font-black">T</span> + Yeni Yazı Ekle
               </button>
-              <button (click)="addImageOverlay()" class="w-full py-2 rounded-lg bg-purple-600 text-white font-bold text-xs hover:bg-purple-500 transition-colors shadow-glow-sm flex items-center justify-center gap-1.5">
-                <span>🖼️</span> + Yeni Görsel Ekle
+              <button (click)="triggerAssetUpload('pip')" class="w-full py-2 rounded-lg bg-purple-600 text-white font-bold text-xs hover:bg-purple-500 transition-colors shadow-glow-sm flex items-center justify-center gap-1.5 cursor-pointer">
+                <span>🖼️</span> + Görsel / PiP Video Yükle
+              </button>
+              <button (click)="triggerAssetUpload('broll')" class="w-full py-2 rounded-lg bg-emerald-600 text-white font-bold text-xs hover:bg-emerald-500 transition-colors shadow-glow-sm flex items-center justify-center gap-1.5 cursor-pointer">
+                <span>🎬</span> + B-Roll / Katman Video Ekle
               </button>
             </div>
 
@@ -2166,9 +2280,13 @@ export interface ContextMenuState {
               <span class="font-black">T</span>
               <span>Yazı</span>
             </button>
-            <button (click)="addImageOverlay()" class="px-2.5 py-1 rounded bg-purple-500 text-white font-bold hover:bg-purple-400 border border-purple-400 shadow-glow-sm text-xs flex items-center gap-1 transition-all cursor-pointer" title="Zaman çizgisine görsel katmanı ekle">
+            <button (click)="triggerAssetUpload('pip')" class="px-2.5 py-1 rounded bg-purple-500 text-white font-bold hover:bg-purple-400 border border-purple-400 shadow-glow-sm text-xs flex items-center gap-1 transition-all cursor-pointer" title="Dışarıdan görsel veya PiP katman yükle">
               <span>🖼️</span>
               <span>Görsel</span>
+            </button>
+            <button (click)="triggerAssetUpload('broll')" class="px-2.5 py-1 rounded bg-emerald-500 text-slate-950 font-bold hover:bg-emerald-400 border border-emerald-400 shadow-glow-sm text-xs flex items-center gap-1 transition-all cursor-pointer" title="Dışarıdan video yükleyip imlecin olduğu saniyeye taşınabilir/boyutlandırılabilir video katmanı olarak ekle">
+              <span>🎬</span>
+              <span>+ Video</span>
             </button>
           </div>
         </div>
@@ -2344,7 +2462,7 @@ export interface ContextMenuState {
                        (mousedown)="onSubtitleMouseDown($event, seg)"
                        (click)="$event.stopPropagation(); selectSubtitle(seg)"
                        (dblclick)="$event.stopPropagation(); startEditSubtitle(seg)"
-                       class="subtitle-segment group absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-1 text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer select-none"
+                       class="subtitle-segment group absolute top-1 bottom-1 bg-amber-500/20 border border-amber-500/50 rounded flex items-center px-0 box-border min-w-[1px] text-[8px] text-amber-100 overflow-hidden hover:bg-amber-500/40 z-20 cursor-pointer select-none"
                        [ngClass]="isSelectedSubtitle(seg) ? 'ring-2 ring-brand-cyan bg-amber-500/50 shadow-glow-sm z-30 font-bold' : (editingSubtitleId() === getSubtitleId(seg) ? 'ring-1 ring-white z-30 bg-amber-500/40' : 'cursor-pointer')"
                        [style.left.%]="seg.leftPercent"
                        [style.width.%]="seg.widthPercent"
@@ -2354,11 +2472,11 @@ export interface ContextMenuState {
                        <div 
                          *ngIf="isSelectedSubtitle(seg)" 
                          (mousedown)="onSubtitleResizeStart($event, seg, 'left')" 
-                         class="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 z-40 flex items-center justify-center">
+                         class="absolute left-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 z-40 flex items-center justify-center">
                          <div class="w-0.5 h-3 bg-slate-900 rounded"></div>
                        </div>
 
-                       <span *ngIf="editingSubtitleId() !== getSubtitleId(seg)" class="truncate font-semibold px-1">{{ seg.text }}</span>
+                       <span *ngIf="editingSubtitleId() !== getSubtitleId(seg)" class="truncate font-semibold px-1 w-full">{{ seg.text }}</span>
                        <input *ngIf="editingSubtitleId() === getSubtitleId(seg)" 
                               type="text" 
                               class="w-full bg-dark-950 text-white outline-none border-b border-amber-400 font-semibold h-full shadow-inner"
@@ -2373,7 +2491,7 @@ export interface ContextMenuState {
                        <div 
                          *ngIf="isSelectedSubtitle(seg)" 
                          (mousedown)="onSubtitleResizeStart($event, seg, 'right')" 
-                         class="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 z-40 flex items-center justify-center">
+                         class="absolute right-0 top-0 bottom-0 w-1.5 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 z-40 flex items-center justify-center">
                          <div class="w-0.5 h-3 bg-slate-900 rounded"></div>
                        </div>
                   </div>
@@ -2426,44 +2544,44 @@ export interface ContextMenuState {
                   <span class="font-mono text-[8px] text-cyan-200 bg-dark-950/80 px-1 rounded shrink-0 ml-1">{{ ghost.timeLabel }}</span>
                 </div>
 
-                <!-- Katman Öğeleri (Pill'ler) -->
+                <!-- Katman Öğeleri (Pill'ler — Uzak/Yakın Zoom'da Gerçek Saniye Genişliği) -->
                 <div 
                   *ngFor="let ov of getOverlaysForTrack(trackNum); trackBy: trackByOverlayId"
                   (mousedown)="!isTrackLocked(trackNum) && onOverlayDragStart($event, ov.id)"
                   (click)="$event.stopPropagation(); !isTrackLocked(trackNum) && selectOverlay(ov.id)"
                   (contextmenu)="openOverlayContextMenu($event, ov)"
-                  class="overlay-item absolute top-1 bottom-1 rounded-lg px-2.5 flex items-center justify-between text-[11px] font-bold z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[4px] border"
+                  class="overlay-item absolute top-1 bottom-1 rounded-md px-0 box-border flex items-center justify-between text-[11px] font-bold z-20 group transition-all select-none shadow-lg overflow-hidden min-w-[1px] border"
                   [ngClass]="[
                      isTrackLocked(trackNum) ? 'cursor-not-allowed opacity-85' : 'cursor-grab active:cursor-grabbing',
                      ov.type === 'text' 
                        ? 'bg-gradient-to-r from-[#ba5748] to-[#994033] text-white border-[#e07567]/70 hover:brightness-110 shadow-rose-950/50' 
                        : 'bg-gradient-to-r from-purple-700 to-indigo-700 text-white border-purple-400/70 hover:brightness-110 shadow-purple-950/50',
                      selectedOverlayId() === ov.id 
-                       ? 'ring-2 ring-white shadow-[0_0_12px_rgba(255,255,255,0.95)] z-30 brightness-115 scale-[1.01]' 
+                       ? 'ring-2 ring-white shadow-[0_0_12px_rgba(255,255,255,0.95)] z-30 brightness-115' 
                        : '',
                      (isDraggingOverlay && selectedOverlayId() === ov.id) ? 'opacity-65 ring-2 ring-brand-cyan' : ''
                   ]"
                   [ngStyle]="getOverlayStyle(ov)"
-                  [title]="(ov.type === 'text' ? 'Metin: ' : 'Görsel: ') + (ov.content || ov.source || ov.id) + ' (Katman #' + trackNum + (isTrackLocked(trackNum) ? ' - Kilitli' : '') + ')'">
+                  [title]="(ov.type === 'text' ? 'Metin: ' : 'Görsel: ') + (ov.content || ov.source || ov.id) + ' (' + ov.duration + 'sn — Katman #' + trackNum + (isTrackLocked(trackNum) ? ' - Kilitli' : '') + ')'">
                   
-                  <!-- Sol Boyutlandırma Kolu -->
-                  <div *ngIf="!isTrackLocked(trackNum)" (mousedown)="onOverlayResizeStart($event, ov.id, 'left')" class="absolute left-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-l flex items-center justify-center z-30 transition-opacity">
-                    <div class="w-0.5 h-3.5 bg-white/90 rounded"></div>
+                  <!-- Sol Boyutlandırma Kolu (Yalnızca Seçili İken Aktif — Uzak Zoom'da Yanlışlıkla Boyutlandırmayı Önler) -->
+                  <div *ngIf="!isTrackLocked(trackNum) && selectedOverlayId() === ov.id" (mousedown)="onOverlayResizeStart($event, ov.id, 'left')" class="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 rounded-l flex items-center justify-center z-30">
+                    <div class="w-0.5 h-3.5 bg-slate-950 rounded"></div>
                   </div>
 
                   <!-- İçerik -->
-                  <div class="truncate px-2 pointer-events-none font-semibold flex items-center gap-1.5 drop-shadow-sm">
-                    <span class="w-4 h-4 rounded text-[9px] font-black flex items-center justify-center bg-black/30 border border-white/20">
-                      {{ ov.type === 'text' ? 'T' : '🖼️' }}
+                  <div class="truncate px-1.5 w-full pointer-events-none font-semibold flex items-center gap-1 drop-shadow-sm overflow-hidden">
+                    <span class="w-3.5 h-3.5 shrink-0 rounded text-[8px] font-black flex items-center justify-center bg-black/30 border border-white/20">
+                      {{ ov.type === 'text' ? 'T' : (ov.type === 'video' ? '🎬' : '🖼️') }}
                     </span>
-                    <span *ngIf="isTrackLocked(trackNum)" class="text-[9px]" title="Katman Kilitli">🔒</span>
+                    <span *ngIf="isTrackLocked(trackNum)" class="text-[9px] shrink-0" title="Katman Kilitli">🔒</span>
                     <span class="truncate">{{ ov.content || (ov.type === 'text' ? 'Metin' : 'Görsel') }}</span>
-                    <span class="text-[9px] font-mono opacity-80 font-normal ml-1">({{ ov.duration }}s)</span>
+                    <span class="text-[9px] font-mono opacity-80 font-normal ml-0.5 shrink-0">({{ ov.duration }}s)</span>
                   </div>
 
-                  <!-- Sağ Boyutlandırma Kolu -->
-                  <div *ngIf="!isTrackLocked(trackNum)" (mousedown)="onOverlayResizeStart($event, ov.id, 'right')" class="absolute right-0 top-0 bottom-0 w-3 cursor-ew-resize opacity-0 group-hover:opacity-100 hover:bg-white/50 bg-white/20 rounded-r flex items-center justify-center z-30 transition-opacity">
-                    <div class="w-0.5 h-3.5 bg-white/90 rounded"></div>
+                  <!-- Sağ Boyutlandırma Kolu (Yalnızca Seçili İken Aktif) -->
+                  <div *ngIf="!isTrackLocked(trackNum) && selectedOverlayId() === ov.id" (mousedown)="onOverlayResizeStart($event, ov.id, 'right')" class="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 rounded-r flex items-center justify-center z-30">
+                    <div class="w-0.5 h-3.5 bg-slate-950 rounded"></div>
                   </div>
                 </div>
               </div>
@@ -2484,7 +2602,7 @@ export interface ContextMenuState {
                     (click)="selectClip(clip.id, $event)"
                     (dblclick)="toggleClip(clip, $event)"
                     (contextmenu)="openClipContextMenu($event, clip)"
-                    class="timeline-clip absolute top-0 bottom-0 transition-all border-r border-white/20 box-border group flex flex-col justify-between p-1 select-none z-10 cursor-pointer"
+                    class="timeline-clip absolute top-0 bottom-0 transition-all border-r border-white/20 box-border group flex flex-col justify-between p-0 overflow-hidden min-w-[1px] select-none z-10 cursor-pointer"
                     [ngClass]="{
                        'bg-amber-500/70 hover:bg-amber-500/80 backdrop-blur-xs': isRetakeClip(clip),
                        'bg-rose-500/70 hover:bg-rose-500/80 backdrop-blur-xs': isManualClip(clip),
@@ -2513,7 +2631,7 @@ export interface ContextMenuState {
                     </div>
 
                     <!-- Üst Klip Başlığı -->
-                    <div class="relative flex items-center justify-between text-[9px] text-white/90 font-mono truncate pointer-events-none z-10">
+                    <div class="relative flex items-center justify-between px-1 pt-0.5 text-[9px] text-white/90 font-mono truncate pointer-events-none z-10 w-full overflow-hidden">
                       <span class="truncate font-semibold flex items-center gap-1">
                         <span *ngIf="clip.isCut" class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
                         <span>{{ clip.isCut ? (isRetakeClip(clip) ? '🔁 Retake' : '✕ Kesilen') : (clip.label || 'Klip') }}</span>
@@ -2685,16 +2803,16 @@ export interface ContextMenuState {
                   (mousedown)="onSfxDragStart($event, sfx)"
                   (click)="$event.stopPropagation(); previewSfxClip(sfx)"
                   [ngStyle]="getSfxClipStyle(sfx)"
-                  class="absolute top-1 bottom-1 rounded-md bg-gradient-to-r from-amber-600/85 to-orange-600/85 border border-amber-300/70 px-2 flex items-center justify-between text-[10px] font-bold text-white shadow z-20 cursor-grab active:cursor-grabbing group overflow-hidden min-w-[24px]"
-                  [title]="(sfx.name || sfx.title || 'SFX') + ' (' + sfx.start.toFixed(1) + 'sn) — Sürükleyerek taşı veya dinlemek için tıkla'">
-                  <div class="flex items-center gap-1 truncate pointer-events-none">
-                    <span>🔊</span>
+                  class="sfx-clip absolute top-1 bottom-1 rounded-md bg-gradient-to-r from-amber-600/85 to-orange-600/85 border border-amber-300/70 px-0 box-border flex items-center justify-between text-[10px] font-bold text-white shadow z-20 cursor-grab active:cursor-grabbing group overflow-hidden min-w-[1px]"
+                  [title]="(sfx.name || sfx.title || 'SFX') + ' (' + sfx.start.toFixed(1) + 'sn, ' + (sfx.duration || 1).toFixed(1) + 'sn) — Sürükleyerek taşı veya dinlemek için tıkla'">
+                  <div class="flex items-center gap-1 truncate px-1.5 w-full pointer-events-none">
+                    <span class="shrink-0">🔊</span>
                     <span class="truncate">{{ sfx.name || sfx.title || 'SFX' }}</span>
                   </div>
                   <button
                     type="button"
                     (click)="$event.stopPropagation(); removeSfxClip(sfx.id)"
-                    class="ml-1 text-[9px] text-amber-100 hover:text-rose-200 opacity-80 group-hover:opacity-100 cursor-pointer">
+                    class="mr-1 text-[9px] text-amber-100 hover:text-rose-200 opacity-0 group-hover:opacity-100 cursor-pointer shrink-0">
                     ✕
                   </button>
                 </div>
@@ -2731,7 +2849,7 @@ export interface ContextMenuState {
         <div class="h-7 px-4 bg-dark-900/95 border-t border-slate-800 flex items-center justify-between shrink-0 select-none">
           <!-- Sol: Bilgi -->
           <div class="flex items-center gap-2 text-[10px] text-slate-500">
-            <span class="font-mono">{{ formatTime(currentTime()) }}</span>
+            <span class="font-mono text-slate-300">{{ formatTime(isAnyRippleActive() ? getVisTimeFromRawTime(currentTime()) : currentTime()) }}</span>
             <span>/</span>
             <span class="font-mono">{{ formatTime(isAnyRippleActive() ? visibleDuration() : totalDuration()) }}</span>
           </div>
@@ -3828,11 +3946,13 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly studioEngine = this.studio;
 
   @ViewChild('videoPlayer') videoRef!: ElementRef<HTMLVideoElement>;
+  @ViewChild('transitionSnapshotCanvas') transitionSnapshotCanvasRef?: ElementRef<HTMLCanvasElement>;
   @ViewChild('bgmAudioPlayer') bgmAudioRef?: ElementRef<HTMLAudioElement>;
   @ViewChild('chatMessagesContainer') chatContainer!: ElementRef<HTMLDivElement>;
   @ViewChild('timelineTrack') timelineTrackRef!: ElementRef<HTMLDivElement>;
   @ViewChild('timelineScrollContainer') timelineScrollContainerRef?: ElementRef<HTMLDivElement>;
   @ViewChild('assetFileInput') assetFileInput?: ElementRef<HTMLInputElement>;
+  readonly hasTransitionSnapshot = signal<boolean>(false);
 
   readonly assets = signal<ProjectAssetDto[]>([]);
   readonly isUploadingAsset = signal<boolean>(false);
@@ -4029,14 +4149,33 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly lockedTracks = signal<Set<number>>(new Set());
 
   readonly activeOverlays = computed(() => {
-    const t = this.currentTime();
     const overlays = this.activeEdl()?.overlays || [];
     const hidden = this.hiddenTracks();
+    const playheadSeq = this.getPlayheadSeqTime();
+
     return overlays.filter(ov => {
       const trackId = Number(ov.trackId) || 1;
       if (hidden.has(trackId)) return false;
-      return t >= ov.timestamp && t <= (ov.timestamp + ov.duration);
+      const dur = Math.max(0.2, Number(ov.duration) || 3);
+      const startSeq = this.getOverlaySeqStart(ov);
+      return playheadSeq >= startSeq - 0.02 && playheadSeq <= (startSeq + dur + 0.02);
     });
+  });
+
+  readonly activeExternalV1Clip = computed(() => {
+    const t = this.currentTime();
+    const rippleActive = this.isAnyRippleActive();
+    const playheadVis = rippleActive ? this.getVisTimeFromRawTime(t) : t;
+    const allClips = this.clips();
+    for (const c of allClips) {
+      if (!c.isVisibleClip || c.isCut || !c.sourceUrl) continue;
+      if (rippleActive) {
+        if (playheadVis >= c.visStart && playheadVis <= c.visEnd) return c;
+      } else {
+        if (t >= c.start && t <= c.end) return c;
+      }
+    }
+    return null;
   });
 
   // Sol Panel Aktif Sekmesi
@@ -4203,29 +4342,33 @@ export class EditorComponent implements OnInit, OnDestroy {
     return tracks;
   });
 
-  // Dinamik Zaman Cetveli İşaretleri
+  // Dinamik Zaman Cetveli İşaretleri (1x Uzaklaştırmadan 50x Yakınlaştırmaya Birebir Gerçek Saniye)
   readonly timelineRulerMarks = computed<{ time: number; label: string; percent: number; isMajor: boolean }[]>(() => {
-    const dur = Math.max(1, (this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration()) || 60);
+    const dur = Math.max(0.5, (this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration()) || 60);
     const zoom = Math.max(1, this.timelineZoom() || 1);
-    
-    let step = 10;
-    if (dur <= 30) step = 2;
-    else if (dur <= 60) step = 5;
-    else if (dur <= 180) step = 10;
-    else if (dur <= 600) step = 20;
-    else if (dur <= 1800) step = 30;
-    else step = 60;
-    
-    if (zoom >= 4) step = Math.max(1, Math.round(step / 4));
-    else if (zoom >= 2) step = Math.max(2, Math.round(step / 2));
-    
+
+    // Görünür genişlikte ~12-16 adet ana saniye etiketi olacak şekilde ideal adımı seç
+    const targetMarkCount = Math.max(10, Math.min(220, Math.round(14 * zoom)));
+    const idealStep = dur / targetMarkCount;
+    const niceSteps = [0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 180, 300, 600];
+    let step = niceSteps[niceSteps.length - 1];
+    for (const s of niceSteps) {
+      if (s >= idealStep) {
+        step = s;
+        break;
+      }
+    }
+
     const marks: { time: number; label: string; percent: number; isMajor: boolean }[] = [];
-    for (let t = 0; t <= dur; t += step) {
-      const mins = Math.floor(t / 60);
-      const secs = Math.floor(t % 60);
-      const label = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-      const percent = (t / dur) * 100;
-      marks.push({ time: t, label, percent, isMajor: true });
+    for (let t = 0; t <= dur + 0.001; t += step) {
+      const clampedT = Math.min(dur, parseFloat(t.toFixed(2)));
+      const mins = Math.floor(clampedT / 60);
+      const secs = Math.floor(clampedT % 60);
+      const frac = Math.round((clampedT % 1) * 10);
+      const baseLabel = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+      const label = step < 1 && frac > 0 ? `${baseLabel}.${frac}` : baseLabel;
+      const percent = (clampedT / dur) * 100;
+      marks.push({ time: clampedT, label, percent, isMajor: true });
     }
     return marks;
   });
@@ -4252,6 +4395,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   dragStartX = 0;
   dragStartY = 0;
   dragOverlayOriginalStart = 0;
+  dragOverlayOriginalSeqStart = 0;
   dragOverlayOriginalDuration = 0;
   dragOverlayOriginalTrack = 1;
   
@@ -4354,7 +4498,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     return { text: String(text), color: String(color), font: String(font), posX, posY };
   });
 
-  // O(1) Pre-Computed Clips hesaplaması (FAZ A İzole Sinyal + FAZ E V1 Klip Sıralama & Çoklu Video Desteği)
+  // O(1) Pre-Computed Clips hesaplaması (FAZ A İzole Sinyal + FAZ E V1 Klip Sıralama & Sıfır Kaymalı Sequence Clock)
   readonly clips = computed(() => {
     const total = Math.max(0.1, this.totalDuration());
     const cuts = this.activeCuts();
@@ -4365,18 +4509,46 @@ export class EditorComponent implements OnInit, OnDestroy {
     const rRet = this.rippleRetake();
     const rippleActive = rAi || rMan || rRet;
 
+    // Yalnızca ana video aralığındaki klipleri al (dışarıdan eklenen videolar T1..Tn katmanındadır)
+    const validCustomClips = (customVideoClips || []).filter(
+      vc => !vc.sourceUrl && (Number(vc.end) || 0) <= total + 1.0
+    );
+    let hasReorderedKeepClips = false;
+    let prevKeepStart = -1;
+    for (const vc of validCustomClips) {
+      if (!vc.isCut) {
+        const s = Number(vc.start) || 0;
+        if (s < prevKeepStart - 0.05) {
+          hasReorderedKeepClips = true;
+          break;
+        }
+        prevKeepStart = s;
+      }
+    }
+
     const rawClips: any[] = [];
     let totalVisDur = 0;
 
-    if (customVideoClips && customVideoClips.length > 0) {
-      // FAZ E: Kullanıcının sıraladığı veya dışarıdan V1'e eklediği klipler varsa bu sırayı baz al
-      for (let i = 0; i < customVideoClips.length; i++) {
-        const vc = customVideoClips[i];
+    if (hasReorderedKeepClips && validCustomClips.length > 0) {
+      // FAZ E: Kullanıcının V1'de sırasını değiştirdiği klipler varsa bu sırayı baz al ama aktif cuts/ripple filtrelerini koru
+      for (let i = 0; i < validCustomClips.length; i++) {
+        const vc = validCustomClips[i];
         const start = Number(vc.start) || 0;
         const end = Number(vc.end) || (start + (Number(vc.duration) || 5));
-        const duration = Math.max(0.05, Number(vc.duration) || (end - start));
-        const isCut = Boolean(vc.isCut);
-        const isVisibleClip = !isCut || !rippleActive;
+        const duration = Math.max(0.05, end - start);
+        const mid = (start + end) / 2;
+        const matchedCut = cuts.find(c => mid >= c.start && mid <= c.end);
+        const isCut = Boolean(vc.isCut) || !!matchedCut;
+        const reason = (matchedCut?.reason || vc.cutReason || '').toLowerCase();
+        const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
+        const isManual = isCut && reason.includes('manuel');
+
+        let isVisibleClip = true;
+        if (isCut) {
+          if (isManual) isVisibleClip = !rMan;
+          else if (isRetake) isVisibleClip = !rRet;
+          else isVisibleClip = !rAi;
+        }
         if (isVisibleClip) {
           totalVisDur += duration;
         }
@@ -4386,9 +4558,9 @@ export class EditorComponent implements OnInit, OnDestroy {
           end,
           duration,
           isCut,
-          cutObj: isCut ? { id: vc.id, start, end, reason: 'Manuel kesim' } : undefined,
+          cutObj: matchedCut || (isCut ? { id: vc.id, start, end, reason: vc.cutReason || 'Manuel kesim' } : undefined),
           sourceUrl: vc.sourceUrl,
-          label: vc.label || (vc.sourceUrl ? '🎬 Ek Video' : 'Klip'),
+          label: vc.label || 'Klip',
           order: i,
           isVisibleClip,
           visStart: 0,
@@ -4401,10 +4573,18 @@ export class EditorComponent implements OnInit, OnDestroy {
       let allPoints = new Set<number>();
       allPoints.add(0);
       allPoints.add(total);
-      for (const s of splits) allPoints.add(s);
+      for (const s of splits) {
+        if (s > 0 && s < total) allPoints.add(s);
+      }
+      for (const vc of validCustomClips) {
+        const s = Number(vc.start) || 0;
+        const e = Number(vc.end) || 0;
+        if (s > 0 && s < total) allPoints.add(s);
+        if (e > 0 && e < total) allPoints.add(e);
+      }
       for (const c of cuts) {
-        allPoints.add(c.start);
-        allPoints.add(c.end);
+        if (c.start >= 0 && c.start <= total) allPoints.add(c.start);
+        if (c.end >= 0 && c.end <= total) allPoints.add(c.end);
       }
       
       const sortedPoints = Array.from(allPoints).sort((a,b) => a-b);
@@ -4540,7 +4720,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       return segments.map(seg => ({
         ...seg,
         leftPercent: (seg.start / total) * 100,
-        widthPercent: Math.max(0.1, ((seg.end - seg.start) / total) * 100)
+        widthPercent: Math.max(0.02, ((seg.end - seg.start) / total) * 100)
       }));
     }
 
@@ -4567,12 +4747,12 @@ export class EditorComponent implements OnInit, OnDestroy {
       }
       if (!matchedClip) continue;
 
-      const startVis = matchedClip.visStart + Math.max(0, seg.start - matchedClip.start);
-      const endVis = matchedClip.visStart + Math.min(matchedClip.duration, seg.end - matchedClip.start);
+      const startVis = this.getVisTimeFromRawTime(seg.start);
+      const endVis = Math.max(startVis + 0.05, this.getVisTimeFromRawTime(seg.end));
       result.push({
         ...seg,
         leftPercent: (startVis / visDur) * 100,
-        widthPercent: Math.max(0.1, ((endVis - startVis) / visDur) * 100)
+        widthPercent: Math.max(0.02, ((endVis - startVis) / visDur) * 100)
       });
     }
     return result;
@@ -4585,6 +4765,8 @@ export class EditorComponent implements OnInit, OnDestroy {
     const boundaries: Array<{
       id: string;
       boundaryTime: number;
+      prevEnd: number;
+      visBoundaryTime: number;
       leftPercent: number;
       fromClipId: string;
       toClipId: string;
@@ -4595,11 +4777,22 @@ export class EditorComponent implements OnInit, OnDestroy {
       const prev = visibleKeepClips[i];
       const next = visibleKeepClips[i + 1];
       const boundaryTime = next.start;
+      const prevEnd = prev.end;
+      const visBoundaryTime = prev.visEnd;
       const leftPercent = prev.leftPercent + prev.widthPercent;
-      const existing = transitions.find(tr => Math.abs((tr.boundaryTime || 0) - boundaryTime) < 0.35);
+      const existing = transitions.find(tr => {
+        const bt = (tr.boundaryTime ?? tr.boundarySourceTime) || 0;
+        return (
+          Math.abs(bt - boundaryTime) < 0.45 ||
+          Math.abs(bt - prevEnd) < 0.45 ||
+          Math.abs(bt - visBoundaryTime) < 0.45
+        );
+      });
       boundaries.push({
         id: `tr_bound_${i}_${boundaryTime.toFixed(2)}`,
         boundaryTime,
+        prevEnd,
+        visBoundaryTime,
         leftPercent,
         fromClipId: prev.id,
         toClipId: next.id,
@@ -4609,10 +4802,75 @@ export class EditorComponent implements OnInit, OnDestroy {
     return boundaries;
   });
 
-  // Canlı Önizleme Monitörü için 45 Geometrik & Sinematik Sahne Geçiş Efekti Motoru (FFmpeg xfade Birebir Eşleniği)
+  // Kesim atlama (Cut Skip), Bölme Sınırı veya "Kaydet ve Uygula" anında 60 FPS Çift Katmanlı (Dual-Layer Canvas A -> Video B) Sahne Geçiş Motoru
+  readonly liveTransitionPreview = signal<{ type: string; progress: number; badge: string } | null>(null);
+  private liveTransitionTimer: any = null;
+  private playbackRafTimer: any = null;
+  private lastTriggeredTransitionKey = '';
+  private lastTriggeredTransitionAtMs = 0;
+
+  /**
+   * Outgoing Clip A karesini <canvas #transitionSnapshotCanvas> üzerine yakalar.
+   * Böylece kesim atlaması (seek) yapıldığında bile A karesi üst katmanda kalır ve
+   * B karesi (canlı <video>) ile gerçek A->B Wipe / Slide / Crossfade / Iris geçişi yapılır.
+   */
+  captureTransitionSnapshot(): boolean {
+    try {
+      const video = this.videoRef?.nativeElement;
+      const canvas = this.transitionSnapshotCanvasRef?.nativeElement;
+      if (!video || !canvas || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
+        this.hasTransitionSnapshot.set(false);
+        return false;
+      }
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        this.hasTransitionSnapshot.set(false);
+        return false;
+      }
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      this.hasTransitionSnapshot.set(true);
+      return true;
+    } catch {
+      this.hasTransitionSnapshot.set(false);
+      return false;
+    }
+  }
+
+  triggerLiveTransitionPreview(type: string, duration = 0.5, snapshotAlreadyCaptured = false): void {
+    if (this.liveTransitionTimer) {
+      clearInterval(this.liveTransitionTimer);
+      this.liveTransitionTimer = null;
+    }
+    if (!snapshotAlreadyCaptured) {
+      this.captureTransitionSnapshot();
+    }
+    const trMeta = this.studio.transitionLibrary.find(x => x.type === type);
+    const badge = trMeta?.name || type;
+    const totalMs = Math.max(250, Math.min(2500, Math.round((duration || 0.5) * 1000)));
+    const startMs = performance.now();
+
+    this.liveTransitionPreview.set({ type, progress: 0.02, badge });
+    this.liveTransitionTimer = setInterval(() => {
+      const elapsed = performance.now() - startMs;
+      const p = elapsed / totalMs;
+      if (p >= 1) {
+        this.liveTransitionPreview.set(null);
+        this.hasTransitionSnapshot.set(false);
+        clearInterval(this.liveTransitionTimer);
+        this.liveTransitionTimer = null;
+        return;
+      }
+      this.liveTransitionPreview.set({ type, progress: Math.max(0, Math.min(1, p)), badge });
+    }, 16);
+  }
+
+  // Canlı Önizleme Monitörü için 45 Geometrik & Sinematik Sahne Geçiş Efekti Motoru (Dual-Layer Canvas A + Live Video B)
   readonly activeTransitionEffect = computed<{
     badge: string;
     overlayStyle: any;
+    outgoingCanvasStyle?: any;
     videoScale?: number;
     videoScaleX?: number;
     videoScaleY?: number;
@@ -4623,239 +4881,370 @@ export class EditorComponent implements OnInit, OnDestroy {
     videoClipPath?: string;
     videoFilterExtra?: string;
   } | null>(() => {
-    const t = this.currentTime();
-    const transitions = this.transitions();
-    if (!transitions || transitions.length === 0) return null;
+    // ÖNEMLİ: Yalnızca aktif 60 FPS geçiş zamanlayıcısı (liveTransitionPreview) çalışırken efekt uygula!
+    // Böylece video duraklatıldığında (pause) ekran asla yarısı siyah kesilmiş halde (Screenshot 5 hatası) donup kalmaz!
+    const manual = this.liveTransitionPreview();
+    if (!manual) return null;
 
-    for (const tr of transitions) {
-      const dur = Math.max(0.15, tr.duration || 0.45);
-      const half = dur / 2;
-      const bTime = tr.boundaryTime ?? tr.boundarySourceTime ?? 0;
-      if (t >= bTime - half && t <= bTime + half) {
-        const progress = Math.max(0, Math.min(1, (t - (bTime - half)) / dur)); // 0..1
-        const intensity = 1 - Math.abs(progress - 0.5) * 2; // 0 -> 1 -> 0 peak at boundary
-        const trMeta = this.studio.transitionLibrary.find(x => x.type === tr.type);
-        const badge = trMeta?.name || tr.type;
-        const type = tr.type;
+    const matchedType = manual.type;
+    const badge = manual.badge;
+    const progress = Math.max(0, Math.min(1, manual.progress));
+    const hasSnap = this.hasTransitionSnapshot();
+    const intensity = 1 - Math.abs(progress - 0.5) * 2; // 0 -> 1 -> 0 peak at boundary
+    const type = matchedType;
 
-        // 1. Işık & Kararma Geçişleri (Fade Black / White / Grays / Dissolve / Distance)
-        if (type === 'fadeblack') {
-          return { badge, overlayStyle: { backgroundColor: `rgba(0,0,0,${(intensity * 0.96).toFixed(2)})` } };
-        }
-        if (type === 'fadewhite') {
-          return { badge, overlayStyle: { backgroundColor: `rgba(255,255,255,${(intensity * 0.96).toFixed(2)})` }, videoFilterExtra: `brightness(${(1 + intensity * 1.4).toFixed(2)})` };
-        }
-        if (type === 'fadegrays') {
-          return { badge, overlayStyle: { backgroundColor: `rgba(100,116,139,${(intensity * 0.45).toFixed(2)})` }, videoFilterExtra: `grayscale(${(intensity * 100).toFixed(0)}%) contrast(${(1 + intensity * 0.3).toFixed(2)})` };
-        }
-        if (type === 'dissolve') {
-          return { badge, overlayStyle: { backgroundImage: 'radial-gradient(rgba(255,255,255,0.22) 1px, transparent 0)', backgroundSize: '6px 6px', opacity: intensity.toFixed(2) }, videoOpacity: 1 - intensity * 0.55 };
-        }
-        if (type === 'distance') {
-          return { badge, overlayStyle: { boxShadow: `inset 0 0 ${Math.round(intensity * 90)}px rgba(56,189,248,0.6)` }, videoFilterExtra: `contrast(${(1 + intensity * 0.8).toFixed(2)}) saturate(${(1 - intensity * 0.5).toFixed(2)})`, videoOpacity: 1 - intensity * 0.35 };
-        }
-
-        // 2. Doğrusal Wipe (Silinme) Geçişleri (CSS clip-path inset)
-        if (type === 'wipeleft') {
-          const cut = Math.round(intensity * 52);
-          return { badge, overlayStyle: { borderRight: '3px solid #06b6d4' }, videoClipPath: `inset(0 ${cut}% 0 0)` };
-        }
-        if (type === 'wiperight') {
-          const cut = Math.round(intensity * 52);
-          return { badge, overlayStyle: { borderLeft: '3px solid #06b6d4' }, videoClipPath: `inset(0 0 0 ${cut}%)` };
-        }
-        if (type === 'wipeup') {
-          const cut = Math.round(intensity * 52);
-          return { badge, overlayStyle: { borderBottom: '3px solid #06b6d4' }, videoClipPath: `inset(0 0 ${cut}% 0)` };
-        }
-        if (type === 'wipedown') {
-          const cut = Math.round(intensity * 52);
-          return { badge, overlayStyle: { borderTop: '3px solid #06b6d4' }, videoClipPath: `inset(${cut}% 0 0 0)` };
-        }
-
-        // 3. Köşe & Çapraz Wipe Geçişleri (wipetl, wipetr, wipebl, wipebr, diagtl, diagtr, diagbl, diagbr)
-        if (type === 'wipetl' || type === 'diagtl') {
-          const c = Math.round(intensity * 48);
-          return { badge, overlayStyle: { background: `linear-gradient(135deg, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 0%, transparent 60%)` }, videoClipPath: `polygon(${c}% ${c}%, 100% 0%, 100% 100%, 0% 100%)` };
-        }
-        if (type === 'wipetr' || type === 'diagtr') {
-          const c = Math.round(100 - intensity * 48);
-          return { badge, overlayStyle: { background: `linear-gradient(225deg, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 0%, transparent 60%)` }, videoClipPath: `polygon(0% 0%, ${c}% ${Math.round(intensity * 48)}%, 100% 100%, 0% 100%)` };
-        }
-        if (type === 'wipebl' || type === 'diagbl') {
-          const c = Math.round(intensity * 48);
-          return { badge, overlayStyle: { background: `linear-gradient(45deg, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 0%, transparent 60%)` }, videoClipPath: `polygon(0% 0%, 100% 0%, 100% 100%, ${c}% ${100 - c}%)` };
-        }
-        if (type === 'wipebr' || type === 'diagbr') {
-          const c = Math.round(100 - intensity * 48);
-          return { badge, overlayStyle: { background: `linear-gradient(315deg, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 0%, transparent 60%)` }, videoClipPath: `polygon(0% 0%, 100% 0%, ${c}% ${c}%, 0% 100%)` };
-        }
-
-        // 4. Whip Pan & Slide / Smooth / Cover / Reveal Kaydırma Geçişleri
-        if (type === 'slideleft' || type === 'smoothleft' || type === 'coverleft' || type === 'revealleft') {
-          const shift = (0.5 - progress) * (type.startsWith('smooth') ? 45 : 32);
-          const blurPx = type.startsWith('smooth') ? Math.round(intensity * 8) : Math.round(intensity * 3);
-          return {
-            badge,
-            overlayStyle: { boxShadow: `inset ${Math.round(shift * 1.5)}px 0 30px rgba(6,182,212,${(intensity * 0.35).toFixed(2)})` },
-            videoTranslateX: shift,
-            videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
-          };
-        }
-        if (type === 'slideright' || type === 'smoothright' || type === 'coverright' || type === 'revealright') {
-          const shift = (progress - 0.5) * (type.startsWith('smooth') ? 45 : 32);
-          const blurPx = type.startsWith('smooth') ? Math.round(intensity * 8) : Math.round(intensity * 3);
-          return {
-            badge,
-            overlayStyle: { boxShadow: `inset ${Math.round(shift * 1.5)}px 0 30px rgba(6,182,212,${(intensity * 0.35).toFixed(2)})` },
-            videoTranslateX: shift,
-            videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
-          };
-        }
-        if (type === 'slideup' || type === 'smoothup' || type === 'coverup' || type === 'revealup') {
-          const shiftY = (0.5 - progress) * (type.startsWith('smooth') ? 42 : 28);
-          const blurPx = type.startsWith('smooth') ? Math.round(intensity * 7) : 0;
-          return {
-            badge,
-            overlayStyle: { boxShadow: `inset 0 ${Math.round(shiftY * 1.5)}px 30px rgba(6,182,212,${(intensity * 0.35).toFixed(2)})` },
-            videoTranslateY: shiftY,
-            videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
-          };
-        }
-        if (type === 'slidedown' || type === 'smoothdown' || type === 'coverdown' || type === 'revealdown') {
-          const shiftY = (progress - 0.5) * (type.startsWith('smooth') ? 42 : 28);
-          const blurPx = type.startsWith('smooth') ? Math.round(intensity * 7) : 0;
-          return {
-            badge,
-            overlayStyle: { boxShadow: `inset 0 ${Math.round(shiftY * 1.5)}px 30px rgba(6,182,212,${(intensity * 0.35).toFixed(2)})` },
-            videoTranslateY: shiftY,
-            videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
-          };
-        }
-
-        // 5. Dairesel İris & Geometrik Kapı Geçişleri (circleopen, circleclose, circlecrop, rectcrop, vertopen, vertclose, horzopen, horzclose)
-        if (type === 'circleopen' || type === 'circlecrop') {
-          const radius = Math.max(12, Math.round((1 - intensity * 0.78) * 75));
-          return {
-            badge,
-            overlayStyle: { boxShadow: 'inset 0 0 40px rgba(0,0,0,0.85)' },
-            videoClipPath: `circle(${radius}% at 50% 50%)`
-          };
-        }
-        if (type === 'circleclose') {
-          const radius = Math.max(8, Math.round((1 - intensity * 0.85) * 75));
-          return {
-            badge,
-            overlayStyle: { backgroundColor: `rgba(0,0,0,${(intensity * 0.65).toFixed(2)})` },
-            videoClipPath: `circle(${radius}% at 50% 50%)`
-          };
-        }
-        if (type === 'rectcrop') {
-          const insetPct = Math.round(intensity * 36);
-          return {
-            badge,
-            overlayStyle: { border: `${Math.round(intensity * 8)}px solid rgba(6,182,212,0.5)` },
-            videoClipPath: `inset(${insetPct}% ${insetPct}% ${insetPct}% ${insetPct}% round 16px)`
-          };
-        }
-        if (type === 'vertopen' || type === 'vertclose') {
-          const bar = Math.round(intensity * 44);
-          return {
-            badge,
-            overlayStyle: { borderLeft: '2px solid #f59e0b', borderRight: '2px solid #f59e0b' },
-            videoClipPath: `inset(0 ${bar}% 0 ${bar}%)`
-          };
-        }
-        if (type === 'horzopen' || type === 'horzclose') {
-          const bar = Math.round(intensity * 44);
-          return {
-            badge,
-            overlayStyle: { borderTop: '2px solid #f59e0b', borderBottom: '2px solid #f59e0b' },
-            videoClipPath: `inset(${bar}% 0 ${bar}% 0)`
-          };
-        }
-
-        // 6. Zoom Crash & Squeeze (Sıkıştırma) Geçişleri
-        if (type === 'zoomin') {
-          return {
-            badge,
-            overlayStyle: { boxShadow: `inset 0 0 ${Math.round(intensity * 75)}px rgba(6,182,212,0.55)` },
-            videoScale: 1 + intensity * 0.42,
-            videoFilterExtra: `blur(${Math.round(intensity * 4)}px)`
-          };
-        }
-        if (type === 'squeezeh') {
-          return {
-            badge,
-            overlayStyle: { backgroundColor: `rgba(2,6,23,${(intensity * 0.5).toFixed(2)})` },
-            videoScaleX: Math.max(0.15, 1 - intensity * 0.78)
-          };
-        }
-        if (type === 'squeezev') {
-          return {
-            badge,
-            overlayStyle: { backgroundColor: `rgba(2,6,23,${(intensity * 0.5).toFixed(2)})` },
-            videoScaleY: Math.max(0.15, 1 - intensity * 0.78)
-          };
-        }
-
-        // 7. Glitch, Pixelize, Blur, Slice & Wind Geçişleri
-        if (type === 'hblur') {
-          return {
-            badge,
-            overlayStyle: { backgroundColor: `rgba(15,23,42,${(intensity * 0.25).toFixed(2)})` },
-            videoFilterExtra: `blur(${Math.round(intensity * 18)}px) brightness(${(1 + intensity * 0.25).toFixed(2)})`,
-            videoScale: 1 + intensity * 0.06
-          };
-        }
-        if (type === 'pixelize') {
-          return {
-            badge,
-            overlayStyle: {
-              backgroundImage: 'linear-gradient(90deg, rgba(6,182,212,0.18) 50%, transparent 50%), linear-gradient(rgba(6,182,212,0.18) 50%, transparent 50%)',
-              backgroundSize: `${Math.max(8, Math.round(intensity * 28))}px ${Math.max(8, Math.round(intensity * 28))}px`
-            },
-            videoFilterExtra: `contrast(${(1 + intensity * 1.4).toFixed(2)}) saturate(${(1 + intensity * 0.8).toFixed(2)}) blur(${Math.round(intensity * 3)}px)`
-          };
-        }
-        if (type === 'hlslice' || type === 'hrslice' || type === 'vuslice' || type === 'vdslice') {
-          const isVert = type.startsWith('v');
-          const deg = isVert ? 90 : 0;
-          const jitter = (progress > 0.5 ? 1 : -1) * intensity * 12;
-          return {
-            badge,
-            overlayStyle: {
-              backgroundImage: `repeating-linear-gradient(${deg}deg, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 0px, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 8px, transparent 8px, transparent 20px)`
-            },
-            videoTranslateX: isVert ? 0 : jitter,
-            videoTranslateY: isVert ? jitter : 0,
-            videoSkewX: intensity * 10,
-            videoFilterExtra: `hue-rotate(${Math.round(intensity * 90)}deg) contrast(${(1 + intensity * 0.5).toFixed(2)})`
-          };
-        }
-        if (type === 'hlwind' || type === 'hrwind' || type === 'vuwind' || type === 'vdwind') {
-          const isVert = type.startsWith('v');
-          const dir = (type === 'hrwind' || type === 'vdwind') ? 1 : -1;
-          return {
-            badge,
-            overlayStyle: {
-              background: `linear-gradient(${isVert ? 180 : 90}deg, transparent, rgba(56,189,248,${(intensity * 0.4).toFixed(2)}), transparent)`
-            },
-            videoTranslateX: isVert ? 0 : dir * intensity * 22,
-            videoTranslateY: isVert ? dir * intensity * 22 : 0,
-            videoFilterExtra: `blur(${Math.round(intensity * 9)}px)`
-          };
-        }
-
-        // 8. Standart Yumuşak Geçiş (Crossfade)
-        return {
-          badge,
-          overlayStyle: { backgroundColor: `rgba(15,23,42,${(intensity * 0.42).toFixed(2)})` },
-          videoOpacity: 1 - intensity * 0.55
-        };
-      }
+    // 1. Işık & Kararma Geçişleri (Fade Black / White / Grays / Dissolve / Distance)
+    if (type === 'fadeblack') {
+      return {
+        badge,
+        outgoingCanvasStyle: { opacity: progress < 0.5 ? (1 - progress * 2).toFixed(2) : '0' },
+        overlayStyle: { backgroundColor: `rgba(0,0,0,${(intensity * 0.96).toFixed(2)})` }
+      };
     }
-    return null;
+    if (type === 'fadewhite') {
+      return {
+        badge,
+        outgoingCanvasStyle: { opacity: progress < 0.5 ? (1 - progress * 2).toFixed(2) : '0' },
+        overlayStyle: { backgroundColor: `rgba(255,255,255,${(intensity * 0.96).toFixed(2)})` },
+        videoFilterExtra: `brightness(${(1 + intensity * 1.4).toFixed(2)})`
+      };
+    }
+    if (type === 'fadegrays') {
+      return {
+        badge,
+        outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2), filter: `grayscale(${(intensity * 100).toFixed(0)}%)` },
+        overlayStyle: { backgroundColor: `rgba(100,116,139,${(intensity * 0.35).toFixed(2)})` },
+        videoFilterExtra: `grayscale(${(intensity * 100).toFixed(0)}%) contrast(${(1 + intensity * 0.3).toFixed(2)})`
+      };
+    }
+    if (type === 'dissolve') {
+      return {
+        badge,
+        outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2) },
+        overlayStyle: { backgroundImage: 'radial-gradient(rgba(255,255,255,0.18) 1px, transparent 0)', backgroundSize: '6px 6px', opacity: (intensity * 0.65).toFixed(2) },
+        videoOpacity: hasSnap ? 1.0 : 1 - intensity * 0.45
+      };
+    }
+    if (type === 'distance') {
+      return {
+        badge,
+        outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2), transform: `scale(${(1 + progress * 0.18).toFixed(3)})` },
+        overlayStyle: { boxShadow: `inset 0 0 ${Math.round(intensity * 70)}px rgba(56,189,248,0.45)` },
+        videoFilterExtra: `contrast(${(1 + intensity * 0.5).toFixed(2)})`
+      };
+    }
+
+    // 2. Doğrusal Wipe (Silinme) Geçişleri: Outgoing Canvas A silinirken altındaki Incoming Video B tam ekran görünür!
+    if (type === 'wipeleft') {
+      const cutPct = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `inset(0 ${cutPct}% 0 0)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: {
+          background: `linear-gradient(90deg, transparent ${Math.max(0, 100 - cutPct - 2)}%, rgba(6,182,212,0.85) ${100 - cutPct}%, transparent ${Math.min(100, 100 - cutPct + 2)}%)`
+        },
+        videoTranslateX: hasSnap ? 0 : (1 - progress) * 8
+      };
+    }
+    if (type === 'wiperight') {
+      const cutPct = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `inset(0 0 0 ${cutPct}%)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: {
+          background: `linear-gradient(90deg, transparent ${Math.max(0, cutPct - 2)}%, rgba(6,182,212,0.85) ${cutPct}%, transparent ${Math.min(100, cutPct + 2)}%)`
+        },
+        videoTranslateX: hasSnap ? 0 : -(1 - progress) * 8
+      };
+    }
+    if (type === 'wipeup') {
+      const cutPct = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `inset(0 0 ${cutPct}% 0)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: {
+          background: `linear-gradient(180deg, transparent ${Math.max(0, 100 - cutPct - 2)}%, rgba(6,182,212,0.85) ${100 - cutPct}%, transparent ${Math.min(100, 100 - cutPct + 2)}%)`
+        },
+        videoTranslateY: hasSnap ? 0 : (1 - progress) * 8
+      };
+    }
+    if (type === 'wipedown') {
+      const cutPct = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `inset(${cutPct}% 0 0 0)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: {
+          background: `linear-gradient(180deg, transparent ${Math.max(0, cutPct - 2)}%, rgba(6,182,212,0.85) ${cutPct}%, transparent ${Math.min(100, cutPct + 2)}%)`
+        },
+        videoTranslateY: hasSnap ? 0 : -(1 - progress) * 8
+      };
+    }
+
+    // 3. Köşe & Çapraz Wipe Geçişleri (wipetl, wipetr, wipebl, wipebr, diagtl, diagtr, diagbl, diagbr)
+    if (type === 'wipetl' || type === 'diagtl') {
+      const c = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: { clipPath: `inset(0 ${c}% ${c}% 0)`, opacity: hasSnap ? '1' : '0' },
+        overlayStyle: { background: `linear-gradient(135deg, rgba(6,182,212,${(intensity * 0.4).toFixed(2)}) 0%, transparent 60%)` }
+      };
+    }
+    if (type === 'wipetr' || type === 'diagtr') {
+      const c = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: { clipPath: `inset(0 0 ${c}% ${c}%)`, opacity: hasSnap ? '1' : '0' },
+        overlayStyle: { background: `linear-gradient(225deg, rgba(6,182,212,${(intensity * 0.4).toFixed(2)}) 0%, transparent 60%)` }
+      };
+    }
+    if (type === 'wipebl' || type === 'diagbl') {
+      const c = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: { clipPath: `inset(${c}% ${c}% 0 0)`, opacity: hasSnap ? '1' : '0' },
+        overlayStyle: { background: `linear-gradient(45deg, rgba(6,182,212,${(intensity * 0.4).toFixed(2)}) 0%, transparent 60%)` }
+      };
+    }
+    if (type === 'wipebr' || type === 'diagbr') {
+      const c = Math.round(progress * 100);
+      return {
+        badge,
+        outgoingCanvasStyle: { clipPath: `inset(${c}% 0 0 ${c}%)`, opacity: hasSnap ? '1' : '0' },
+        overlayStyle: { background: `linear-gradient(315deg, rgba(6,182,212,${(intensity * 0.4).toFixed(2)}) 0%, transparent 60%)` }
+      };
+    }
+
+    // 4. Whip Pan & Slide / Smooth / Cover / Reveal Kaydırma Geçişleri (A karesi dışarı kayarken B karesi içeri kayar!)
+    if (type === 'slideleft' || type === 'smoothleft' || type === 'coverleft' || type === 'revealleft') {
+      const outShift = -progress * 100;
+      const inShift = hasSnap ? (1 - progress) * 100 : (0.5 - progress) * 35;
+      const blurPx = type.startsWith('smooth') ? Math.round(intensity * 8) : Math.round(intensity * 2);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          transform: `translateX(${outShift.toFixed(1)}%)`,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : 'none',
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { boxShadow: `inset 0 0 24px rgba(6,182,212,${(intensity * 0.3).toFixed(2)})` },
+        videoTranslateX: type.startsWith('reveal') && hasSnap ? 0 : inShift,
+        videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
+      };
+    }
+    if (type === 'slideright' || type === 'smoothright' || type === 'coverright' || type === 'revealright') {
+      const outShift = progress * 100;
+      const inShift = hasSnap ? -(1 - progress) * 100 : (progress - 0.5) * 35;
+      const blurPx = type.startsWith('smooth') ? Math.round(intensity * 8) : Math.round(intensity * 2);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          transform: `translateX(${outShift.toFixed(1)}%)`,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : 'none',
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { boxShadow: `inset 0 0 24px rgba(6,182,212,${(intensity * 0.3).toFixed(2)})` },
+        videoTranslateX: type.startsWith('reveal') && hasSnap ? 0 : inShift,
+        videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
+      };
+    }
+    if (type === 'slideup' || type === 'smoothup' || type === 'coverup' || type === 'revealup') {
+      const outShiftY = -progress * 100;
+      const inShiftY = hasSnap ? (1 - progress) * 100 : (0.5 - progress) * 32;
+      const blurPx = type.startsWith('smooth') ? Math.round(intensity * 7) : 0;
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          transform: `translateY(${outShiftY.toFixed(1)}%)`,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : 'none',
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { boxShadow: `inset 0 0 24px rgba(6,182,212,${(intensity * 0.3).toFixed(2)})` },
+        videoTranslateY: type.startsWith('reveal') && hasSnap ? 0 : inShiftY,
+        videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
+      };
+    }
+    if (type === 'slidedown' || type === 'smoothdown' || type === 'coverdown' || type === 'revealdown') {
+      const outShiftY = progress * 100;
+      const inShiftY = hasSnap ? -(1 - progress) * 100 : (progress - 0.5) * 32;
+      const blurPx = type.startsWith('smooth') ? Math.round(intensity * 7) : 0;
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          transform: `translateY(${outShiftY.toFixed(1)}%)`,
+          filter: blurPx > 0 ? `blur(${blurPx}px)` : 'none',
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { boxShadow: `inset 0 0 24px rgba(6,182,212,${(intensity * 0.3).toFixed(2)})` },
+        videoTranslateY: type.startsWith('reveal') && hasSnap ? 0 : inShiftY,
+        videoFilterExtra: blurPx > 0 ? `blur(${blurPx}px)` : undefined
+      };
+    }
+
+    // 5. Dairesel İris & Geometrik Kapı Geçişleri (circleopen, circleclose, circlecrop, rectcrop, vertopen, vertclose, horzopen, horzclose)
+    if (type === 'circleopen' || type === 'circlecrop' || type === 'circleclose') {
+      const radius = Math.round((1 - progress) * 75);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `circle(${radius}% at 50% 50%)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { boxShadow: `inset 0 0 ${Math.round(intensity * 40)}px rgba(6,182,212,0.45)` },
+        videoScale: hasSnap ? 1.0 : 1 + intensity * 0.12
+      };
+    }
+    if (type === 'rectcrop') {
+      const insetPct = Math.round(progress * 50);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `inset(${insetPct}% ${insetPct}% ${insetPct}% ${insetPct}% round 16px)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { border: `${Math.round(intensity * 6)}px solid rgba(6,182,212,0.5)` }
+      };
+    }
+    if (type === 'vertopen' || type === 'vertclose') {
+      const bar = Math.round(progress * 50);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `inset(0 ${bar}% 0 ${bar}%)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { borderLeft: '2px solid #f59e0b', borderRight: '2px solid #f59e0b' }
+      };
+    }
+    if (type === 'horzopen' || type === 'horzclose') {
+      const bar = Math.round(progress * 50);
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          clipPath: `inset(${bar}% 0 ${bar}% 0)`,
+          opacity: hasSnap ? '1' : '0'
+        },
+        overlayStyle: { borderTop: '2px solid #f59e0b', borderBottom: '2px solid #f59e0b' }
+      };
+    }
+
+    // 6. Zoom Crash & Squeeze (Sıkıştırma) Geçişleri
+    if (type === 'zoomin') {
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          transform: `scale(${(1 + progress * 0.85).toFixed(3)})`,
+          opacity: (1 - progress).toFixed(2),
+          filter: `blur(${Math.round(progress * 6)}px)`
+        },
+        overlayStyle: { boxShadow: `inset 0 0 ${Math.round(intensity * 75)}px rgba(6,182,212,0.55)` },
+        videoScale: 1 + (1 - progress) * 0.28,
+        videoFilterExtra: `blur(${Math.round(intensity * 4)}px)`
+      };
+    }
+    if (type === 'squeezeh') {
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          transform: `scaleX(${Math.max(0.02, 1 - progress).toFixed(3)})`,
+          opacity: (1 - progress * 0.8).toFixed(2)
+        },
+        overlayStyle: {},
+        videoScaleX: hasSnap ? 1.0 : Math.max(0.25, 1 - intensity * 0.65)
+      };
+    }
+    if (type === 'squeezev') {
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          transform: `scaleY(${Math.max(0.02, 1 - progress).toFixed(3)})`,
+          opacity: (1 - progress * 0.8).toFixed(2)
+        },
+        overlayStyle: {},
+        videoScaleY: hasSnap ? 1.0 : Math.max(0.25, 1 - intensity * 0.65)
+      };
+    }
+
+    // 7. Glitch, Pixelize, Blur, Slice & Wind Geçişleri
+    if (type === 'hblur') {
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          opacity: (1 - progress).toFixed(2),
+          filter: `blur(${Math.round(intensity * 18)}px)`
+        },
+        overlayStyle: { backgroundColor: `rgba(15,23,42,${(intensity * 0.2).toFixed(2)})` },
+        videoFilterExtra: `blur(${Math.round(intensity * 16)}px) brightness(${(1 + intensity * 0.25).toFixed(2)})`,
+        videoScale: 1 + intensity * 0.06
+      };
+    }
+    if (type === 'pixelize') {
+      return {
+        badge,
+        outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2) },
+        overlayStyle: {
+          backgroundImage: 'linear-gradient(90deg, rgba(6,182,212,0.18) 50%, transparent 50%), linear-gradient(rgba(6,182,212,0.18) 50%, transparent 50%)',
+          backgroundSize: `${Math.max(8, Math.round(intensity * 28))}px ${Math.max(8, Math.round(intensity * 28))}px`
+        },
+        videoFilterExtra: `contrast(${(1 + intensity * 1.4).toFixed(2)}) saturate(${(1 + intensity * 0.8).toFixed(2)}) blur(${Math.round(intensity * 3)}px)`
+      };
+    }
+    if (type === 'hlslice' || type === 'hrslice' || type === 'vuslice' || type === 'vdslice') {
+      const isVert = type.startsWith('v');
+      const deg = isVert ? 90 : 0;
+      const jitter = (progress > 0.5 ? 1 : -1) * intensity * 12;
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          opacity: (1 - progress).toFixed(2),
+          transform: `translate(${isVert ? 0 : -jitter}%, ${isVert ? -jitter : 0}%)`
+        },
+        overlayStyle: {
+          backgroundImage: `repeating-linear-gradient(${deg}deg, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 0px, rgba(6,182,212,${(intensity * 0.45).toFixed(2)}) 8px, transparent 8px, transparent 20px)`
+        },
+        videoTranslateX: isVert ? 0 : jitter,
+        videoTranslateY: isVert ? jitter : 0,
+        videoSkewX: intensity * 10,
+        videoFilterExtra: `hue-rotate(${Math.round(intensity * 90)}deg) contrast(${(1 + intensity * 0.5).toFixed(2)})`
+      };
+    }
+    if (type === 'hlwind' || type === 'hrwind' || type === 'vuwind' || type === 'vdwind') {
+      const isVert = type.startsWith('v');
+      const dir = (type === 'hrwind' || type === 'vdwind') ? 1 : -1;
+      return {
+        badge,
+        outgoingCanvasStyle: {
+          opacity: (1 - progress).toFixed(2),
+          transform: `translate(${isVert ? 0 : dir * progress * 45}%, ${isVert ? dir * progress * 45 : 0}%)`,
+          filter: `blur(${Math.round(intensity * 10)}px)`
+        },
+        overlayStyle: {
+          background: `linear-gradient(${isVert ? 180 : 90}deg, transparent, rgba(56,189,248,${(intensity * 0.4).toFixed(2)}), transparent)`
+        },
+        videoTranslateX: isVert ? 0 : -dir * (1 - progress) * 18,
+        videoTranslateY: isVert ? -dir * (1 - progress) * 18 : 0,
+        videoFilterExtra: `blur(${Math.round(intensity * 9)}px)`
+      };
+    }
+
+    // 8. Standart Yumuşak Geçiş (Crossfade): Outgoing Canvas A opaklığı 1 -> 0 inerken alttaki Incoming Video B %100 görünür!
+    return {
+      badge,
+      outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2) },
+      overlayStyle: { backgroundColor: hasSnap ? 'transparent' : `rgba(15,23,42,${(intensity * 0.38).toFixed(2)})` },
+      videoOpacity: hasSnap ? 1.0 : 1 - intensity * 0.5
+    };
   });
 
   readonly videoPreviewTransform = computed<string>(() => {
@@ -5619,6 +6008,14 @@ export class EditorComponent implements OnInit, OnDestroy {
       clearInterval(this.modalPreviewTimer);
       this.modalPreviewTimer = null;
     }
+    if (this.liveTransitionTimer) {
+      clearInterval(this.liveTransitionTimer);
+      this.liveTransitionTimer = null;
+    }
+    if (this.playbackRafTimer) {
+      clearInterval(this.playbackRafTimer);
+      this.playbackRafTimer = null;
+    }
     if (this.projectId) {
       this.signalr.leaveProjectGroup(this.projectId);
     }
@@ -5666,12 +6063,58 @@ export class EditorComponent implements OnInit, OnDestroy {
   loadEdl(): void {
     this.edlService.getEdl(this.projectId).subscribe({
       next: (res) => {
+        // Eski V1 sonuna eklenmiş harici videoClips kayıtlarını temizle ve serbest B-Roll katmanına dönüştür
+        const rawVClips: VideoClipItem[] = res.edl.videoClips || res.edl.settings?.videoClips || [];
+        if (rawVClips.some(c => Boolean(c.sourceUrl))) {
+          const externalClips = rawVClips.filter(c => Boolean(c.sourceUrl) && !c.isCut);
+          const cleanedVClips = rawVClips.filter(c => !c.sourceUrl);
+          res.edl.videoClips = cleanedVClips;
+          if (res.edl.settings) {
+            res.edl.settings.videoClips = cleanedVClips;
+          }
+          res.edl.overlays = res.edl.overlays || [];
+          for (const ext of externalClips) {
+            const alreadyConverted = res.edl.overlays.some(o => o.source === ext.sourceUrl);
+            if (!alreadyConverted && ext.sourceUrl) {
+              res.edl.overlays.push({
+                id: `ov_vid_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+                type: 'video',
+                content: ext.title || ext.label || 'B-Roll Video',
+                source: ext.sourceUrl,
+                timestamp: 0,
+                seqTimestamp: 0,
+                duration: Math.min(30, Math.max(1.0, ext.duration || 5.0)),
+                positionX: 50,
+                positionY: 50,
+                scale: 1.0,
+                fullScreen: true,
+                volume: 100,
+                trimStart: 0,
+                trackId: 1,
+                animation: 'fade',
+                exitAnimation: 'fade'
+              });
+            }
+          }
+          this.edlService.patchEdl(this.projectId, {
+            videoClips: cleanedVClips,
+            settings: { videoClips: cleanedVClips }
+          }).subscribe({ error: () => {} });
+        }
+
         if (res.edl.overlays && res.edl.overlays.length > 0) {
+          let durationFixed = false;
+          for (const ov of res.edl.overlays) {
+            if (!ov.duration || ov.duration <= 0 || ov.duration > 60) {
+              ov.duration = 5.0;
+              durationFixed = true;
+            }
+          }
           const { overlays, changed } = this.autoAssignOverlayTracks(res.edl.overlays);
           res.edl.overlays = overlays;
-          if (changed) {
+          if (changed || durationFixed) {
             this.edlService.patchEdl(this.projectId, {
-              overlays: overlays.map(o => ({ id: o.id, trackId: o.trackId, action: 'update' } as any))
+              overlays: overlays.map(o => ({ id: o.id, trackId: o.trackId, duration: o.duration, action: 'update' } as any))
             }).subscribe({
               error: (err) => console.warn('Katman ayrıştırma kaydedilemedi:', err)
             });
@@ -5682,6 +6125,14 @@ export class EditorComponent implements OnInit, OnDestroy {
           res.edl.suggestions = this.studio.generateProactiveSuggestions(res.edl);
         }
         this.edl.set(res.edl);
+        // Tüm katmanların Canonical Sequence Time (seqTimestamp) değerlerini kesim haritasına göre senkronize et
+        if (res.edl.overlays && res.edl.overlays.length > 0) {
+          for (const ov of res.edl.overlays) {
+            if (ov.seqTimestamp === undefined || ov.seqTimestamp === null || isNaN(Number(ov.seqTimestamp))) {
+              ov.seqTimestamp = parseFloat(this.getVisTimeFromRawTime(ov.timestamp || 0).toFixed(2));
+            }
+          }
+        }
         if (res.edl.settings?.subtitlesEnabled !== undefined) {
           this.showSubtitles.set(res.edl.settings.subtitlesEnabled);
         }
@@ -5713,7 +6164,11 @@ export class EditorComponent implements OnInit, OnDestroy {
         if (selId) {
           const ov = res.edl.overlays?.find(o => o.id === selId);
           if (ov) {
-            this.inspectorData = { ...this.inspectorData, ...ov };
+            this.inspectorData = {
+              ...this.inspectorData,
+              ...ov,
+              seqTimestamp: this.getOverlaySeqStart(ov)
+            };
           }
         }
         // EDL içerisinden gelen gerçek peaks varsa öncelikli olarak yükle
@@ -5943,13 +6398,16 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!ov) return;
     
     const newId = `ov_${ov.type}_${Date.now()}`;
-    const desiredStart = parseFloat((ov.timestamp + (ov.duration || 3.0) + 0.1).toFixed(2));
-    const resolved = this.resolveOverlayPlacement(newId, desiredStart, ov.duration || 3.0, Number(ov.trackId) || 1);
+    const origSeqStart = this.getOverlaySeqStart(ov);
+    const desiredSeqStart = parseFloat((origSeqStart + (ov.duration || 3.0) + 0.1).toFixed(2));
+    const desiredRawStart = this.isAnyRippleActive() ? this.getRawTimeFromVisTime(desiredSeqStart) : desiredSeqStart;
+    const resolved = this.resolveOverlayPlacement(newId, desiredRawStart, ov.duration || 3.0, Number(ov.trackId) || 1);
     
     const duplicated: any = {
       ...ov,
       id: newId,
       timestamp: resolved.start,
+      seqTimestamp: resolved.seqStart,
       trackId: resolved.trackId,
       content: ov.type === 'text' ? `${ov.content || 'Metin'} (Kopya)` : ov.content,
       action: 'add'
@@ -5965,24 +6423,30 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   splitOverlayAtPlayhead(ov: OverlayItem): void {
-    const t = this.currentTime();
-    if (t <= ov.timestamp || t >= (ov.timestamp + ov.duration)) {
+    const playheadSeq = this.getPlayheadSeqTime();
+    const ovSeqStart = this.getOverlaySeqStart(ov);
+    const ovDur = Math.max(0.4, ov.duration || 3.0);
+    if (playheadSeq <= ovSeqStart + 0.15 || playheadSeq >= (ovSeqStart + ovDur - 0.15)) {
       alert('Zaman imleci katmanın sınırları içinde olmalıdır.');
       return;
     }
-    const part1Duration = parseFloat((t - ov.timestamp).toFixed(2));
-    const part2Duration = parseFloat(((ov.timestamp + ov.duration) - t).toFixed(2));
+    const part1Duration = parseFloat((playheadSeq - ovSeqStart).toFixed(2));
+    const part2Duration = parseFloat(((ovSeqStart + ovDur) - playheadSeq).toFixed(2));
+    const part2RawStart = parseFloat(this.currentTime().toFixed(2));
     
     const updatedPart1 = {
       ...ov,
+      seqTimestamp: ovSeqStart,
       duration: part1Duration,
       action: 'update'
     };
     const newPart2 = {
       ...ov,
       id: `ov_${ov.type}_${Date.now()}`,
-      timestamp: parseFloat(t.toFixed(2)),
+      timestamp: part2RawStart,
+      seqTimestamp: parseFloat(playheadSeq.toFixed(2)),
       duration: part2Duration,
+      trimStart: ov.type === 'video' ? parseFloat(((ov.trimStart || 0) + part1Duration).toFixed(2)) : ov.trimStart,
       action: 'add'
     };
     
@@ -6163,8 +6627,71 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  triggerAssetUpload(): void {
-    this.assetFileInput?.nativeElement.click();
+  private pendingUploadMode: 'default' | 'broll' | 'pip' = 'default';
+  private assetDurationMap = new Map<string, number>();
+
+  triggerAssetUpload(mode: 'default' | 'broll' | 'pip' = 'default'): void {
+    this.pendingUploadMode = mode;
+    const input = this.assetFileInput?.nativeElement;
+    if (input) {
+      input.value = '';
+      input.click();
+    }
+  }
+
+  isImageAsset(asset: ProjectAssetDto): boolean {
+    const mime = (asset.mimeTuru || '').toLowerCase();
+    const ext = (asset.dosyaAdi || '').toLowerCase();
+    return (
+      mime.startsWith('image/') ||
+      /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i.test(ext)
+    );
+  }
+
+  isVideoAsset(asset: ProjectAssetDto): boolean {
+    const mime = (asset.mimeTuru || '').toLowerCase();
+    const ext = (asset.dosyaAdi || '').toLowerCase();
+    return (
+      mime.startsWith('video/') ||
+      /\.(mp4|mov|webm|mkv|avi|m4v|flv|wmv)$/i.test(ext)
+    );
+  }
+
+  isAudioAsset(asset: ProjectAssetDto): boolean {
+    const mime = (asset.mimeTuru || '').toLowerCase();
+    const ext = (asset.dosyaAdi || '').toLowerCase();
+    return (
+      mime.startsWith('audio/') ||
+      /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(ext)
+    );
+  }
+
+  private probeMediaDuration(file: File): Promise<number> {
+    return new Promise((resolve) => {
+      const isVid = file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(file.name);
+      const isAud = file.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|aac|flac)$/i.test(file.name);
+      if (!isVid && !isAud) {
+        resolve(5.0);
+        return;
+      }
+      const url = URL.createObjectURL(file);
+      const el = document.createElement(isVid ? 'video' : 'audio');
+      el.preload = 'metadata';
+      const cleanup = (dur: number) => {
+        URL.revokeObjectURL(url);
+        resolve(dur > 0.2 && isFinite(dur) ? parseFloat(dur.toFixed(2)) : 6.0);
+      };
+      const timer = setTimeout(() => cleanup(6.0), 3000);
+      el.onloadedmetadata = () => {
+        clearTimeout(timer);
+        cleanup(el.duration);
+      };
+      el.onerror = () => {
+        clearTimeout(timer);
+        cleanup(6.0);
+      };
+      el.src = url;
+    });
   }
 
   onAssetFileSelected(event: Event): void {
@@ -6196,23 +6723,66 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  uploadFile(file: File): void {
+  async uploadFile(file: File): Promise<void> {
     if (!this.projectId) return;
+    const mode = this.pendingUploadMode;
+    this.pendingUploadMode = 'default';
     this.isUploadingAsset.set(true);
+
+    const probedDuration = await this.probeMediaDuration(file);
+
+    const handleUploadedAsset = (newAsset: ProjectAssetDto) => {
+      this.assetDurationMap.set(newAsset.id, probedDuration);
+      this.assets.update(list => [newAsset, ...list]);
+      this.activeTab.set('media');
+
+      if (this.isVideoAsset(newAsset)) {
+        // CapCut & Premiere Pro Mimarisi: Eklenen videolar projenin sonuna değil,
+        // doğrudan aktif imleç (Playhead) konumuna serbest taşınabilir B-Roll veya PiP katmanı (T1..Tn) olarak eklenir!
+        const videoMode: 'broll' | 'pip' = mode === 'pip' ? 'pip' : 'broll';
+        this.addAssetOverlay(newAsset, probedDuration, videoMode);
+      } else if (this.isImageAsset(newAsset)) {
+        this.addAssetOverlay(newAsset, 5.0);
+      } else if (this.isAudioAsset(newAsset)) {
+        this.addAssetAudioToSfxTrack(newAsset, probedDuration);
+      }
+    };
+
     this.assetService.uploadAsset(this.projectId, file).subscribe({
       next: (newAsset) => {
         this.isUploadingAsset.set(false);
-        this.assets.update(list => [newAsset, ...list]);
+        handleUploadedAsset(newAsset);
       },
       error: (err) => {
+        console.warn('Sunucu medya yükleme uyarısı, yerel Blob URL ile devam ediliyor:', err);
         this.isUploadingAsset.set(false);
-        alert('Medya yüklenemedi: ' + (err.error?.detail || err.message));
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        let fallbackMime = file.type;
+        if (!fallbackMime || fallbackMime === 'application/octet-stream') {
+          if (['mp4', 'mov', 'webm', 'mkv', 'avi', 'm4v'].includes(ext)) fallbackMime = 'video/mp4';
+          else if (['mp3', 'wav', 'ogg', 'm4a', 'aac', 'flac'].includes(ext)) fallbackMime = 'audio/mpeg';
+          else fallbackMime = 'image/png';
+        }
+        const localAsset: ProjectAssetDto = {
+          id: `local_asset_${Date.now()}`,
+          projectId: this.projectId,
+          dosyaAdi: file.name,
+          mimeTuru: fallbackMime,
+          boyutByte: file.size,
+          url: URL.createObjectURL(file),
+          yuklemeTarihi: new Date().toISOString()
+        };
+        handleUploadedAsset(localAsset);
       }
     });
   }
 
   deleteAsset(assetId: string): void {
     if (!confirm('Bu medya dosyasını silmek istediğinize emin misiniz?')) return;
+    if (assetId.startsWith('local_asset_')) {
+      this.assets.update(list => list.filter(a => a.id !== assetId));
+      return;
+    }
     this.assetService.deleteAsset(this.projectId, assetId).subscribe({
       next: () => {
         this.assets.update(list => list.filter(a => a.id !== assetId));
@@ -6221,42 +6791,89 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
-  addAssetOverlay(asset: ProjectAssetDto): void {
-    const isImage = asset.mimeTuru.startsWith('image/');
-    const isVideo = asset.mimeTuru.startsWith('video/');
+  addAssetOverlay(asset: ProjectAssetDto, customDuration?: number, videoMode: 'broll' | 'pip' | boolean = 'broll'): void {
+    const isImage = this.isImageAsset(asset);
+    const isVideo = this.isVideoAsset(asset);
     const t = Math.max(0, this.currentTime());
-    const currentOverlays = this.activeEdl()?.overlays || [];
-    const overlapping = currentOverlays.filter(ov => {
-       const ovEnd = ov.timestamp + ov.duration;
-       return (t < ovEnd && (t + 5.0) > ov.timestamp);
-    });
-    let nextTrack = 1;
-    if (overlapping.length > 0) {
-       const usedTracks = overlapping.map(o => Number(o.trackId) || 1);
-       nextTrack = Math.max(...usedTracks) + 1;
-    }
+    const dur = Math.min(60, Math.max(1.0, customDuration || this.assetDurationMap.get(asset.id) || 5.0));
+    const newOvId = `asset_${Date.now()}`;
+    const resolved = this.resolveOverlayPlacement(newOvId, t, dur, 1);
+    const isFullBroll = isVideo && (videoMode === 'broll' || videoMode === true);
 
     const newOverlay: any = {
-      id: `asset_${Date.now()}`,
+      id: newOvId,
       type: isImage ? 'image' : (isVideo ? 'video' : 'text'),
       content: asset.dosyaAdi,
       source: asset.url,
-      timestamp: parseFloat(t.toFixed(2)),
-      duration: 5.0,
+      timestamp: parseFloat(resolved.start.toFixed(2)),
+      seqTimestamp: parseFloat(resolved.seqStart.toFixed(2)),
+      duration: parseFloat(dur.toFixed(2)),
       positionX: 50,
       positionY: 50,
-      scale: 1.0,
-      trackId: nextTrack,
+      scale: isVideo ? (isFullBroll ? 1.0 : 0.65) : 1.0,
+      fullScreen: isFullBroll,
+      volume: isVideo ? 100 : undefined,
+      trimStart: isVideo ? 0 : undefined,
+      trackId: resolved.trackId,
       animation: 'fade',
       exitAnimation: 'fade',
       action: 'add'
     };
 
+    this.applyOptimisticPatch({ overlays: [newOverlay] });
+    this.selectOverlay(newOvId);
+    setTimeout(() => this.syncOverlayVideos(true), 40);
     this.edlService.patchEdl(this.projectId, {
       overlays: [newOverlay]
-    }).subscribe(() => {
-      this.loadEdl();
-      this.activeTab.set('overlays');
+    }).subscribe({
+      error: (err) => console.error('Medya katmanı kaydedilemedi:', err)
+    });
+  }
+
+  /**
+   * Aktif video katmanlarını (B-Roll / PiP <video class="overlay-video-el">)
+   * ana zaman çizelgesi (Playhead Sequence Time) ile milisaniye hassasiyetinde senkronize eder.
+   */
+  syncOverlayVideos(forceSeek = false): void {
+    const mainVideo = this.videoRef?.nativeElement;
+    const isMainPlaying = Boolean(mainVideo && !mainVideo.paused && !this.isScrubbing);
+    const playheadSeq = this.getPlayheadSeqTime();
+    const activeVidOverlays = this.activeOverlays().filter(o => o.type === 'video');
+    const vidElements = document.querySelectorAll<HTMLVideoElement>('video.overlay-video-el');
+
+    vidElements.forEach((el) => {
+      const ovId = el.getAttribute('data-overlay-id');
+      const ov = activeVidOverlays.find(x => x.id === ovId);
+      if (!ov) {
+        if (!el.paused) el.pause();
+        return;
+      }
+      const startSeq = this.getOverlaySeqStart(ov);
+      const trimOffset = Math.max(0, Number(ov.trimStart) || 0);
+      const rawTargetTime = Math.max(0, (playheadSeq - startSeq) + trimOffset);
+      const maxDur = el.duration && isFinite(el.duration) && el.duration > 0.2 ? el.duration : 9999;
+      const targetTime = Math.min(maxDur - 0.02, rawTargetTime);
+
+      const vol = Math.max(0, Math.min(1, (ov.volume ?? 100) / 100));
+      el.volume = vol;
+      el.muted = vol <= 0.01;
+
+      const drift = Math.abs((el.currentTime || 0) - targetTime);
+      if (forceSeek || drift > 0.22 || !isMainPlaying) {
+        try {
+          el.currentTime = Math.max(0, targetTime);
+        } catch {}
+      }
+
+      if (isMainPlaying) {
+        if (el.paused) {
+          el.play().catch(() => {});
+        }
+      } else {
+        if (!el.paused) {
+          el.pause();
+        }
+      }
     });
   }
 
@@ -6271,6 +6888,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (bgm && video && this.bgmUrl()) {
       bgm.currentTime = video.currentTime % Math.max(1, bgm.duration || 60);
     }
+    this.syncOverlayVideos(true);
   }
 
   onVideoPlay(): void {
@@ -6281,16 +6899,30 @@ export class EditorComponent implements OnInit, OnDestroy {
       bgm.volume = (this.edl()?.settings?.bgmVolume ?? 15) / 100;
       bgm.play().catch(() => {});
     }
+    this.syncOverlayVideos(true);
+    if (this.playbackRafTimer) {
+      clearInterval(this.playbackRafTimer);
+    }
+    this.playbackRafTimer = setInterval(() => {
+      const v = this.videoRef?.nativeElement;
+      if (!v || v.paused || this.isScrubbing) return;
+      this.onTimeUpdate();
+    }, 33);
   }
 
   onVideoPause(): void {
+    if (this.playbackRafTimer) {
+      clearInterval(this.playbackRafTimer);
+      this.playbackRafTimer = null;
+    }
     const bgm = this.bgmAudioRef?.nativeElement;
     if (bgm) {
       bgm.pause();
     }
+    this.syncOverlayVideos(false);
   }
 
-  // --- CANLI EDL SİMÜLASYONU (Cut Skip + BGM Auto-Ducking + Canlı SFX + Klip Hızı) ---
+  // --- CANLI EDL SİMÜLASYONU (Cut Skip + Çift Katmanlı Sahne Geçişi + B-Roll Video Senkronu + BGM Auto-Ducking + Canlı SFX + Klip Hızı) ---
   onTimeUpdate(): void {
     if (this.isScrubbing) return;
     
@@ -6301,6 +6933,9 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.currentTime.set(t);
 
     if (video.seeking || this.isSkippingCut) return;
+
+    // 0. Aktif B-Roll / PiP Video Katmanlarını Senkronize Et
+    this.syncOverlayVideos(false);
 
     // 1. Canlı BGM Auto-Ducking ([E2])
     const bgm = this.bgmAudioRef?.nativeElement;
@@ -6327,7 +6962,23 @@ export class EditorComponent implements OnInit, OnDestroy {
       }
     }
 
-    // 3. Klip Hızı (0.5x - 2.0x) ve Kesilmiş Klipleri Atlama
+    // 3. Kesintisiz Bölme Sınırlarındaki (Continuous Split Boundaries) Sahne Geçişlerini Tetikle
+    if (!video.paused && !this.liveTransitionPreview()) {
+      const nowMs = performance.now();
+      for (const tr of this.transitions()) {
+        const bTime = tr.boundaryTime ?? tr.boundarySourceTime ?? 0;
+        const trKey = `${tr.id || bTime.toFixed(2)}`;
+        if (Math.abs(t - bTime) <= 0.08 && (this.lastTriggeredTransitionKey !== trKey || nowMs - this.lastTriggeredTransitionAtMs > 1200)) {
+          this.lastTriggeredTransitionKey = trKey;
+          this.lastTriggeredTransitionAtMs = nowMs;
+          this.captureTransitionSnapshot();
+          this.triggerLiveTransitionPreview(tr.type, tr.duration || 0.5, true);
+          break;
+        }
+      }
+    }
+
+    // 4. Klip Hızı (0.5x - 2.0x) ve Kesilmiş Klipleri Atlama + Çift Katmanlı (A->B) Geçiş Efekti Oynatma
     const allClips = this.clips();
     const currentClip = allClips.find(c => t >= c.start && t < c.end);
     if (currentClip) {
@@ -6338,6 +6989,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     if (currentClip && !this.isVisible(currentClip)) {
       // Kesilmiş bir klipteyiz. Bu klibi ve ardışık gelen tüm kesilmiş klipleri birleştirip tek seferde atla!
+      const cutEntryStart = currentClip.start;
       let targetJumpTime = currentClip.end;
       const sortedClips = allClips.slice().sort((a, b) => a.start - b.start);
       const currIdx = sortedClips.findIndex(c => c.id === currentClip.id);
@@ -6352,11 +7004,28 @@ export class EditorComponent implements OnInit, OnDestroy {
         }
       }
 
+      // Bu kesim sınırında tanımlanmış bir sahne geçişi (Transition) varsa Outgoing Karesini (A) yakala ve 60 FPS geçişi tetikle!
+      const matchedTr =
+        this.getTransitionAtBoundary(targetJumpTime) ||
+        this.getTransitionAtBoundary(cutEntryStart) ||
+        this.clipTransitionBoundaries().find(
+          b => Math.abs(b.boundaryTime - targetJumpTime) < 0.45 || Math.abs(b.prevEnd - cutEntryStart) < 0.45
+        )?.existing;
+      if (matchedTr) {
+        this.lastTriggeredTransitionKey = `${matchedTr.id || targetJumpTime.toFixed(2)}`;
+        this.lastTriggeredTransitionAtMs = performance.now();
+        this.captureTransitionSnapshot();
+      }
+
       this.isSkippingCut = true;
       // 0.04s (1 video frame) tampon ekleyerek geriye düşme (infinite seek-loop) riskini sıfırla
       const finalJumpTime = Math.min(this.totalDuration(), targetJumpTime + 0.04);
       video.currentTime = finalJumpTime;
       this.currentTime.set(finalJumpTime);
+
+      if (matchedTr) {
+        this.triggerLiveTransitionPreview(matchedTr.type, matchedTr.duration || 0.5, true);
+      }
     }
   }
 
@@ -6429,6 +7098,29 @@ export class EditorComponent implements OnInit, OnDestroy {
     return bestIdx >= 0 ? visClips[bestIdx].visEnd : 0;
   }
 
+  /**
+   * Canonical Sequence Time: Aktif zaman çizelgesi moduna (Ripple / Ham) göre imlecin tam saniyesi.
+   * Cetvel, Playhead, Katman kutuları ve Canlı Önizleme Monitörü %100 bu saati paylaşır.
+   */
+  getPlayheadSeqTime(): number {
+    const rawT = this.currentTime();
+    return this.isAnyRippleActive() ? this.getVisTimeFromRawTime(rawT) : rawT;
+  }
+
+  /**
+   * Katmanın (OverlayItem) aktif zaman çizelgesindeki (Sequence Time) kesin başlangıç saniyesini döndürür.
+   */
+  getOverlaySeqStart(ov: OverlayItem | any): number {
+    if (!ov) return 0;
+    if (this.isAnyRippleActive()) {
+      if (ov.seqTimestamp !== undefined && ov.seqTimestamp !== null && !isNaN(Number(ov.seqTimestamp))) {
+        return Math.max(0, Number(ov.seqTimestamp));
+      }
+      return Math.max(0, this.getVisTimeFromRawTime(Number(ov.timestamp) || 0));
+    }
+    return Math.max(0, Number(ov.timestamp) || 0);
+  }
+
   getTimeAtClientX(clientX: number): number {
     const track = this.timelineTrackRef?.nativeElement;
     if (!track) {
@@ -6455,17 +7147,10 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getPlayheadPosition(): number {
-    const t = this.currentTime();
-    let pos: number;
-    if (!this.isAnyRippleActive()) {
-       pos = (t / Math.max(0.001, this.totalDuration())) * 100;
-    } else {
-       const visDur = this.visibleDuration();
-       if (visDur <= 0) return 0;
-       pos = (this.getVisTimeFromRawTime(t) / visDur) * 100;
-    }
+    const activeDur = this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration();
+    if (activeDur <= 0) return 0;
+    const pos = (this.getPlayheadSeqTime() / Math.max(0.001, activeDur)) * 100;
     if (isNaN(pos)) {
-      console.error('[PLAYHEAD:POS_NAN]', { t, totalDur: this.totalDuration(), visDur: this.visibleDuration() });
       return 0;
     }
     return Math.max(0, Math.min(100, pos));
@@ -6677,8 +7362,9 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlayTop(ov: OverlayItem): string {
+    if (ov.type === 'video' && ov.fullScreen) return '50%';
     if (ov.keyframes && ov.keyframes.length >= 2) {
-      const relT = Math.max(0, this.currentTime() - ov.timestamp);
+      const relT = Math.max(0, this.getPlayheadSeqTime() - this.getOverlaySeqStart(ov));
       const sorted = [...ov.keyframes].sort((a, b) => a.timeOffset - b.timeOffset);
       if (relT <= sorted[0].timeOffset) return `${sorted[0].y}%`;
       if (relT >= sorted[sorted.length - 1].timeOffset) return `${sorted[sorted.length - 1].y}%`;
@@ -6699,8 +7385,9 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlayLeft(ov: OverlayItem): string {
+    if (ov.type === 'video' && ov.fullScreen) return '50%';
     if (ov.keyframes && ov.keyframes.length >= 2) {
-      const relT = Math.max(0, this.currentTime() - ov.timestamp);
+      const relT = Math.max(0, this.getPlayheadSeqTime() - this.getOverlaySeqStart(ov));
       const sorted = [...ov.keyframes].sort((a, b) => a.timeOffset - b.timeOffset);
       if (relT <= sorted[0].timeOffset) return `${sorted[0].x}%`;
       if (relT >= sorted[sorted.length - 1].timeOffset) return `${sorted[sorted.length - 1].x}%`;
@@ -6725,13 +7412,17 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlayAnimationClass(ov: OverlayItem): string {
-    const t = this.currentTime();
+    const playheadSeq = this.getPlayheadSeqTime();
+    const startSeq = this.getOverlaySeqStart(ov);
+    const dur = Math.max(0.1, ov.duration || 3);
+    const endSeq = startSeq + dur;
+
     const anim = ov.animation || 'fade';
     const exitAnim = ov.exitAnimation || 'fade';
     const loopAnim = ov.loopAnimation || 'none';
     const classes: string[] = [];
 
-    if (t < ov.timestamp + 0.5) {
+    if (playheadSeq < startSeq + 0.35) {
       if (anim === 'fade') classes.push('animate-fade-in');
       else if (anim === 'pop-up') classes.push('animate-scale-in');
       else if (anim === 'bounce') classes.push('animate-bounce-in');
@@ -6742,18 +7433,18 @@ export class EditorComponent implements OnInit, OnDestroy {
       else if (anim === 'slide-right') classes.push('animate-slide-right-in');
       else if (anim === 'glitch') classes.push('animate-glitch-in');
       else if (anim === 'blur-in') classes.push('animate-blur-in');
-    } else if (t > (ov.timestamp + ov.duration - 0.5)) {
+    } else if (this.isPlaying() && playheadSeq > (endSeq - 0.25)) {
       if (exitAnim === 'fade') classes.push('animate-fade-out');
       else if (exitAnim === 'scale-out') classes.push('animate-scale-out');
       else if (exitAnim === 'slide-down') classes.push('animate-slide-down-out');
       else if (exitAnim === 'blur-out') classes.push('animate-blur-out');
     } else if (loopAnim !== 'none') {
-      if (loopAnim === 'pulse') classes.push('animate-loop-pulse');
-      else if (loopAnim === 'float') classes.push('animate-loop-float');
-      else if (loopAnim === 'wiggle') classes.push('animate-loop-wiggle');
-      else if (loopAnim === 'shake') classes.push('animate-loop-shake');
-      else if (loopAnim === 'neon-flicker') classes.push('animate-loop-neon');
-      else if (loopAnim === 'pendulum') classes.push('animate-loop-pendulum');
+      if (loopAnim === 'pulse') classes.push('anim-loop-pulse');
+      else if (loopAnim === 'float') classes.push('anim-loop-float');
+      else if (loopAnim === 'wiggle') classes.push('anim-loop-wiggle');
+      else if (loopAnim === 'shake') classes.push('anim-loop-shake');
+      else if (loopAnim === 'neon-flicker') classes.push('anim-loop-neon');
+      else if (loopAnim === 'pendulum') classes.push('anim-loop-pendulum');
     }
 
     return classes.join(' ');
@@ -6968,18 +7659,18 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlayStyle(ov: any): any {
-     const totalDur = Math.max(1, this.totalDuration());
+     const totalDur = Math.max(0.5, this.totalDuration());
      if (!this.isAnyRippleActive()) {
         return {
            left: `${(ov.timestamp / totalDur) * 100}%`,
-           width: `${Math.max(0.4, (ov.duration / totalDur) * 100)}%`
+           width: `${Math.max(0.02, (ov.duration / totalDur) * 100)}%`
         };
      }
 
-     const startVis = this.getVisTimeFromRawTime(ov.timestamp);
+     const startVis = this.getOverlaySeqStart(ov);
      const visDur = Math.max(0.1, this.visibleDuration());
-     const leftPct = Math.max(0, Math.min(99.2, (startVis / visDur) * 100));
-     const widthPct = Math.max(0.4, Math.min(100 - leftPct, (ov.duration / visDur) * 100));
+     const leftPct = Math.max(0, Math.min(99.8, (startVis / visDur) * 100));
+     const widthPct = Math.max(0.02, Math.min(100 - leftPct, (ov.duration / visDur) * 100));
      
      return {
         left: `${leftPct}%`,
@@ -7002,10 +7693,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     
     const newOvId = `ov_txt_${Date.now()}`;
+    const startSeq = this.isAnyRippleActive() ? this.getVisTimeFromRawTime(start) : start;
     const currentOverlays = this.activeEdl()?.overlays || [];
     const overlapping = currentOverlays.filter(ov => {
-       const ovEnd = ov.timestamp + ov.duration;
-       return (start < ovEnd && (start + duration) > ov.timestamp);
+       const ovSeq = this.getOverlaySeqStart(ov);
+       const ovEnd = ovSeq + (ov.duration || 3);
+       return (startSeq < ovEnd && (startSeq + duration) > ovSeq);
     });
     let nextTrack = 1;
     if (overlapping.length > 0) {
@@ -7018,6 +7711,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       type: 'text',
       content: 'Yeni Metin',
       timestamp: parseFloat(start.toFixed(2)),
+      seqTimestamp: parseFloat(startSeq.toFixed(2)),
       duration: parseFloat(duration.toFixed(2)),
       color: '#FFFFFF',
       fontSize: 54,
@@ -7070,10 +7764,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     
     const newOvId = `ov_img_${Date.now()}`;
+    const startSeq = this.isAnyRippleActive() ? this.getVisTimeFromRawTime(start) : start;
     const currentOverlays = this.activeEdl()?.overlays || [];
     const overlapping = currentOverlays.filter(ov => {
-       const ovEnd = ov.timestamp + ov.duration;
-       return (start < ovEnd && (start + duration) > ov.timestamp);
+       const ovSeq = this.getOverlaySeqStart(ov);
+       const ovEnd = ovSeq + (ov.duration || 3);
+       return (startSeq < ovEnd && (startSeq + duration) > ovSeq);
     });
     let nextTrack = 1;
     if (overlapping.length > 0) {
@@ -7087,6 +7783,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       content: contentName,
       source: url,
       timestamp: parseFloat(start.toFixed(2)),
+      seqTimestamp: parseFloat(startSeq.toFixed(2)),
       duration: parseFloat(duration.toFixed(2)),
       positionX: 50,
       positionY: 45,
@@ -7125,6 +7822,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      this.selectedOverlayId.set(id);
      const ov = this.activeEdl()?.overlays?.find(o => o.id === id);
      if (ov) {
+        const seqStart = this.getOverlaySeqStart(ov);
         this.inspectorData = {
           id: ov.id,
           type: ov.type || 'text',
@@ -7132,7 +7830,11 @@ export class EditorComponent implements OnInit, OnDestroy {
           source: ov.source || '',
           originalSource: ov.originalSource || ov.source || '',
           timestamp: ov.timestamp ?? 0,
+          seqTimestamp: parseFloat(seqStart.toFixed(2)),
           duration: ov.duration ?? 3,
+          fullScreen: Boolean(ov.fullScreen),
+          volume: ov.volume ?? 100,
+          trimStart: ov.trimStart ?? 0,
           fontSize: ov.fontSize ?? 48,
           font: ov.font || 'Inter',
           fontWeight: ov.fontWeight || '900',
@@ -7197,14 +7899,27 @@ export class EditorComponent implements OnInit, OnDestroy {
           dropShadow: ov.dropShadow ?? false
         };
         
-        const t = this.currentTime();
-        if (t < ov.timestamp || t > (ov.timestamp + ov.duration)) {
+        const playheadSeq = this.getPlayheadSeqTime();
+        if (playheadSeq < seqStart || playheadSeq > (seqStart + (ov.duration || 3))) {
+           const targetRaw = this.isAnyRippleActive() ? this.getRawTimeFromVisTime(seqStart + 0.05) : (ov.timestamp + 0.05);
            if (this.videoRef?.nativeElement) {
-              this.videoRef.nativeElement.currentTime = ov.timestamp + 0.05;
-              this.currentTime.set(ov.timestamp + 0.05);
+              this.videoRef.nativeElement.currentTime = targetRaw;
+              this.currentTime.set(targetRaw);
            }
         }
      }
+  }
+
+  onInspectorSeqStartChange(): void {
+    if (!this.inspectorData) return;
+    const seqVal = Math.max(0, Number(this.inspectorData.seqTimestamp) || 0);
+    this.inspectorData.seqTimestamp = parseFloat(seqVal.toFixed(2));
+    if (this.isAnyRippleActive()) {
+      this.inspectorData.timestamp = parseFloat(this.getRawTimeFromVisTime(seqVal).toFixed(2));
+    } else {
+      this.inspectorData.timestamp = this.inspectorData.seqTimestamp;
+    }
+    this.onInspectorChange();
   }
 
   onInspectorChange(): void {
@@ -7229,6 +7944,9 @@ export class EditorComponent implements OnInit, OnDestroy {
       ov.gradientEnd = this.inspectorData.gradientEnd || '#EF4444';
       ov.gradientAngle = Number(this.inspectorData.gradientAngle) ?? 90;
       ov.scale = Number(this.inspectorData.scale) || 1.0;
+      ov.fullScreen = Boolean(this.inspectorData.fullScreen);
+      ov.volume = this.inspectorData.volume !== undefined ? Number(this.inspectorData.volume) : 100;
+      ov.trimStart = this.inspectorData.trimStart !== undefined ? Number(this.inspectorData.trimStart) : 0;
       ov.animation = this.inspectorData.animation;
       ov.exitAnimation = this.inspectorData.exitAnimation || 'fade';
       ov.loopAnimation = this.inspectorData.loopAnimation || 'none';
@@ -7236,6 +7954,11 @@ export class EditorComponent implements OnInit, OnDestroy {
       ov.positionX = Number(this.inspectorData.positionX);
       ov.positionY = Number(this.inspectorData.positionY);
       ov.timestamp = Number(this.inspectorData.timestamp);
+      if (this.inspectorData.seqTimestamp !== undefined) {
+        ov.seqTimestamp = Number(this.inspectorData.seqTimestamp);
+      } else {
+        ov.seqTimestamp = parseFloat(this.getVisTimeFromRawTime(ov.timestamp).toFixed(2));
+      }
       ov.duration = Number(this.inspectorData.duration);
       ov.trackId = Number(this.inspectorData.trackId) || 1;
 
@@ -7286,6 +8009,9 @@ export class EditorComponent implements OnInit, OnDestroy {
       ov.dropShadow = Boolean(this.inspectorData.dropShadow);
       
       this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
+      if (ov.type === 'video') {
+        this.syncOverlayVideos(false);
+      }
       this.diagnostics.logTrace('INSPECTOR', 'Overlay Değiştirildi', {
         id: selId,
         type: ov.type,
@@ -7307,7 +8033,11 @@ export class EditorComponent implements OnInit, OnDestroy {
           id: selId,
           type: this.inspectorData.type || 'text',
           timestamp: Number(this.inspectorData.timestamp),
+          seqTimestamp: Number(this.inspectorData.seqTimestamp ?? this.getVisTimeFromRawTime(Number(this.inspectorData.timestamp) || 0)),
           duration: Number(this.inspectorData.duration),
+          fullScreen: Boolean(this.inspectorData.fullScreen),
+          volume: this.inspectorData.volume !== undefined ? Number(this.inspectorData.volume) : 100,
+          trimStart: this.inspectorData.trimStart !== undefined ? Number(this.inspectorData.trimStart) : 0,
           positionX: Number(this.inspectorData.positionX),
           positionY: Number(this.inspectorData.positionY),
           fontSize: Number(this.inspectorData.fontSize),
@@ -7669,21 +8399,21 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getSfxClipStyle(sfx: EdlSfxClip): any {
-    const totalDur = Math.max(1, this.totalDuration());
+    const totalDur = Math.max(0.5, this.totalDuration());
     const start = sfx.start || 0;
-    const dur = Math.max(0.3, sfx.duration || 1.0);
+    const dur = Math.max(0.2, sfx.duration || 1.0);
     if (!this.isAnyRippleActive()) {
       return {
         left: `${(start / totalDur) * 100}%`,
-        width: `${Math.max(0.8, (dur / totalDur) * 100)}%`
+        width: `${Math.max(0.02, (dur / totalDur) * 100)}%`
       };
     }
     const startVis = this.getVisTimeFromRawTime(start);
     const visDur = Math.max(0.1, this.visibleDuration());
-    const leftPct = Math.max(0, Math.min(99.2, (startVis / visDur) * 100));
+    const leftPct = Math.max(0, Math.min(99.8, (startVis / visDur) * 100));
     return {
       left: `${leftPct}%`,
-      width: `${Math.max(0.8, Math.min(100 - leftPct, (dur / visDur) * 100))}%`
+      width: `${Math.max(0.02, Math.min(100 - leftPct, (dur / visDur) * 100))}%`
     };
   }
 
@@ -7703,7 +8433,14 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   // --- FAZ 4: SAHNE GEÇİŞ EFEKTLERİ (XFADE TRANSITIONS) METOTLARI ---
   getTransitionAtBoundary(boundaryTime: number): EdlTransition | undefined {
-    return this.transitions().find(tr => Math.abs(((tr.boundaryTime ?? tr.boundarySourceTime) || 0) - boundaryTime) < 0.25);
+    const bounds = this.clipTransitionBoundaries();
+    const matchedBound = bounds.find(b =>
+      Math.abs(b.boundaryTime - boundaryTime) < 0.45 ||
+      Math.abs(b.prevEnd - boundaryTime) < 0.45 ||
+      Math.abs(b.visBoundaryTime - boundaryTime) < 0.45
+    );
+    if (matchedBound?.existing) return matchedBound.existing;
+    return this.transitions().find(tr => Math.abs(((tr.boundaryTime ?? tr.boundarySourceTime) || 0) - boundaryTime) < 0.45);
   }
 
   getTransitionMeta(type: string): TransitionLibraryItem | undefined {
@@ -7838,12 +8575,13 @@ export class EditorComponent implements OnInit, OnDestroy {
   saveCurrentTransition(): void {
     const bTime = this.editingTransitionBoundaryTime();
     const dur = this.editingTransitionDuration();
+    const trType = this.editingTransitionType();
     const existing = this.getTransitionAtBoundary(bTime);
     const trObj: EdlTransition = {
       id: existing?.id || `tr_${Date.now()}`,
       boundaryTime: bTime,
       boundarySourceTime: bTime,
-      type: this.editingTransitionType(),
+      type: trType,
       duration: dur,
       action: existing ? 'update' : 'add'
     };
@@ -7852,43 +8590,56 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.applyOptimisticPatch(patch);
     this.edlService.patchEdl(this.projectId, patch).subscribe();
 
-    // Geçiş efektini kullanıcıya hemen canlı monitörde göster
-    const previewStart = Math.max(0, bTime - dur / 2 - 0.15);
+    // Geçiş efektini kullanıcıya hemen 60 FPS canlı monitörde göster
+    this.triggerLiveTransitionPreview(trType, dur);
     this.currentTime.set(bTime);
     if (this.videoRef?.nativeElement) {
-      this.videoRef.nativeElement.currentTime = previewStart;
-      this.videoRef.nativeElement.play().then(() => {
-        this.isPlaying.set(true);
-        setTimeout(() => {
-          if (this.videoRef?.nativeElement && !this.videoRef.nativeElement.paused) {
-            this.videoRef.nativeElement.pause();
-            this.isPlaying.set(false);
-          }
-        }, Math.round((dur + 0.35) * 1000));
-      }).catch(() => {});
+      this.videoRef.nativeElement.currentTime = bTime;
     }
   }
 
   applyTransitionToAllCuts(): void {
-    const allClips = this.clips();
+    const bounds = this.clipTransitionBoundaries();
+    const trType = this.editingTransitionType();
+    const dur = this.editingTransitionDuration();
     const patches: EdlTransition[] = [];
-    for (let i = 0; i < allClips.length - 1; i++) {
-      const bTime = parseFloat(allClips[i].end.toFixed(2));
-      const existing = this.getTransitionAtBoundary(bTime);
-      patches.push({
-        id: existing?.id || `tr_all_${Date.now()}_${i}`,
-        boundaryTime: bTime,
-        boundarySourceTime: bTime,
-        type: this.editingTransitionType(),
-        duration: this.editingTransitionDuration(),
-        action: existing ? 'update' : 'add'
-      });
+
+    if (bounds.length > 0) {
+      for (let i = 0; i < bounds.length; i++) {
+        const b = bounds[i];
+        const bTime = parseFloat(b.boundaryTime.toFixed(2));
+        const existing = b.existing || this.getTransitionAtBoundary(bTime);
+        patches.push({
+          id: existing?.id || `tr_all_${Date.now()}_${i}`,
+          boundaryTime: bTime,
+          boundarySourceTime: bTime,
+          type: trType,
+          duration: dur,
+          action: existing ? 'update' : 'add'
+        });
+      }
+    } else {
+      const allClips = this.clips().filter(c => !c.isCut);
+      for (let i = 0; i < allClips.length - 1; i++) {
+        const bTime = parseFloat(allClips[i + 1].start.toFixed(2));
+        const existing = this.getTransitionAtBoundary(bTime);
+        patches.push({
+          id: existing?.id || `tr_all_${Date.now()}_${i}`,
+          boundaryTime: bTime,
+          boundarySourceTime: bTime,
+          type: trType,
+          duration: dur,
+          action: existing ? 'update' : 'add'
+        });
+      }
     }
+
     if (patches.length > 0) {
       const patch: EdlPatchDto = { transitions: patches };
       this.transitionModalOpen.set(false);
       this.applyOptimisticPatch(patch);
       this.edlService.patchEdl(this.projectId, patch).subscribe();
+      this.triggerLiveTransitionPreview(trType, dur);
     }
   }
 
@@ -8284,80 +9035,88 @@ export class EditorComponent implements OnInit, OnDestroy {
     movingId: string,
     desiredStart: number,
     duration: number,
-    desiredTrack: number
-  ): { start: number; trackId: number; snappedToEdge: boolean; snapTime: number | null } {
+    desiredTrack: number,
+    desiredSeqOverride?: number
+  ): { start: number; seqStart: number; trackId: number; snappedToEdge: boolean; snapTime: number | null } {
     const allOverlays = this.allOverlaysSignal().filter(
       o => o.id !== movingId && (Number(o.trackId) || 1) === desiredTrack
     );
-    const totalDur = Math.max(10, this.totalDuration() || 60);
-    let candidateStart = Math.max(0, Math.min(totalDur - 0.2, desiredStart));
+    const rippleActive = this.isAnyRippleActive();
+    const toPos = (rawT: number) => (rippleActive ? this.getVisTimeFromRawTime(rawT) : rawT);
+    const toRaw = (posT: number) => (rippleActive ? this.getRawTimeFromVisTime(posT) : posT);
+
+    const maxPosDur = Math.max(2, (rippleActive ? this.visibleDuration() : this.totalDuration()) || 60);
+    const desiredPos = desiredSeqOverride !== undefined ? desiredSeqOverride : toPos(desiredStart);
+    let candidatePos = Math.max(0, Math.min(maxPosDur - 0.2, desiredPos));
     let snapped = false;
-    let snapTime: number | null = null;
-    const SNAP_THRESHOLD_SEC = 0.25;
+    let snapPos: number | null = null;
+    const SNAP_THRESHOLD_SEC = 0.22;
 
     // 1. Manyetik Uç Yakalama (Magnetic Edge Snapping) + Playhead Yakalama
-    const playheadT = this.currentTime();
-    if (Math.abs(candidateStart - playheadT) <= SNAP_THRESHOLD_SEC) {
-      candidateStart = playheadT;
+    const playheadPos = this.getPlayheadSeqTime();
+    if (Math.abs(candidatePos - playheadPos) <= SNAP_THRESHOLD_SEC) {
+      candidatePos = playheadPos;
       snapped = true;
-      snapTime = playheadT;
-    } else if (Math.abs((candidateStart + duration) - playheadT) <= SNAP_THRESHOLD_SEC) {
-      candidateStart = Math.max(0, playheadT - duration);
+      snapPos = playheadPos;
+    } else if (Math.abs((candidatePos + duration) - playheadPos) <= SNAP_THRESHOLD_SEC) {
+      candidatePos = Math.max(0, playheadPos - duration);
       snapped = true;
-      snapTime = playheadT;
+      snapPos = playheadPos;
     }
 
-    for (const other of allOverlays) {
-      const otherStart = other.timestamp;
-      const otherEnd = other.timestamp + other.duration;
+    const otherRanges = allOverlays
+      .map(o => {
+        const s = this.getOverlaySeqStart(o);
+        const d = Math.max(0.2, o.duration || 3);
+        return { id: o.id, start: s, end: s + d };
+      })
+      .sort((a, b) => a.start - b.start);
 
-      if (Math.abs(candidateStart - otherEnd) <= SNAP_THRESHOLD_SEC) {
-        candidateStart = otherEnd;
+    for (const other of otherRanges) {
+      if (Math.abs(candidatePos - other.end) <= SNAP_THRESHOLD_SEC) {
+        candidatePos = other.end;
         snapped = true;
-        snapTime = otherEnd;
+        snapPos = other.end;
         break;
       }
-      if (Math.abs((candidateStart + duration) - otherStart) <= SNAP_THRESHOLD_SEC) {
-        candidateStart = Math.max(0, otherStart - duration);
+      if (Math.abs((candidatePos + duration) - other.start) <= SNAP_THRESHOLD_SEC) {
+        candidatePos = Math.max(0, other.start - duration);
         snapped = true;
-        snapTime = otherStart;
+        snapPos = other.start;
         break;
       }
     }
 
-    // 2. Sert Çakışma Çözücü (Hard Non-Overlap Clamp)
-    const sorted = [...allOverlays].sort((a, b) => a.timestamp - b.timestamp);
-    for (const blocker of sorted) {
-      const bStart = blocker.timestamp;
-      const bEnd = blocker.timestamp + blocker.duration;
-      const cEnd = candidateStart + duration;
+    // 2. Sert Çakışma Çözücü (Hard Non-Overlap Clamp in Active Timeline Space)
+    for (const blocker of otherRanges) {
+      const bStart = blocker.start;
+      const bEnd = blocker.end;
+      const cEnd = candidatePos + duration;
 
-      // Kesişim testi: [candidateStart, cEnd) ile [bStart, bEnd) kesişiyor mu?
-      if (candidateStart < bEnd - 0.01 && cEnd > bStart + 0.01) {
+      if (candidatePos < bEnd - 0.01 && cEnd > bStart + 0.01) {
         const pushLeftStart = bStart - duration;
         const pushRightStart = bEnd;
 
-        const distLeft = pushLeftStart >= 0 ? Math.abs(desiredStart - pushLeftStart) : Infinity;
-        const distRight = Math.abs(desiredStart - pushRightStart);
+        const distLeft = pushLeftStart >= 0 ? Math.abs(desiredPos - pushLeftStart) : Infinity;
+        const distRight = Math.abs(desiredPos - pushRightStart);
 
         if (distLeft <= distRight && pushLeftStart >= 0) {
-          // Sol tarafa yasla ve önceki blokla çakışmadığından emin ol
-          const conflictLeft = sorted.some(
-            s => s.id !== blocker.id && pushLeftStart < (s.timestamp + s.duration - 0.01) && (pushLeftStart + duration) > (s.timestamp + 0.01)
+          const conflictLeft = otherRanges.some(
+            s => s.id !== blocker.id && pushLeftStart < (s.end - 0.01) && (pushLeftStart + duration) > (s.start + 0.01)
           );
           if (!conflictLeft) {
-            candidateStart = pushLeftStart;
+            candidatePos = pushLeftStart;
             snapped = true;
-            snapTime = bStart;
+            snapPos = bStart;
           } else {
-            candidateStart = pushRightStart;
+            candidatePos = pushRightStart;
             snapped = true;
-            snapTime = bEnd;
+            snapPos = bEnd;
           }
         } else {
-          candidateStart = pushRightStart;
+          candidatePos = pushRightStart;
           snapped = true;
-          snapTime = bEnd;
+          snapPos = bEnd;
         }
       }
     }
@@ -8365,21 +9124,26 @@ export class EditorComponent implements OnInit, OnDestroy {
     // 3. Eğer sağa itildiğinde başka bir blokla tekrar kesişiyorsa ilk boşluğa yerleştir
     let safetyCounter = 0;
     while (safetyCounter < 20) {
-      const hit = sorted.find(
-        b => candidateStart < (b.timestamp + b.duration - 0.01) && (candidateStart + duration) > (b.timestamp + 0.01)
+      const hit = otherRanges.find(
+        b => candidatePos < (b.end - 0.01) && (candidatePos + duration) > (b.start + 0.01)
       );
       if (!hit) break;
-      candidateStart = hit.timestamp + hit.duration;
+      candidatePos = hit.end;
       snapped = true;
-      snapTime = candidateStart;
+      snapPos = candidatePos;
       safetyCounter++;
     }
 
+    const finalSeqStart = parseFloat(Math.max(0, candidatePos).toFixed(2));
+    const finalRawStart = toRaw(finalSeqStart);
+    const finalSnapRaw = snapPos !== null ? toRaw(snapPos) : null;
+
     return {
-      start: parseFloat(Math.max(0, candidateStart).toFixed(2)),
+      start: parseFloat(Math.max(0, finalRawStart).toFixed(2)),
+      seqStart: finalSeqStart,
       trackId: desiredTrack,
       snappedToEdge: snapped,
-      snapTime
+      snapTime: finalSnapRaw
     };
   }
 
@@ -8398,17 +9162,24 @@ export class EditorComponent implements OnInit, OnDestroy {
       const total = Math.max(0.1, this.totalDuration());
       return {
         leftPercent: Math.max(0, (startRaw / total) * 100),
-        widthPercent: Math.max(0.8, (durationRaw / total) * 100)
+        widthPercent: Math.max(0.02, (durationRaw / total) * 100)
       };
     }
     const sVis = this.getVisTimeFromRawTime(startRaw);
     const visTotal = Math.max(0.1, this.visibleDuration());
-    const leftPercent = Math.max(0, Math.min(99.2, (sVis / visTotal) * 100));
-    const widthPercent = Math.max(0.8, Math.min(100 - leftPercent, (durationRaw / visTotal) * 100));
+    const leftPercent = Math.max(0, Math.min(99.8, (sVis / visTotal) * 100));
+    const widthPercent = Math.max(0.02, Math.min(100 - leftPercent, (durationRaw / visTotal) * 100));
     return {
       leftPercent,
       widthPercent
     };
+  }
+
+  private getTimelineSpanStyleForSeqRange(startSeq: number, durationSeq: number): { leftPercent: number; widthPercent: number } {
+    const activeDur = Math.max(0.1, this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration());
+    const leftPercent = Math.max(0, Math.min(99.8, (startSeq / activeDur) * 100));
+    const widthPercent = Math.max(0.02, Math.min(100 - leftPercent, (durationSeq / activeDur) * 100));
+    return { leftPercent, widthPercent };
   }
 
   // --- TIMELINE & CANVAS DRAG & RESIZE ---
@@ -8425,9 +9196,10 @@ export class EditorComponent implements OnInit, OnDestroy {
      
      if (ov) {
         this.dragOverlayOriginalStart = ov.timestamp;
+        this.dragOverlayOriginalSeqStart = this.getOverlaySeqStart(ov);
         this.dragOverlayOriginalDuration = ov.duration;
         this.dragOverlayOriginalTrack = Number(ov.trackId) || 1;
-        const origSpan = this.getTimelineSpanStyleForRawRange(ov.timestamp, ov.duration);
+        const origSpan = this.getTimelineSpanStyleForSeqRange(this.dragOverlayOriginalSeqStart, ov.duration);
         this.overlayOriginGhost.set({
           trackId: this.dragOverlayOriginalTrack,
           leftPercent: origSpan.leftPercent,
@@ -8450,6 +9222,7 @@ export class EditorComponent implements OnInit, OnDestroy {
      
      if (ov) {
         this.dragOverlayOriginalStart = ov.timestamp;
+        this.dragOverlayOriginalSeqStart = this.getOverlaySeqStart(ov);
         this.dragOverlayOriginalDuration = ov.duration;
         this.dragOverlayOriginalTrack = Number(ov.trackId) || 1;
      }
@@ -8487,16 +9260,18 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!ov) return;
     
     const desiredTrack = (Number(ov.trackId) || 1) + 1;
-    const resolved = this.resolveOverlayPlacement(ov.id, ov.timestamp, ov.duration, desiredTrack);
+    const resolved = this.resolveOverlayPlacement(ov.id, ov.timestamp, ov.duration, desiredTrack, this.getOverlaySeqStart(ov));
     ov.trackId = resolved.trackId;
     ov.timestamp = resolved.start;
+    ov.seqTimestamp = resolved.seqStart;
     if (this.inspectorData && this.inspectorData.id === overlayId) {
        this.inspectorData.trackId = resolved.trackId;
        this.inspectorData.timestamp = resolved.start;
+       this.inspectorData.seqTimestamp = resolved.seqStart;
     }
     this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
     this.edlService.patchEdl(this.projectId, {
-       overlays: [{ id: ov.id, trackId: resolved.trackId, timestamp: resolved.start, action: 'update' } as any]
+       overlays: [{ id: ov.id, trackId: resolved.trackId, timestamp: resolved.start, seqTimestamp: resolved.seqStart, action: 'update' } as any]
     }).subscribe();
   }
 
@@ -8506,16 +9281,18 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!ov) return;
     
     const desiredTrack = Math.max(1, (Number(ov.trackId) || 1) - 1);
-    const resolved = this.resolveOverlayPlacement(ov.id, ov.timestamp, ov.duration, desiredTrack);
+    const resolved = this.resolveOverlayPlacement(ov.id, ov.timestamp, ov.duration, desiredTrack, this.getOverlaySeqStart(ov));
     ov.trackId = resolved.trackId;
     ov.timestamp = resolved.start;
+    ov.seqTimestamp = resolved.seqStart;
     if (this.inspectorData && this.inspectorData.id === overlayId) {
        this.inspectorData.trackId = resolved.trackId;
        this.inspectorData.timestamp = resolved.start;
+       this.inspectorData.seqTimestamp = resolved.seqStart;
     }
     this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
     this.edlService.patchEdl(this.projectId, {
-       overlays: [{ id: ov.id, trackId: resolved.trackId, timestamp: resolved.start, action: 'update' } as any]
+       overlays: [{ id: ov.id, trackId: resolved.trackId, timestamp: resolved.start, seqTimestamp: resolved.seqStart, action: 'update' } as any]
     }).subscribe();
   }
 
@@ -8524,16 +9301,18 @@ export class EditorComponent implements OnInit, OnDestroy {
     const ov = overlays.find(o => o.id === overlayId);
     if (!ov) return;
     
-    const resolved = this.resolveOverlayPlacement(ov.id, ov.timestamp, ov.duration, trackId);
+    const resolved = this.resolveOverlayPlacement(ov.id, ov.timestamp, ov.duration, trackId, this.getOverlaySeqStart(ov));
     ov.trackId = resolved.trackId;
     ov.timestamp = resolved.start;
+    ov.seqTimestamp = resolved.seqStart;
     if (this.inspectorData && this.inspectorData.id === overlayId) {
        this.inspectorData.trackId = resolved.trackId;
        this.inspectorData.timestamp = resolved.start;
+       this.inspectorData.seqTimestamp = resolved.seqStart;
     }
     this.edl.update(e => e ? { ...e, overlays: [...(e.overlays || [])] } : null);
     this.edlService.patchEdl(this.projectId, {
-       overlays: [{ id: ov.id, trackId: resolved.trackId, timestamp: resolved.start, action: 'update' } as any]
+       overlays: [{ id: ov.id, trackId: resolved.trackId, timestamp: resolved.start, seqTimestamp: resolved.seqStart, action: 'update' } as any]
     }).subscribe();
   }
 
@@ -8594,7 +9373,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
          const ov = this.activeEdl()?.overlays?.find(o => o.id === this.canvasResizeOverlayId);
          if (ov) {
-             if (ov.type === 'image') {
+             if (ov.type !== 'text') {
                  let newScale = this.canvasResizeOriginalScale + (delta / 120);
                  if (newScale < 0.2) newScale = 0.2;
                  if (newScale > 5.0) newScale = 5.0;
@@ -8625,9 +9404,14 @@ export class EditorComponent implements OnInit, OnDestroy {
         const track = this.timelineTrackRef?.nativeElement;
         if (!track) return;
         const rect = track.getBoundingClientRect();
-        const pixelsPerSec = rect.width / Math.max(1, this.totalDuration());
+        const activeTimelineDur = Math.max(0.5, this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration());
+        const pixelsPerSec = rect.width / activeTimelineDur;
         const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
         let newStart = Math.max(0, this.dragSfxOriginalStart + deltaSec);
+        if (this.isAnyRippleActive()) {
+           const origVis = this.getVisTimeFromRawTime(this.dragSfxOriginalStart);
+           newStart = this.getRawTimeFromVisTime(Math.max(0, origVis + deltaSec));
+        }
 
         // Manyetik yakalama (Playhead veya diğer SFX uçları)
         let snapped = false;
@@ -8649,7 +9433,8 @@ export class EditorComponent implements OnInit, OnDestroy {
         }
 
         sfx.start = parseFloat(newStart.toFixed(2));
-        const endSec = parseFloat((sfx.start + this.dragSfxOriginalDuration).toFixed(2));
+        const dispStart = this.isAnyRippleActive() ? this.getVisTimeFromRawTime(sfx.start) : sfx.start;
+        const endSec = parseFloat((dispStart + this.dragSfxOriginalDuration).toFixed(2));
         const span = this.getTimelineSpanStyleForRawRange(sfx.start, this.dragSfxOriginalDuration);
         this.timelineGhostPreview.set({
            kind: 'sfx',
@@ -8657,7 +9442,7 @@ export class EditorComponent implements OnInit, OnDestroy {
            leftPercent: span.leftPercent,
            widthPercent: span.widthPercent,
            label: sfx.name || 'SFX',
-           timeLabel: `${sfx.start.toFixed(1)}s - ${endSec.toFixed(1)}s`,
+           timeLabel: `${dispStart.toFixed(1)}s - ${endSec.toFixed(1)}s`,
            snapped
         });
         this.activeSnapLinePercent.set(snapTime !== null ? this.getTimelinePercentForRawTime(snapTime) : null);
@@ -8672,7 +9457,8 @@ export class EditorComponent implements OnInit, OnDestroy {
         const track = this.timelineTrackRef?.nativeElement;
         if (!track) return;
         const rect = track.getBoundingClientRect();
-        const pixelsPerSec = rect.width / this.totalDuration();
+        const activeTimelineDur = Math.max(0.5, this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration());
+        const pixelsPerSec = rect.width / activeTimelineDur;
         const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
 
         if (this.isDraggingSubtitle) {
@@ -8719,42 +9505,36 @@ export class EditorComponent implements OnInit, OnDestroy {
      const ov = overlays.find(o => o.id === ovId);
      if (!ov) return;
      
+     const track = this.timelineTrackRef?.nativeElement;
+     if (!track) return;
+     const rect = track.getBoundingClientRect();
+     const activeTimelineDur = Math.max(0.5, this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration());
+     const pixelsPerSec = rect.width / activeTimelineDur;
+     const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
+
      if (this.isDraggingOverlay) {
-        let desiredStart = ov.timestamp;
-        if (!this.isAnyRippleActive()) {
-           const track = this.timelineTrackRef?.nativeElement;
-           if (!track) return;
-           const rect = track.getBoundingClientRect();
-           const pixelsPerSec = rect.width / this.totalDuration();
-           const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
-           desiredStart = Math.max(0, this.dragOverlayOriginalStart + deltaSec);
-        } else {
-           const startVis = this.getVisTimeFromRawTime(this.dragOverlayOriginalStart);
-           const currentMouseRaw = this.getTimeAtClientX(event.clientX);
-           const startMouseRaw = this.getTimeAtClientX(this.dragStartX);
-           const deltaVis = this.getVisTimeFromRawTime(currentMouseRaw) - this.getVisTimeFromRawTime(startMouseRaw);
-           const newVis = Math.max(0, startVis + deltaVis);
-           desiredStart = this.getRawTimeFromVisTime(newVis);
-        }
+        const desiredSeqStart = Math.max(0, this.dragOverlayOriginalSeqStart + deltaSec);
+        const desiredRawStart = this.isAnyRippleActive() ? this.getRawTimeFromVisTime(desiredSeqStart) : desiredSeqStart;
         
         const deltaTrack = Math.round((this.dragStartY - event.clientY) / 40);
         const maxTrack = Math.max(3, ...this.overlayTrackNumbers());
         const desiredTrack = Math.max(1, Math.min(maxTrack + 1, this.dragOverlayOriginalTrack + deltaTrack));
 
-        // Çakışma Önleyici (No-Overlap) ve Manyetik Snap Çözümlemesi
-        const resolved = this.resolveOverlayPlacement(ov.id, desiredStart, ov.duration, desiredTrack);
+        // Çakışma Önleyici (No-Overlap) ve Manyetik Snap Çözümlemesi (Canonical Sequence Time üzerinde)
+        const resolved = this.resolveOverlayPlacement(ov.id, desiredRawStart, ov.duration, desiredTrack, desiredSeqStart);
         ov.timestamp = resolved.start;
+        ov.seqTimestamp = resolved.seqStart;
         ov.trackId = resolved.trackId;
 
-        const endSec = parseFloat((ov.timestamp + ov.duration).toFixed(2));
-        const span = this.getTimelineSpanStyleForRawRange(ov.timestamp, ov.duration);
+        const endSeqSec = parseFloat((resolved.seqStart + ov.duration).toFixed(2));
+        const span = this.getTimelineSpanStyleForSeqRange(resolved.seqStart, ov.duration);
         this.timelineGhostPreview.set({
            kind: 'overlay',
            trackId: ov.trackId,
            leftPercent: span.leftPercent,
            widthPercent: span.widthPercent,
            label: ov.type === 'text' ? (ov.content || 'Metin') : (ov.content || 'Görsel'),
-           timeLabel: `${ov.timestamp.toFixed(1)}s - ${endSec.toFixed(1)}s`,
+           timeLabel: `${resolved.seqStart.toFixed(1)}s - ${endSeqSec.toFixed(1)}s`,
            snapped: resolved.snappedToEdge
         });
         this.activeSnapLinePercent.set(
@@ -8763,52 +9543,53 @@ export class EditorComponent implements OnInit, OnDestroy {
 
         if (this.inspectorData && this.inspectorData.id === ovId) {
             this.inspectorData.timestamp = ov.timestamp;
+            this.inspectorData.seqTimestamp = ov.seqTimestamp;
             this.inspectorData.trackId = ov.trackId;
         }
         this.edl.update(e => e ? { ...e, overlays: [...overlays] } : null);
      } else if (this.isResizingOverlay) {
-        const track = this.timelineTrackRef?.nativeElement;
-        if (!track) return;
-        const rect = track.getBoundingClientRect();
-        const activeTimelineDur = Math.max(0.5, this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration());
-        const pixelsPerSec = rect.width / activeTimelineDur;
-        const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
-
         const trackNum = Number(ov.trackId) || 1;
         const otherOnTrack = this.allOverlaysSignal().filter(
            o => o.id !== ov.id && (Number(o.trackId) || 1) === trackNum
         );
         
         if (this.resizeEdge === 'left') {
-           const originalEnd = this.dragOverlayOriginalStart + this.dragOverlayOriginalDuration;
-           let newStart = Math.max(0, this.dragOverlayOriginalStart + deltaSec);
+           // Sol kenar boyutlandırma %100 Sequence Time üzerinde yapılır; böylece timestamp asla kesik içine düşüp sıçramaz!
+           const originalSeqEnd = this.dragOverlayOriginalSeqStart + this.dragOverlayOriginalDuration;
+           let newSeqStart = Math.max(0, this.dragOverlayOriginalSeqStart + deltaSec);
            // Sol taraftaki komşu katmanın üzerine taşmasını engelle
            for (const other of otherOnTrack) {
-              const oEnd = other.timestamp + other.duration;
-              if (oEnd <= originalEnd + 0.01 && newStart < oEnd) {
-                 newStart = oEnd;
+              const oSeqStart = this.getOverlaySeqStart(other);
+              const oSeqEnd = oSeqStart + (other.duration || 3);
+              if (oSeqEnd <= originalSeqEnd + 0.01 && newSeqStart < oSeqEnd) {
+                 newSeqStart = oSeqEnd;
               }
            }
-           if (newStart >= originalEnd - 0.3) {
-              newStart = originalEnd - 0.3;
+           if (newSeqStart >= originalSeqEnd - 0.3) {
+              newSeqStart = originalSeqEnd - 0.3;
            }
-           const newDuration = originalEnd - newStart;
-           ov.timestamp = parseFloat(newStart.toFixed(2));
+           const newDuration = originalSeqEnd - newSeqStart;
+           ov.seqTimestamp = parseFloat(newSeqStart.toFixed(2));
+           ov.timestamp = parseFloat((this.isAnyRippleActive() ? this.getRawTimeFromVisTime(newSeqStart) : newSeqStart).toFixed(2));
            ov.duration = parseFloat(newDuration.toFixed(2));
            
            if (this.inspectorData && this.inspectorData.id === ovId) {
               this.inspectorData.timestamp = ov.timestamp;
+              this.inspectorData.seqTimestamp = ov.seqTimestamp;
               this.inspectorData.duration = ov.duration;
            }
         } else if (this.resizeEdge === 'right') {
-           let newEnd = this.dragOverlayOriginalStart + Math.max(0.3, this.dragOverlayOriginalDuration + deltaSec);
+           const curSeqStart = this.getOverlaySeqStart(ov);
+           let newSeqEnd = curSeqStart + Math.max(0.3, this.dragOverlayOriginalDuration + deltaSec);
            // Sağ taraftaki komşu katmanın üzerine taşmasını engelle
            for (const other of otherOnTrack) {
-              if (other.timestamp >= ov.timestamp - 0.01 && newEnd > other.timestamp) {
-                 newEnd = other.timestamp;
+              const oSeqStart = this.getOverlaySeqStart(other);
+              if (oSeqStart >= curSeqStart - 0.01 && newSeqEnd > oSeqStart) {
+                 newSeqEnd = oSeqStart;
               }
            }
-           const newDuration = Math.max(0.3, newEnd - ov.timestamp);
+           const newDuration = Math.max(0.3, newSeqEnd - curSeqStart);
+           ov.seqTimestamp = parseFloat(curSeqStart.toFixed(2));
            ov.duration = parseFloat(newDuration.toFixed(2));
            
            if (this.inspectorData && this.inspectorData.id === ovId) {
@@ -8816,15 +9597,16 @@ export class EditorComponent implements OnInit, OnDestroy {
            }
         }
 
-        const endSec = parseFloat((ov.timestamp + ov.duration).toFixed(2));
-        const span = this.getTimelineSpanStyleForRawRange(ov.timestamp, ov.duration);
+        const dispSeqStart = this.getOverlaySeqStart(ov);
+        const endSeqSec = parseFloat((dispSeqStart + ov.duration).toFixed(2));
+        const span = this.getTimelineSpanStyleForSeqRange(dispSeqStart, ov.duration);
         this.timelineGhostPreview.set({
            kind: 'overlay',
            trackId: trackNum,
            leftPercent: span.leftPercent,
            widthPercent: span.widthPercent,
            label: `${ov.duration.toFixed(1)}sn`,
-           timeLabel: `${ov.timestamp.toFixed(1)}s - ${endSec.toFixed(1)}s`,
+           timeLabel: `${dispSeqStart.toFixed(1)}s - ${endSeqSec.toFixed(1)}s`,
            snapped: false
         });
         this.edl.update(e => e ? { ...e, overlays: [...overlays] } : null);
@@ -9082,8 +9864,9 @@ export class EditorComponent implements OnInit, OnDestroy {
     }, 280);
   }
 
-  addAssetAudioToSfxTrack(asset: ProjectAssetDto): void {
+  addAssetAudioToSfxTrack(asset: ProjectAssetDto, customDuration?: number): void {
     const start = parseFloat(this.currentTime().toFixed(2));
+    const dur = Math.max(0.5, customDuration || this.assetDurationMap.get(asset.id) || 2.5);
     const newClip: EdlSfxClip = {
       id: `sfx_asset_${Date.now()}`,
       name: asset.dosyaAdi || 'Özel Ses',
@@ -9092,7 +9875,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       presetId: 'whoosh-fast',
       sourceUrl: asset.url,
       start,
-      duration: 2.5,
+      duration: dur,
       volume: 0.9,
       action: 'add'
     };
@@ -9390,32 +10173,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
-  appendAssetVideoToMainTrack(asset: ProjectAssetDto): void {
-    const list = this.buildCurrentVideoClipsSnapshot();
-    const lastEnd = list.reduce((maxE, c) => Math.max(maxE, c.end), this.totalDuration() || 10);
-    const clipDuration = 6.0;
-    const newClip: VideoClipItem = {
-      id: `vclip_${Date.now()}`,
-      title: asset.dosyaAdi || 'Ek Video Klip',
-      label: asset.dosyaAdi || '🎬 Ek Video Klip',
-      sourceUrl: asset.url,
-      start: 0,
-      end: clipDuration,
-      duration: clipDuration,
-      order: list.length,
-      isCut: false,
-      speed: 1.0
-    };
-    const updatedList = [...list, newClip];
-    this.totalDuration.set(lastEnd + clipDuration);
-
-    const patch: EdlPatchDto = {
-      videoClips: updatedList,
-      settings: { videoClips: updatedList }
-    };
-    this.applyOptimisticPatch(patch);
-    this.edlService.patchEdl(this.projectId, patch).subscribe();
-    this.selectedClipIds.set([newClip.id]);
+  appendAssetVideoToMainTrack(asset: ProjectAssetDto, customDuration?: number): void {
+    // CapCut / Premiere Pro Mimarisi: Ek videolar projenin en sonuna eklenmek yerine
+    // aktif imleç (Playhead) konumuna Tam Ekran B-Roll (serbest taşınabilir / boyutlandırılabilir) katmanı olarak eklenir.
+    this.addAssetOverlay(asset, customDuration, 'broll');
   }
 
   private formatVttTimestamp(seconds: number): string {
