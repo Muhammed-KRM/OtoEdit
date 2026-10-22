@@ -948,7 +948,7 @@ export interface ContextMenuState {
                 <!-- 1B. Normal & Photoshop Stil Metin Kaplaması (Gradient, Çift Kontur, Neon Glow, Pill/Marker, Typewriter) -->
                 <span 
                   *ngIf="ov.type === 'text' && (!ov.curveBend || (ov.curveBend >= -1 && ov.curveBend <= 1))" 
-                  class="font-bold whitespace-normal break-words block transition-all"
+                  class="font-bold whitespace-pre-line break-words inline-block transition-all"
                   [ngStyle]="getTextOverlayStyle(ov)">
                   {{ getRenderedOverlayText(ov) }}
                 </span>
@@ -2919,7 +2919,7 @@ export interface ContextMenuState {
                   (click)="$event.stopPropagation(); previewSfxClip(sfx)"
                   [ngStyle]="getSfxClipStyle(sfx)"
                   class="sfx-clip absolute top-1 bottom-1 rounded-md bg-gradient-to-r from-amber-600/85 to-orange-600/85 border border-amber-300/70 px-0 box-border flex items-center justify-between text-[10px] font-bold text-white shadow z-20 cursor-grab active:cursor-grabbing group overflow-hidden min-w-[1px]"
-                  [title]="(sfx.name || sfx.title || 'SFX') + ' (' + sfx.start.toFixed(1) + 'sn, ' + (sfx.duration || 1).toFixed(1) + 'sn) — Sürükleyerek taşı veya dinlemek için tıkla'">
+                  [title]="(sfx.name || sfx.title || 'SFX') + ' (' + getVisTimeFromRawTime(sfx.start).toFixed(1) + 'sn, ' + (sfx.duration || 1).toFixed(1) + 'sn) — Sürükleyerek taşı veya dinlemek için tıkla'">
                   <div class="flex items-center gap-1 truncate px-1.5 w-full pointer-events-none">
                     <span class="shrink-0">🔊</span>
                     <span class="truncate">{{ sfx.name || sfx.title || 'SFX' }}</span>
@@ -4277,7 +4277,14 @@ export class EditorComponent implements OnInit, OnDestroy {
   });
 
   readonly sfxClips = computed<EdlSfxClip[]>(() => {
-    return this.activeEdl()?.sfxClips || [];
+    const rawList = this.activeEdl()?.sfxClips || [];
+    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
+      return rawList;
+    }
+    return rawList.filter(sfx => {
+      const range = this.getVisibleRangeFromRawRange(Number(sfx.start) || 0, Number(sfx.duration) || 1.0);
+      return range.visible;
+    });
   });
 
   readonly transitions = computed<EdlTransition[]>(() => {
@@ -4338,7 +4345,8 @@ export class EditorComponent implements OnInit, OnDestroy {
     return overlays.filter(ov => {
       const trackId = Number(ov.trackId) || 1;
       if (hidden.has(trackId)) return false;
-      const dur = Math.max(0.2, Number(ov.duration) || 3);
+      if (!this.isOverlayVisibleInTimeline(ov)) return false;
+      const dur = this.getOverlaySeqDuration(ov);
       const startSeq = this.getOverlaySeqStart(ov);
       return playheadSeq >= startSeq - 0.02 && playheadSeq <= (startSeq + dur + 0.02);
     });
@@ -4730,7 +4738,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         const isCut = Boolean(vc.isCut) || !!matchedCut;
         const reason = (matchedCut?.reason || vc.cutReason || '').toLowerCase();
         const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
-        const isManual = isCut && reason.includes('manuel');
+        const isManual = isCut && (reason.includes('manuel') || reason.includes('manual') || reason.includes('kullanıcı'));
 
         let isVisibleClip = true;
         if (isCut) {
@@ -4796,7 +4804,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         const isCut = !!cut;
         const reason = (cut?.reason || '').toLowerCase();
         const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
-        const isManual = isCut && reason.includes('manuel');
+        const isManual = isCut && (reason.includes('manuel') || reason.includes('manual') || reason.includes('kullanıcı'));
 
         let isVisibleClip = true;
         if (isCut) {
@@ -4880,7 +4888,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       const isCut = !!cut;
       const reason = (cut?.reason || '').toLowerCase();
       const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
-      const isManual = isCut && reason.includes('manuel');
+      const isManual = isCut && (reason.includes('manuel') || reason.includes('manual') || reason.includes('kullanıcı'));
 
       let isVisible = true;
       if (isCut) {
@@ -5954,7 +5962,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   isManualClip(clip: any): boolean {
     if (!clip || !clip.isCut || !clip.cutObj) return false;
     const r = (clip.cutObj.reason || '').toLowerCase();
-    return r.includes('manuel');
+    return r.includes('manuel') || r.includes('manual') || r.includes('kullanıcı');
   }
 
   getClipTooltip(clip: any): string {
@@ -6354,18 +6362,11 @@ export class EditorComponent implements OnInit, OnDestroy {
           res.edl.suggestions = this.studio.generateProactiveSuggestions(res.edl);
         }
         this.edl.set(res.edl);
-        // Tüm katmanların Canonical Sequence Time (seqTimestamp) değerlerini gerçek totalDuration ve kesim haritasına göre senkronize et
-        const hasCuts = (res.edl.cuts?.length || 0) > 0;
+        // Tüm katmanların Canonical Sequence Time (seqTimestamp) değerlerini gerçek totalDuration ve kesim haritasına göre her zaman senkronize et
         if (res.edl.overlays && res.edl.overlays.length > 0) {
           for (const ov of res.edl.overlays) {
             const rawTs = Number(ov.timestamp) || 0;
-            const currentSeq = ov.seqTimestamp !== undefined && ov.seqTimestamp !== null ? Number(ov.seqTimestamp) : NaN;
-            const isClampedAtDefault100 = Math.abs(currentSeq - 100) < 0.05 && rawTs > 100.5;
-            if (!hasCuts) {
-              ov.seqTimestamp = parseFloat(rawTs.toFixed(2));
-            } else if (isNaN(currentSeq) || isClampedAtDefault100) {
-              ov.seqTimestamp = parseFloat(this.getVisTimeFromRawTime(rawTs).toFixed(2));
-            }
+            ov.seqTimestamp = parseFloat(this.getVisTimeFromRawTime(rawTs).toFixed(2));
           }
         }
         if (res.edl.settings?.subtitlesEnabled !== undefined) {
@@ -6608,6 +6609,8 @@ export class EditorComponent implements OnInit, OnDestroy {
       reason: 'Manuel kesim',
       action: 'add'
     };
+    this.applyOptimisticPatch({ cuts: [newCut as any] });
+    this.selectedClipIds.set([]);
     this.edlService.patchEdl(this.projectId, {
       cuts: [newCut as any]
     }).subscribe(() => {
@@ -6618,8 +6621,10 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   restoreClip(clip: any): void {
     if (clip.cutObj?.id) {
+      const removeAction = { id: clip.cutObj.id, start: 0, end: 0, action: 'remove' } as any;
+      this.applyOptimisticPatch({ cuts: [removeAction] });
       this.edlService.patchEdl(this.projectId, {
-        cuts: [{ id: clip.cutObj.id, start: 0, end: 0, action: 'remove' } as any]
+        cuts: [removeAction]
       }).subscribe(() => {
         this.loadEdl();
         this.closeContextMenu();
@@ -7187,22 +7192,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       bgm.volume = bgm.volume + (targetVol - bgm.volume) * 0.35;
     }
 
-    // 2. Canlı SFX Tetikleme (A2 SFX Kanalı)
-    if (!video.paused) {
-      const sfxList = this.sfxClips();
-      for (const sfx of sfxList) {
-        if (t >= sfx.start && t <= sfx.start + 0.18) {
-          if (!this.playedSfxIdsInPass.has(sfx.id)) {
-            this.playedSfxIdsInPass.add(sfx.id);
-            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.22, sfx.sourceUrl);
-          }
-        } else if (t < sfx.start - 0.1 || t > sfx.start + (sfx.duration || 1.0)) {
-          this.playedSfxIdsInPass.delete(sfx.id);
-        }
-      }
-    }
-
-    // 3. Kesintisiz Bölme Sınırlarındaki (Continuous Split Boundaries) Sahne Geçişlerini Tetikle
+    // 2. Kesintisiz Bölme Sınırlarındaki (Continuous Split Boundaries) Sahne Geçişlerini Tetikle
     if (!video.paused && !this.liveTransitionPreview()) {
       const nowMs = performance.now();
       for (const tr of this.transitions()) {
@@ -7218,7 +7208,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       }
     }
 
-    // 4. Klip Hızı (0.5x - 2.0x) ve Kesilmiş Klipleri Atlama + Çift Katmanlı (A->B) Geçiş Efekti Oynatma
+    // 3. Klip Hızı (0.5x - 2.0x) ve Kesilmiş Klipleri Atlama + Çift Katmanlı (A->B) Geçiş Efekti Oynatma
     const allClips = this.clips();
     const currentClip = allClips.find(c => t >= c.start && t < c.end);
     if (currentClip) {
@@ -7265,6 +7255,22 @@ export class EditorComponent implements OnInit, OnDestroy {
 
       if (matchedTr) {
         this.triggerLiveTransitionPreview(matchedTr.type, matchedTr.duration || 0.5, true);
+      }
+      return;
+    }
+
+    // 4. Canlı SFX Tetikleme (A2 SFX Kanalı — Yalnızca görünür/kesilmemiş kliplerde tetiklenir!)
+    if (!video.paused) {
+      const sfxList = this.sfxClips();
+      for (const sfx of sfxList) {
+        if (t >= sfx.start && t <= sfx.start + 0.18) {
+          if (!this.playedSfxIdsInPass.has(sfx.id)) {
+            this.playedSfxIdsInPass.add(sfx.id);
+            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.22, sfx.sourceUrl);
+          }
+        } else if (t < sfx.start - 0.1 || t > sfx.start + (sfx.duration || 1.0)) {
+          this.playedSfxIdsInPass.delete(sfx.id);
+        }
       }
     }
   }
@@ -7354,23 +7360,107 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   /**
+   * Ham zaman aralığını [rawStart, rawStart + rawDuration] aktif görünür klipler üzerinden
+   * sekans (görünür timeline) uzayına projekte eder.
+   * Eğer öğe tamamen kesilmiş (cut) bir bölgedeyse `visible: false` döner.
+   * Kısmen kesilmişse süresini kesim kadar otomatik kırpar; kesimden sonraysa kesim süresi kadar sola kaydırır.
+   */
+  getVisibleRangeFromRawRange(
+    rawStart: number,
+    rawDuration: number
+  ): { visible: boolean; seqStart: number; seqDuration: number; effectiveRawStart: number } {
+    const safeStart = Math.max(0, Number(rawStart) || 0);
+    const safeDur = Math.max(0.05, Number(rawDuration) || 0.2);
+    const rawEnd = safeStart + safeDur;
+
+    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
+      return { visible: true, seqStart: safeStart, seqDuration: safeDur, effectiveRawStart: safeStart };
+    }
+
+    const visClips = this.visibleClipsSortedByStart();
+    if (!visClips.length) {
+      return { visible: true, seqStart: safeStart, seqDuration: safeDur, effectiveRawStart: safeStart };
+    }
+
+    let firstSeqStart: number | null = null;
+    let firstEffectiveRawStart = safeStart;
+    let totalVisibleDuration = 0;
+
+    for (const clip of visClips) {
+      const overlapStart = Math.max(safeStart, clip.start);
+      const overlapEnd = Math.min(rawEnd, clip.end);
+
+      if (overlapEnd > overlapStart + 0.005) {
+        if (firstSeqStart === null) {
+          firstSeqStart = clip.visStart + (overlapStart - clip.start);
+          firstEffectiveRawStart = overlapStart;
+        }
+        totalVisibleDuration += overlapEnd - overlapStart;
+      }
+    }
+
+    const lastClip = visClips[visClips.length - 1];
+    if (safeStart >= lastClip.end) {
+      return {
+        visible: true,
+        seqStart: lastClip.visEnd + (safeStart - lastClip.end),
+        seqDuration: safeDur,
+        effectiveRawStart: safeStart
+      };
+    }
+
+    if (firstSeqStart === null || totalVisibleDuration < 0.04) {
+      return {
+        visible: false,
+        seqStart: this.getVisTimeFromRawTime(safeStart),
+        seqDuration: 0,
+        effectiveRawStart: safeStart
+      };
+    }
+
+    return {
+      visible: true,
+      seqStart: Math.max(0, firstSeqStart),
+      seqDuration: Math.max(0.1, totalVisibleDuration),
+      effectiveRawStart: firstEffectiveRawStart
+    };
+  }
+
+  /**
    * Katmanın (OverlayItem) aktif zaman çizelgesindeki (Sequence Time) kesin başlangıç saniyesini döndürür.
+   * Her zaman `ov.timestamp` (ham kaynak zamanı) üzerinden aktif kesimleri hesaba katarak dinamik hesaplar.
    */
   getOverlaySeqStart(ov: OverlayItem | any): number {
     if (!ov) return 0;
-    const rawTs = Math.max(0, Number(ov.timestamp) || 0);
-    // Kesim (cut) yoksa veya Ripple kapalıysa Sequence Time ile Raw Time birebir aynıdır
+    const hasRawTs = ov.timestamp !== undefined && ov.timestamp !== null && !isNaN(Number(ov.timestamp));
+    const rawTs = hasRawTs ? Math.max(0, Number(ov.timestamp)) : Math.max(0, Number(ov.seqTimestamp) || 0);
     if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
       return rawTs;
     }
-    if (ov.seqTimestamp !== undefined && ov.seqTimestamp !== null && !isNaN(Number(ov.seqTimestamp))) {
-      const seqVal = Math.max(0, Number(ov.seqTimestamp));
-      // Eski 100sn varsayılan sınırına takılmış (clamped) değerleri otomatik onar
-      if (!(Math.abs(seqVal - 100) < 0.05 && rawTs > 100.5)) {
-        return seqVal;
-      }
+    const range = this.getVisibleRangeFromRawRange(rawTs, Number(ov.duration) || 3);
+    return Math.max(0, range.seqStart);
+  }
+
+  getOverlaySeqDuration(ov: OverlayItem | any): number {
+    if (!ov) return 0.2;
+    const rawDur = Math.max(0.2, Number(ov.duration) || 3);
+    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
+      return rawDur;
     }
-    return Math.max(0, this.getVisTimeFromRawTime(rawTs));
+    const hasRawTs = ov.timestamp !== undefined && ov.timestamp !== null && !isNaN(Number(ov.timestamp));
+    const rawTs = hasRawTs ? Math.max(0, Number(ov.timestamp)) : Math.max(0, Number(ov.seqTimestamp) || 0);
+    const range = this.getVisibleRangeFromRawRange(rawTs, rawDur);
+    return range.visible ? range.seqDuration : 0;
+  }
+
+  isOverlayVisibleInTimeline(ov: OverlayItem | any): boolean {
+    if (!ov) return false;
+    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
+      return true;
+    }
+    const hasRawTs = ov.timestamp !== undefined && ov.timestamp !== null && !isNaN(Number(ov.timestamp));
+    const rawTs = hasRawTs ? Math.max(0, Number(ov.timestamp)) : Math.max(0, Number(ov.seqTimestamp) || 0);
+    return this.getVisibleRangeFromRawRange(rawTs, Number(ov.duration) || 3).visible;
   }
 
   getTimeAtClientX(clientX: number): number {
@@ -7920,9 +8010,10 @@ export class EditorComponent implements OnInit, OnDestroy {
      }
 
      const startVis = this.getOverlaySeqStart(ov);
+     const durVis = this.getOverlaySeqDuration(ov);
      const visDur = Math.max(0.1, this.visibleDuration());
      const leftPct = Math.max(0, Math.min(99.8, (startVis / visDur) * 100));
-     const widthPct = Math.max(0.02, Math.min(100 - leftPct, (ov.duration / visDur) * 100));
+     const widthPct = Math.max(0.02, Math.min(100 - leftPct, (durVis / visDur) * 100));
      
      return {
         left: `${leftPct}%`,
@@ -8419,20 +8510,93 @@ export class EditorComponent implements OnInit, OnDestroy {
     return `M 20,90 Q 250,${ctrlY.toFixed(1)} 480,90`;
   }
 
-  getRenderedOverlayText(ov: OverlayItem): string {
+  private _textMeasureCtx: CanvasRenderingContext2D | null = null;
+
+  private measureOverlayTextPx(text: string, fontSpec: string, letterSpacingPx: number = 0): number {
+    if (!text) return 0;
+    if (!this._textMeasureCtx && typeof document !== 'undefined') {
+      const canvas = document.createElement('canvas');
+      this._textMeasureCtx = canvas.getContext('2d');
+    }
+    if (!this._textMeasureCtx) {
+      return text.length * 11.5;
+    }
+    this._textMeasureCtx.font = fontSpec;
+    const baseWidth = this._textMeasureCtx.measureText(text).width;
+    const extraSpacing = Math.max(0, text.length - 1) * (letterSpacingPx || 0);
+    return baseWidth + extraSpacing;
+  }
+
+  /**
+   * Metin tek satırda yan koridor sınırını (maxWidthCqi) aşıyorsa, kelimeleri
+   * en uzun satırın piksel genişliğini minimize edecek şekilde (\n ile) 2 dengeli satıra böler.
+   * Böylece CSS `white-space: pre-line` + `width: max-content` ile arka plan kutusu
+   * 30cqi'ye yayılmak yerine en uzun satırı sıfır fazla boşlukla (0.58em padding) sarar.
+   */
+  getTightWrappedFullText(ov: OverlayItem): string {
     const raw = ov.allCaps ? (ov.content || '').toLocaleUpperCase('tr-TR') : (ov.content || '');
     if (!raw) return '';
-    if (ov.animation !== 'typewriter') return raw;
+    if (raw.includes('\n')) return raw;
+
+    const words = raw.trim().split(/\s+/);
+    if (words.length <= 1) return raw;
+
+    const scale = ov.scale || 1;
+    const rawFontSize = ov.fontSize || 48;
+    const fSize = Math.max(14, (rawFontSize * 0.46) * scale);
+    const fontWeight = ov.fontWeight || '900';
+    const fontFamily = (ov.font || 'Inter').split(',')[0].trim();
+    const fontSpec = `${fontWeight} ${fSize.toFixed(1)}px ${fontFamily}, sans-serif`;
+    const letterSpacing = ov.letterSpacing || 0;
+
+    const posX = ov.positionX ?? 50;
+    const isSideColumn = posX <= 34 || posX >= 66;
+    const maxCqi = isSideColumn ? ((ov as any).maxWidthCqi || 30) : 64;
+
+    const refCanvasWidthPx = 1920 * 0.46;
+    const maxBoxWidthPx = refCanvasWidthPx * (maxCqi / 100);
+    const isBox = ov.boxStyle && ov.boxStyle !== 'none';
+    const padXPx = isBox ? (fSize * 0.58) : 4;
+    const maxLineTextPx = Math.max(fSize * 4, maxBoxWidthPx - (padXPx * 2));
+
+    const singleLineWidth = this.measureOverlayTextPx(raw, fontSpec, letterSpacing);
+    if (singleLineWidth <= maxLineTextPx) {
+      return raw;
+    }
+
+    let bestSplitIdx = 1;
+    let bestMaxLineWidth = Number.POSITIVE_INFINITY;
+    for (let i = 1; i < words.length; i++) {
+      const line1 = words.slice(0, i).join(' ');
+      const line2 = words.slice(i).join(' ');
+      const w1 = this.measureOverlayTextPx(line1, fontSpec, letterSpacing);
+      const w2 = this.measureOverlayTextPx(line2, fontSpec, letterSpacing);
+      const currentMax = Math.max(w1, w2);
+      if (currentMax < bestMaxLineWidth) {
+        bestMaxLineWidth = currentMax;
+        bestSplitIdx = i;
+      }
+    }
+
+    const bestLine1 = words.slice(0, bestSplitIdx).join(' ');
+    const bestLine2 = words.slice(bestSplitIdx).join(' ');
+    return `${bestLine1}\n${bestLine2}`;
+  }
+
+  getRenderedOverlayText(ov: OverlayItem): string {
+    const wrappedFull = this.getTightWrappedFullText(ov);
+    if (!wrappedFull) return '';
+    if (ov.animation !== 'typewriter') return wrappedFull;
 
     const playheadSeq = this.getPlayheadSeqTime();
     const startSeq = this.getOverlaySeqStart(ov);
     const elapsed = Math.max(0, playheadSeq - startSeq);
-    const typeDur = Math.min(0.55, Math.max(0.28, raw.length * 0.032));
-    if (elapsed >= typeDur) return raw;
+    const typeDur = Math.min(0.55, Math.max(0.28, wrappedFull.length * 0.032));
+    if (elapsed >= typeDur) return wrappedFull;
 
     const progress = Math.max(0.08, Math.min(1, elapsed / typeDur));
-    const charCount = Math.max(1, Math.ceil(raw.length * progress));
-    return raw.slice(0, charCount);
+    const charCount = Math.max(1, Math.ceil(wrappedFull.length * progress));
+    return wrappedFull.slice(0, charCount);
   }
 
   getTextOverlayStyle(ov: OverlayItem): any {
@@ -8473,10 +8637,13 @@ export class EditorComponent implements OnInit, OnDestroy {
       'text-align': ov.textAlign || 'center',
       'text-transform': ov.allCaps ? 'uppercase' : 'none',
       'letter-spacing.px': ov.letterSpacing || 0,
+      'width': 'max-content',
       'max-width': isSideColumn ? sideMaxWidth : '64cqi',
-      'white-space': 'normal',
-      'word-break': 'break-word',
-      'text-wrap': 'balance',
+      'white-space': 'pre-line',
+      'word-break': 'normal',
+      'overflow-wrap': 'break-word',
+      'text-wrap': 'wrap',
+      'box-sizing': 'border-box',
       'paint-order': 'stroke fill',
       '-webkit-text-stroke': ov.strokeWidth ? `${(ov.strokeWidth * 0.45).toFixed(1)}px ${ov.strokeColor || '#000'}` : 'none',
       'text-shadow': shadows.length > 0 ? shadows.join(', ') : 'none'
@@ -8494,11 +8661,13 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (isBox) {
       style['background-color'] = ov.boxBgColor || '#1E293B';
       style['padding'] = ov.boxStyle === 'highlight-marker'
-        ? '4px 14px'
-        : `${(ov.boxPadding || 14) * 0.45}px ${(ov.boxPadding || 14) * 0.9}px`;
+        ? '0.18em 0.58em'
+        : (ov.boxPadding && ov.boxPadding !== 14
+            ? `${(ov.boxPadding * 0.42).toFixed(1)}px ${(ov.boxPadding * 0.82).toFixed(1)}px`
+            : '0.22em 0.58em');
       style['border-radius'] = ov.boxStyle === 'pill'
         ? '9999px'
-        : (ov.boxStyle === 'rounded' ? `${ov.borderRadius || 16}px` : '4px');
+        : (ov.boxStyle === 'rounded' ? `${ov.borderRadius || 12}px` : '6px');
       if (ov.boxStyle === 'highlight-marker') {
         style['transform'] = 'skewX(-8deg)';
       }
@@ -8680,18 +8849,18 @@ export class EditorComponent implements OnInit, OnDestroy {
     const totalDur = Math.max(0.5, this.totalDuration());
     const start = sfx.start || 0;
     const dur = Math.max(0.2, sfx.duration || 1.0);
-    if (!this.isAnyRippleActive()) {
+    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
       return {
         left: `${(start / totalDur) * 100}%`,
         width: `${Math.max(0.02, (dur / totalDur) * 100)}%`
       };
     }
-    const startVis = this.getVisTimeFromRawTime(start);
+    const range = this.getVisibleRangeFromRawRange(start, dur);
     const visDur = Math.max(0.1, this.visibleDuration());
-    const leftPct = Math.max(0, Math.min(99.8, (startVis / visDur) * 100));
+    const leftPct = Math.max(0, Math.min(99.8, (range.seqStart / visDur) * 100));
     return {
       left: `${leftPct}%`,
-      width: `${Math.max(0.02, Math.min(100 - leftPct, (dur / visDur) * 100))}%`
+      width: `${Math.max(0.02, Math.min(100 - leftPct, (range.seqDuration / visDur) * 100))}%`
     };
   }
 
@@ -9609,7 +9778,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   getOverlaysForTrack(trackNum: number): OverlayItem[] {
-    return this.overlaysByTrackMap().get(trackNum) || [];
+    const rawTrackItems = this.overlaysByTrackMap().get(trackNum) || [];
+    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
+      return rawTrackItems;
+    }
+    return rawTrackItems.filter(ov => this.isOverlayVisibleInTimeline(ov));
   }
 
   @HostListener('window:mousemove', ['$event'])

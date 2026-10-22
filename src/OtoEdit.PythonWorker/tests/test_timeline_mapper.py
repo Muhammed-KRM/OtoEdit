@@ -53,6 +53,31 @@ def test_remap_overlays_filters_cut_content():
     assert remapped[1]["content"] == "Başarılı Sahne 2"
 
 
+def test_remap_overlays_ignores_stale_seq_timestamp_on_cut():
+    # 10.0-13.0 sn arası 3 saniyelik manuel kesim yapıldı
+    keep_segments = [(0.0, 10.0), (13.0, 30.0)]
+    overlays = [
+        # LlmDirector / AutoDirector başlangıçta seqTimestamp: 15.0 yazmıştı
+        {"type": "text", "timestamp": 15.0, "seqTimestamp": 15.0, "duration": 4.0, "content": "SEBEPTEN ESERE"},
+        # Kesim bölgesinin içindeki katman (10.5 - 12.5) tamamen elenmeli
+        {"type": "image", "timestamp": 10.5, "seqTimestamp": 10.5, "duration": 2.0, "source": "cut_inside.png"},
+        # Kesim bölgesini kapsayan katman (9.0 - 15.0, toplam 6sn) -> 3sn kesilince süresi 3.0sn'ye düşmeli
+        {"type": "text", "timestamp": 9.0, "seqTimestamp": 9.0, "duration": 6.0, "content": "Kısmi Kesim"}
+    ]
+
+    remapped = TimelineMapper.remap_overlays(overlays, keep_segments)
+    assert len(remapped) == 2
+
+    # 15.0 sn -> 3 sn kesimden dolayı 12.0 sn'ye kaymalı!
+    assert remapped[0]["timestamp"] == 12.0
+    assert remapped[0]["seqTimestamp"] == 12.0
+    assert remapped[0]["duration"] == 4.0
+
+    # 9.0 - 15.0 -> 9.0'da başlar, görünür süresi (9..10 = 1s) + (13..15 = 2s) = 3.0s olur
+    assert remapped[1]["timestamp"] == 9.0
+    assert remapped[1]["duration"] == 3.0
+
+
 def test_remap_transcript_with_karaoke():
     keep_segments = [(0.0, 5.0), (10.0, 15.0)]
     test_transcript = {

@@ -664,11 +664,17 @@ class VideoRenderer:
                     continue
                 new_sfx = dict(sfx)
                 raw_s = float(sfx.get("start") if sfx.get("start") is not None else sfx.get("timestamp", 0.0))
-                seq_s = sfx.get("seqTimestamp")
-                if seq_s is not None:
-                    new_sfx["start"] = max(0.0, float(seq_s))
-                else:
-                    new_sfx["start"] = TimelineMapper.remap_timestamp_nearest(raw_s, keep_segments, actual_durations)
+                dur_s = float(sfx.get("duration") if sfx.get("duration") is not None else 0.8)
+                mapped_sfx_range = TimelineMapper.remap_range(
+                    raw_s, raw_s + max(0.05, dur_s), keep_segments, actual_durations
+                )
+                if mapped_sfx_range is None:
+                    logger.info(f"🔇 SFX kesim bölgesinde kaldığı için atlandı: start={raw_s:.2f}s")
+                    continue
+                m_start, m_end = mapped_sfx_range
+                new_sfx["start"] = round(max(0.0, m_start), 3)
+                new_sfx["timestamp"] = new_sfx["start"]
+                new_sfx["duration"] = round(max(0.1, m_end - m_start), 3)
                 mapped_sfx_clips.append(new_sfx)
             sfx_clips = mapped_sfx_clips
 

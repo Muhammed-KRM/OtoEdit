@@ -743,26 +743,6 @@ class PillowGraphicsEngine:
                     f_out.write(data)
             return output_path
 
-        display_text = text.upper() if all_caps else text
-        wrap_char_threshold = 12 if int(font_size) >= 52 else (14 if int(font_size) >= 44 else 16)
-        if "\n" not in display_text and len(display_text) > wrap_char_threshold and " " in display_text and abs(curve_bend) <= 1.0:
-            words_list = display_text.split()
-            wrapped_lines: List[str] = []
-            cur_line = ""
-            max_line_chars = max(wrap_char_threshold, int(len(display_text) * 0.56))
-            for w in words_list:
-                cand = f"{cur_line} {w}".strip() if cur_line else w
-                if cur_line and len(cand) > max_line_chars:
-                    wrapped_lines.append(cur_line)
-                    cur_line = w
-                else:
-                    cur_line = cand
-            if cur_line:
-                wrapped_lines.append(cur_line)
-            lines = wrapped_lines
-        else:
-            lines = display_text.split("\n")
-
         # 2x süper-örnekleme (Pürüzsüz kenarlar için)
         ss = 2
         ss_font_size = max(16, int(font_size) * ss)
@@ -776,6 +756,47 @@ class PillowGraphicsEngine:
         ss_shadow_blur = max(0, int(shadow_blur) * ss)
 
         font = cls.get_font(effective_font, ss_font_size)
+
+        display_text = text.upper() if all_caps else text
+        max_w_cqi = int(kwargs.get("maxWidthCqi") or kwargs.get("max_width_cqi") or 30)
+        max_line_px_ss = int(1920.0 * (max_w_cqi / 100.0) * 0.88 * ss)
+
+        def _measure_str_px(s_val: str, d_ctx: ImageDraw.ImageDraw) -> int:
+            if not s_val:
+                return 0
+            if ss_letter_spacing != 0:
+                total_w = 0
+                for ch_item in s_val:
+                    bb = d_ctx.textbbox((0, 0), ch_item, font=font, stroke_width=ss_total_stroke)
+                    total_w += (bb[2] - bb[0]) + ss_letter_spacing
+                return max(1, total_w)
+            bb = d_ctx.textbbox((0, 0), s_val, font=font, stroke_width=ss_total_stroke)
+            return max(1, bb[2] - bb[0])
+
+        probe_img = Image.new("RGBA", (1, 1), (0, 0, 0, 0))
+        probe_draw = ImageDraw.Draw(probe_img)
+
+        if "\n" not in display_text and " " in display_text and abs(curve_bend) <= 1.0:
+            full_px = _measure_str_px(display_text, probe_draw)
+            if full_px > max_line_px_ss:
+                words_list = display_text.split()
+                if len(words_list) >= 2:
+                    best_idx = 1
+                    best_max_w = float("inf")
+                    for split_i in range(1, len(words_list)):
+                        l1 = " ".join(words_list[:split_i])
+                        l2 = " ".join(words_list[split_i:])
+                        cur_max = max(_measure_str_px(l1, probe_draw), _measure_str_px(l2, probe_draw))
+                        if cur_max < best_max_w:
+                            best_max_w = cur_max
+                            best_idx = split_i
+                    lines = [" ".join(words_list[:best_idx]), " ".join(words_list[best_idx:])]
+                else:
+                    lines = [display_text]
+            else:
+                lines = [display_text]
+        else:
+            lines = display_text.split("\n")
 
         text_rgba = hex_to_rgba(text_color, default=(255, 255, 255, 255))
         stroke_rgba = hex_to_rgba(stroke_color, default=(0, 0, 0, 255)) if ss_stroke_width > 0 else (0, 0, 0, 0)
@@ -836,8 +857,8 @@ class PillowGraphicsEngine:
             is_marker = box_style == "highlight-marker" and bool(box_bg_color)
 
             if has_box or is_marker:
-                pad_x = int(ss_box_padding * 1.6)
-                pad_y = int(ss_box_padding * 1.0)
+                pad_x = int(round(ss_font_size * 0.58))
+                pad_y = int(round(ss_font_size * 0.22))
             else:
                 pad_x = ss_total_stroke + 12
                 pad_y = ss_total_stroke + 12
