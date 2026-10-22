@@ -262,20 +262,29 @@ export interface ContextMenuState {
               </div>
             </div>
 
-            <!-- FAZ 5 & FAZ B: 50+ Yerleşik Çıkartma, Hareketli Noto Emoji & 200.000+ Canlı Iconify Sticker Arama -->
+            <!-- FAZ 5 & FAZ B: GIPHY + Google Noto 881 Hareketli Emoji + 200.000+ Iconify Vektör Sticker Arama -->
             <div class="pt-2 border-t border-slate-800/80 space-y-2">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">✨ Çıkartma, Hareketli Emoji & İkon ({{ filteredStickers().length }})</span>
-                <span class="text-[9px] text-emerald-400 font-mono font-bold">200.000+ Online</span>
+                <span class="text-[10px] font-bold text-amber-400 uppercase tracking-wider">✨ GIF, Çıkartma & Hareketli Emoji ({{ filteredStickers().length }})</span>
+                <span class="text-[9px] text-emerald-400 font-mono font-bold">GIPHY • Noto • Iconify</span>
               </div>
 
-              <!-- 200.000+ Canlı Iconify Sticker & Vektör Arama Kutusu -->
+              <!-- Kaynak Seçici Sekmeler (GIPHY Sticker / GIPHY GIF / Noto 881 Emoji / Iconify) -->
+              <div class="grid grid-cols-5 gap-1 p-0.5 bg-dark-950 rounded-lg border border-slate-800 text-[8px] font-bold">
+                <button type="button" (click)="setStickerSource('all')" [ngClass]="selectedStickerSource() === 'all' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-white'" class="py-1 rounded cursor-pointer">Tümü</button>
+                <button type="button" (click)="setStickerSource('giphy_stickers')" [ngClass]="selectedStickerSource() === 'giphy_stickers' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-white'" class="py-1 rounded cursor-pointer" title="GIPHY Şeffaf Hareketli Stickerlar">🔥 Sticker</button>
+                <button type="button" (click)="setStickerSource('giphy_gifs')" [ngClass]="selectedStickerSource() === 'giphy_gifs' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-white'" class="py-1 rounded cursor-pointer" title="GIPHY Tepki GIF'leri">🎬 GIF</button>
+                <button type="button" (click)="setStickerSource('noto_animated')" [ngClass]="selectedStickerSource() === 'noto_animated' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-white'" class="py-1 rounded cursor-pointer" title="Google Noto 881 Hareketli Emoji">✨ Noto</button>
+                <button type="button" (click)="setStickerSource('iconify')" [ngClass]="selectedStickerSource() === 'iconify' ? 'bg-amber-400 text-slate-950' : 'text-slate-400 hover:text-white'" class="py-1 rounded cursor-pointer" title="200.000+ Vektör İkon">🎨 Vektör</button>
+              </div>
+
+              <!-- Canlı GIPHY + Noto + Iconify Arama Kutusu -->
               <div class="flex gap-1">
                 <input
                   type="text"
                   [ngModel]="stickerSearchQuery()"
                   (ngModelChange)="onStickerSearchInput($event)"
-                  placeholder="🔍 200.000+ çıkartma ara (fire, arrow, tiktok, star)..."
+                  placeholder="🔍 GIF & Çıkartma ara (ok işareti, abone ol, ateş, kalp, rofl)..."
                   class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white placeholder-slate-500 focus:border-amber-400 outline-none" />
                 <button
                   *ngIf="stickerSearchQuery()"
@@ -286,6 +295,12 @@ export interface ContextMenuState {
                 </button>
               </div>
 
+              <!-- CapCut Popüler Hızlı Arama Etiketleri -->
+              <div class="flex items-center gap-1 overflow-x-auto pb-0.5 text-[8px] no-scrollbar">
+                <span class="text-slate-500 shrink-0">Popüler:</span>
+                <button type="button" *ngFor="let tag of ['ok işareti', 'subscribe', 'ateş', 'kalp', 'loading', 'komik', 'alkış']" (click)="onStickerSearchInput(tag)" class="px-1.5 py-0.5 rounded bg-dark-800/80 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700/70 whitespace-nowrap cursor-pointer">{{ tag }}</button>
+              </div>
+
               <!-- Kategori Çipleri -->
               <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
                 <button type="button" (click)="selectedStickerCategory.set('all')" [ngClass]="selectedStickerCategory() === 'all' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">Tümü ({{ studio.stickerLibrary.length }})</button>
@@ -293,12 +308,12 @@ export interface ContextMenuState {
                 <button type="button" (click)="selectedStickerCategory.set('emoji')" [ngClass]="selectedStickerCategory() === 'emoji' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">😀 3D Emoji</button>
                 <button type="button" (click)="selectedStickerCategory.set('social')" [ngClass]="selectedStickerCategory() === 'social' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">📱 Sosyal</button>
                 <button type="button" (click)="selectedStickerCategory.set('badge')" [ngClass]="selectedStickerCategory() === 'badge' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🏷️ Rozet</button>
-                <button type="button" (click)="selectedStickerCategory.set('arrow')" [ngClass]="selectedStickerCategory() === 'arrow' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">➡️ Oklar</button>
+                <button type="button" (click)="selectedStickerCategory.set('arrow')" [ngClass]="selectedStickerCategory() === 'arrow' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">➡️ Oklar & Daire</button>
                 <button type="button" (click)="selectedStickerCategory.set('fx')" [ngClass]="selectedStickerCategory() === 'fx' ? 'bg-amber-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💥 Efekt</button>
               </div>
 
               <!-- Çıkartma & Emoji Izgarası -->
-              <div class="grid grid-cols-3 gap-1.5 max-h-48 overflow-y-auto pr-1">
+              <div class="grid grid-cols-3 gap-1.5 max-h-52 overflow-y-auto pr-1">
                 <button
                   type="button"
                   *ngFor="let stk of filteredStickers()"
@@ -306,7 +321,7 @@ export interface ContextMenuState {
                   class="p-2 rounded-lg bg-dark-900 border border-slate-800 hover:border-amber-400/70 hover:bg-dark-800 flex flex-col items-center justify-center gap-1 transition-all cursor-pointer group relative"
                   [title]="stk.name + ' Ekle'">
                   <span *ngIf="stk.isAnimated" class="absolute top-1 right-1 px-1 rounded bg-rose-500/80 text-[7px] font-bold text-white">GIF</span>
-                  <img [src]="stk.dataUrl" [alt]="stk.name" loading="lazy" class="h-7 object-contain group-hover:scale-110 transition-transform" />
+                  <img [src]="stk.dataUrl" [alt]="stk.name" loading="lazy" class="h-8 object-contain group-hover:scale-110 transition-transform" />
                   <span class="text-[8px] text-slate-300 truncate w-full text-center font-medium">{{ stk.name }}</span>
                 </button>
               </div>
@@ -327,17 +342,37 @@ export interface ContextMenuState {
               </div>
             </div>
 
-            <!-- Zengin B-Roll Stok Kütüphanesi -->
+            <!-- Zengin B-Roll Stok Kütüphanesi (Openverse + Wikimedia + Unsplash Canlı Arama) -->
             <div class="pt-2 border-t border-slate-800/80 space-y-2">
-              <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">B-Roll Stok Kütüphanesi</span>
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">🖼️ B-Roll & Stok Görsel Arama</span>
+                <span class="text-[9px] text-brand-cyan font-mono">Openverse • Wikimedia</span>
+              </div>
+
+              <!-- Canlı Stok Görsel Arama Kutusu -->
+              <div class="flex gap-1">
+                <input
+                  type="text"
+                  [ngModel]="stockSearchQuery()"
+                  (ngModelChange)="onStockSearchInput($event)"
+                  placeholder="🔍 Milyonlarca ücretsiz görsel ara (mahkeme, kitap, uzay)..."
+                  class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white placeholder-slate-500 focus:border-brand-cyan outline-none" />
+                <button
+                  *ngIf="stockSearchQuery()"
+                  type="button"
+                  (click)="onStockSearchInput('')"
+                  class="px-2 py-1 bg-dark-800 text-slate-400 hover:text-white rounded-lg text-[10px] cursor-pointer">
+                  ✕
+                </button>
+              </div>
               
               <!-- Kategori Seçici Çipler -->
               <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
                 <button 
                   type="button" 
                   *ngFor="let cat of stockCategories" 
-                  (click)="selectedStockCategory.set(cat.id)" 
-                  [ngClass]="selectedStockCategory() === cat.id ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-800 text-slate-400 hover:text-white'" 
+                  (click)="selectedStockCategory.set(cat.id); onStockSearchInput('')" 
+                  [ngClass]="selectedStockCategory() === cat.id && !stockSearchQuery() ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-800 text-slate-400 hover:text-white'" 
                   class="px-2 py-0.8 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer transition-colors">
                   {{ cat.name }}
                 </button>
@@ -346,7 +381,7 @@ export interface ContextMenuState {
               <!-- Görsel Izgarası -->
               <div class="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto pr-1">
                 <div *ngFor="let img of currentCategoryImages()" class="aspect-video bg-dark-800 border border-slate-700 rounded overflow-hidden relative group hover:border-brand-cyan">
-                  <img [src]="img.thumb" [alt]="img.title" class="w-full h-full object-cover" />
+                  <img [src]="img.thumb" [alt]="img.title" loading="lazy" class="w-full h-full object-cover" />
                   <div class="absolute inset-0 bg-dark-950/85 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col items-center justify-center gap-1 p-1">
                     <span class="text-[9px] text-white font-bold truncate max-w-full text-center">{{ img.title }}</span>
                     <button (click)="$event.stopPropagation(); addImageOverlayFromUrl(img.url, img.title)" class="px-2 py-0.5 bg-brand-cyan text-slate-950 text-[9px] rounded font-bold w-full cursor-pointer hover:bg-cyan-400">+ Katmana Ekle</button>
@@ -356,77 +391,128 @@ export interface ContextMenuState {
             </div>
           </div>
 
-          <!-- Sekme 1.5 (FAZ 3): Stüdyo Ses Efektleri (SFX) & Ses Mastering -->
-          <div *ngIf="activeTab() === 'sfx'" class="flex-1 p-3 overflow-y-auto space-y-3">
-            <!-- Stüdyo Ses Mastering (-14 LUFS & Smart Punch-In) -->
-            <div class="p-2.5 rounded-xl bg-gradient-to-br from-emerald-950/50 to-dark-900 border border-emerald-500/30 space-y-2">
-              <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">🎧 Stüdyo Ses & Kurgu Master</span>
-                <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">Pro</span>
-              </div>
-              <div class="flex items-center justify-between text-xs">
-                <div>
-                  <span class="font-semibold text-slate-200 block text-[11px]">-14 LUFS Ses Normalizasyonu</span>
-                  <span class="text-[9px] text-slate-400">YouTube / Reels yayın standardı</span>
+          <!-- Sekme 1.5 (FAZ 3): CapCut Stüdyo Ses Efektleri (100+ Yerleşik + Canlı Freesound/Openverse & Wikimedia CC0 Arama) -->
+          <div *ngIf="activeTab() === 'sfx'" class="flex-1 flex flex-col h-full overflow-hidden">
+            <div class="flex-1 p-3 overflow-y-auto space-y-3">
+              <!-- Stüdyo Ses Mastering (-14 LUFS & Smart Punch-In) -->
+              <div class="p-2.5 rounded-xl bg-gradient-to-br from-emerald-950/50 to-dark-900 border border-emerald-500/30 space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">🎧 Stüdyo Ses & Kurgu Master</span>
+                  <span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono">Freesound CC0 + Synth</span>
                 </div>
-                <input type="checkbox" [checked]="normalizeAudio()" (change)="toggleNormalizeAudio($any($event.target).checked)" class="rounded accent-emerald-400 cursor-pointer w-4 h-4" />
-              </div>
-            </div>
-
-            <!-- SFX Kategori Filtresi (76 Stüdyo SFX + Özel Ses Yükleme) -->
-            <div class="space-y-1.5">
-              <div class="flex items-center justify-between">
-                <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider">🔊 Ses Efektleri ({{ filteredSfxLibrary().length }} / {{ studio.sfxLibrary.length }})</span>
-                <div class="flex items-center gap-2">
-                  <button type="button" (click)="triggerAssetUpload()" class="text-[9px] text-amber-300 hover:underline cursor-pointer font-semibold">📤 Özel Ses Yükle</button>
-                  <button type="button" (click)="isBgmSelectorOpen.set(true)" class="text-[9px] text-violet-300 hover:underline cursor-pointer font-semibold">🎵 BGM</button>
+                <div class="flex items-center justify-between text-xs">
+                  <div>
+                    <span class="font-semibold text-slate-200 block text-[11px]">-14 LUFS Ses Normalizasyonu</span>
+                    <span class="text-[9px] text-slate-400">YouTube / Reels yayın standardı</span>
+                  </div>
+                  <input type="checkbox" [checked]="normalizeAudio()" (change)="toggleNormalizeAudio($any($event.target).checked)" class="rounded accent-emerald-400 cursor-pointer w-4 h-4" />
                 </div>
               </div>
-              <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
-                <button type="button" (click)="selectedSfxCategory.set('all')" [ngClass]="selectedSfxCategory() === 'all' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">Tümü ({{ studio.sfxLibrary.length }})</button>
-                <button type="button" (click)="selectedSfxCategory.set('whoosh')" [ngClass]="selectedSfxCategory() === 'whoosh' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💨 Geçiş</button>
-                <button type="button" (click)="selectedSfxCategory.set('pop')" [ngClass]="selectedSfxCategory() === 'pop' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🫧 Pop</button>
-                <button type="button" (click)="selectedSfxCategory.set('cinematic')" [ngClass]="selectedSfxCategory() === 'cinematic' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💣 Sinematik</button>
-                <button type="button" (click)="selectedSfxCategory.set('impact')" [ngClass]="selectedSfxCategory() === 'impact' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🥊 Darbe</button>
-                <button type="button" (click)="selectedSfxCategory.set('riser')" [ngClass]="selectedSfxCategory() === 'riser' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🚀 Riser</button>
-                <button type="button" (click)="selectedSfxCategory.set('ui')" [ngClass]="selectedSfxCategory() === 'ui' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🔔 Bildirim</button>
-                <button type="button" (click)="selectedSfxCategory.set('ambience')" [ngClass]="selectedSfxCategory() === 'ambience' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🌧️ Atmosfer</button>
-                <button type="button" (click)="selectedSfxCategory.set('musical')" [ngClass]="selectedSfxCategory() === 'musical' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🎸 Müzikal</button>
-                <button type="button" (click)="selectedSfxCategory.set('foley')" [ngClass]="selectedSfxCategory() === 'foley' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">👣 Foley</button>
-                <button type="button" (click)="selectedSfxCategory.set('funny')" [ngClass]="selectedSfxCategory() === 'funny' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💿 Mizah</button>
-              </div>
-            </div>
 
-            <!-- SFX Kartları -->
-            <div class="space-y-1.5">
-              <div
-                *ngFor="let sfx of filteredSfxLibrary()"
-                class="p-2 rounded-xl bg-dark-900 border border-slate-800 hover:border-emerald-500/50 flex items-center justify-between gap-2 transition-all group">
-                <div class="flex items-center gap-2 min-w-0">
-                  <button
-                    type="button"
-                    (click)="previewSfxItem(sfx)"
-                    class="w-7 h-7 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 flex items-center justify-center text-xs shrink-0 transition-colors cursor-pointer"
-                    title="Sesi Dinle">
-                    ▶
-                  </button>
-                  <div class="min-w-0">
-                    <div class="flex items-center gap-1.5">
-                      <span class="text-xs">{{ sfx.icon }}</span>
-                      <span class="text-[11px] font-bold text-slate-100 truncate">{{ sfx.name }}</span>
-                      <span class="text-[9px] font-mono text-emerald-400">{{ sfx.duration }}s</span>
-                    </div>
-                    <p class="text-[9px] text-slate-400 truncate">{{ sfx.description }}</p>
+              <!-- CapCut Stili Canlı Ses Efekti Arama Çubuğu -->
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider">🔊 Ses Efektleri ({{ filteredSfxLibrary().length }})</span>
+                  <div class="flex items-center gap-2">
+                    <button type="button" (click)="triggerAssetUpload()" class="text-[9px] text-amber-300 hover:underline cursor-pointer font-semibold">📤 Ses Yükle</button>
+                    <button type="button" (click)="isBgmSelectorOpen.set(true)" class="text-[9px] text-violet-300 hover:underline cursor-pointer font-semibold">🎵 BGM</button>
                   </div>
                 </div>
+
+                <!-- CapCut Arama Kutusu (Yerleşik 100+ SFX + Online Freesound CC0 HQ MP3 + Wikimedia) -->
+                <div class="flex gap-1">
+                  <input
+                    type="text"
+                    [ngModel]="sfxSearchQuery()"
+                    (ngModelChange)="onSfxSearchInput($event)"
+                    placeholder="🔍 Kullanıcılar şunları aratıyor: typing, whoosh, pop, gong..."
+                    class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-[10px] text-white placeholder-slate-500 focus:border-emerald-400 outline-none" />
+                  <button
+                    *ngIf="sfxSearchQuery()"
+                    type="button"
+                    (click)="onSfxSearchInput('')"
+                    class="px-2 py-1 bg-dark-800 text-slate-400 hover:text-white rounded-lg text-[10px] cursor-pointer">
+                    ✕
+                  </button>
+                </div>
+
+                <!-- Hızlı Arama Etiketleri -->
+                <div class="flex items-center gap-1 overflow-x-auto pb-0.5 text-[8px] no-scrollbar">
+                  <span class="text-slate-500 shrink-0">Trend:</span>
+                  <button type="button" *ngFor="let sTag of ['typing', 'whoosh', 'pop', 'ding', 'glitch', 'camera', 'laugh', 'thunder']" (click)="onSfxSearchInput(sTag)" class="px-1.5 py-0.5 rounded bg-dark-800/80 hover:bg-emerald-500/20 text-slate-300 hover:text-emerald-300 border border-slate-700/70 whitespace-nowrap cursor-pointer">{{ sTag }}</button>
+                </div>
+
+                <!-- CapCut Kategorileri -->
+                <div class="flex items-center gap-1 overflow-x-auto pb-1 text-[9px] no-scrollbar">
+                  <button type="button" (click)="selectedSfxCategory.set('all')" [ngClass]="selectedSfxCategory() === 'all' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🔥 Revaçta ({{ studio.sfxLibrary.length }})</button>
+                  <button type="button" (click)="selectedSfxCategory.set('whoosh')" [ngClass]="selectedSfxCategory() === 'whoosh' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💨 Geçiş & Whoosh</button>
+                  <button type="button" (click)="selectedSfxCategory.set('pop')" [ngClass]="selectedSfxCategory() === 'pop' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🫧 Pop & Vlog</button>
+                  <button type="button" (click)="selectedSfxCategory.set('foley')" [ngClass]="selectedSfxCategory() === 'foley' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">⌨️ ASMR & Makineler</button>
+                  <button type="button" (click)="selectedSfxCategory.set('funny')" [ngClass]="selectedSfxCategory() === 'funny' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">😂 Komik & Islık</button>
+                  <button type="button" (click)="selectedSfxCategory.set('ui')" [ngClass]="selectedSfxCategory() === 'ui' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🎮 Oyun & Bildirim</button>
+                  <button type="button" (click)="selectedSfxCategory.set('cinematic')" [ngClass]="selectedSfxCategory() === 'cinematic' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💣 Sinematik</button>
+                  <button type="button" (click)="selectedSfxCategory.set('impact')" [ngClass]="selectedSfxCategory() === 'impact' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🥊 Darbe</button>
+                  <button type="button" (click)="selectedSfxCategory.set('riser')" [ngClass]="selectedSfxCategory() === 'riser' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🚀 Riser</button>
+                  <button type="button" (click)="selectedSfxCategory.set('ambience')" [ngClass]="selectedSfxCategory() === 'ambience' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🌧️ Atmosfer</button>
+                  <button type="button" (click)="selectedSfxCategory.set('musical')" [ngClass]="selectedSfxCategory() === 'musical' ? 'bg-emerald-400 text-slate-950 font-bold' : 'bg-dark-800 text-slate-400'" class="px-2 py-0.5 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🎸 Müzikal</button>
+                </div>
+              </div>
+
+              <!-- SFX Kartları -->
+              <div class="space-y-1.5">
+                <div
+                  *ngFor="let sfx of filteredSfxLibrary()"
+                  [ngClass]="activePreviewSfx()?.id === sfx.id ? 'border-emerald-400 bg-emerald-950/25' : 'border-slate-800 bg-dark-900 hover:border-emerald-500/50'"
+                  class="p-2 rounded-xl border flex items-center justify-between gap-2 transition-all group">
+                  <div class="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      (click)="previewSfxItem(sfx)"
+                      class="w-7 h-7 rounded-lg bg-emerald-500/15 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 flex items-center justify-center text-xs shrink-0 transition-colors cursor-pointer"
+                      title="Sesi Dinle">
+                      ▶
+                    </button>
+                    <div class="min-w-0">
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-xs">{{ sfx.icon }}</span>
+                        <span class="text-[11px] font-bold text-slate-100 truncate">{{ sfx.name }}</span>
+                        <span class="text-[9px] font-mono text-emerald-400">{{ sfx.duration }}s</span>
+                        <span *ngIf="sfx.sourceUrl" class="text-[7px] px-1 rounded bg-sky-500/20 text-sky-300 font-mono">HQ MP3</span>
+                      </div>
+                      <p class="text-[9px] text-slate-400 truncate">{{ sfx.description }}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    (click)="addSfxToTimeline(sfx)"
+                    class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 border border-emerald-500/40 text-[10px] font-bold shrink-0 cursor-pointer transition-colors"
+                    title="İmlecin olduğu saniyeye (A2 Kanalına) ekle">
+                    +
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- CapCut Alt Ses Efekti Dinleme Çubuğu (Mini-Player Bar - Screenshot 1) -->
+            <div *ngIf="activePreviewSfx() as curSfx" class="p-2.5 bg-dark-950 border-t border-emerald-500/40 flex items-center justify-between gap-2 shrink-0">
+              <div class="flex items-center gap-2 min-w-0">
                 <button
                   type="button"
-                  (click)="addSfxToTimeline(sfx)"
-                  class="px-2.5 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500 text-emerald-300 hover:text-slate-950 border border-emerald-500/40 text-[10px] font-bold shrink-0 cursor-pointer transition-colors"
-                  title="İmlecin olduğu saniyeye (A2 Kanalına) ekle">
-                  + Ekle
+                  (click)="previewSfxItem(curSfx)"
+                  class="w-7 h-7 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center text-xs font-bold shrink-0 cursor-pointer">
+                  ▶
                 </button>
+                <div class="min-w-0">
+                  <div class="text-[10px] font-bold text-white truncate">{{ curSfx.name }}</div>
+                  <div class="text-[9px] font-mono text-emerald-400">00:00 / 00:0{{ curSfx.duration.toFixed(0) }} • {{ curSfx.description }}</div>
+                </div>
               </div>
+              <button
+                type="button"
+                (click)="addSfxToTimeline(curSfx)"
+                class="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 text-[10px] font-extrabold shrink-0 cursor-pointer">
+                + Ekle
+              </button>
             </div>
           </div>
 
@@ -1150,12 +1236,12 @@ export interface ContextMenuState {
                 <button type="button" (click)="textInspectorTab.set('transform')" [ngClass]="textInspectorTab() === 'transform' ? 'bg-brand-cyan text-slate-950 shadow' : 'text-slate-400 hover:text-white'" class="py-1.5 rounded-lg transition-all cursor-pointer">📐 3D & Yay</button>
               </div>
 
-              <!-- 1. T STİL SEKMESİ (35+ Font, Renk, Degrade, Kutu Rozet) -->
+              <!-- 1. T STİL SEKMESİ (125+ Google Font, Canlı 1600+ Font Yükleyici, Renk, Degrade, Kutu Rozet) -->
               <div *ngIf="textInspectorTab() === 'style'" class="space-y-3 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800">
-                <!-- Kategorili 35+ Google Font Seçici -->
-                <div class="space-y-1">
+                <!-- Kategorili 125+ Google Font Seçici + 1600+ Canlı Google Font Yükleme -->
+                <div class="space-y-1.5">
                   <div class="flex items-center justify-between">
-                    <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi (35+ Profesyonel Font)</label>
+                    <label class="text-[10px] text-slate-400 uppercase font-semibold">Yazı Tipi ({{ studio.fonts.length }}+ Google Font)</label>
                     <span class="text-[9px] text-brand-cyan font-mono">{{ inspectorData.font }}</span>
                   </div>
                   <select [(ngModel)]="inspectorData.font" (ngModelChange)="onInspectorChange()" class="w-full bg-dark-900 border border-slate-700 rounded-lg p-1.5 text-xs text-white focus:border-brand-cyan outline-none">
@@ -1165,6 +1251,20 @@ export interface ContextMenuState {
                       </option>
                     </optgroup>
                   </select>
+                  <!-- 1600+ Google Font Dinamik Yükleme Kutusu -->
+                  <div class="flex gap-1 pt-0.5">
+                    <input
+                      type="text"
+                      #customFontInput
+                      placeholder="+ Google Font adı yaz (ör: Kalnia, Nabla,Pixelify Sans)..."
+                      class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white placeholder-slate-500 focus:border-brand-cyan outline-none" />
+                    <button
+                      type="button"
+                      (click)="loadCustomGoogleFont(customFontInput.value); customFontInput.value = ''"
+                      class="px-2 py-1 bg-brand-cyan/20 hover:bg-brand-cyan text-brand-cyan hover:text-slate-950 border border-brand-cyan/40 rounded-lg text-[9px] font-bold cursor-pointer shrink-0">
+                      + Font Yükle
+                    </button>
+                  </div>
                 </div>
 
                 <!-- Boyut & Harf Aralığı -->
@@ -1254,15 +1354,30 @@ export interface ContextMenuState {
                 </div>
               </div>
 
-              <!-- 2. ✨ ŞABLON SEKMESİ (12 Viral CapCut / Premiere Hazır Şablonu) -->
-              <div *ngIf="textInspectorTab() === 'presets'" class="space-y-2 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800 max-h-[340px] overflow-y-auto">
+              <!-- 2. ✨ ŞABLON SEKMESİ (30 Viral CapCut / Premiere Hazır Şablonu + Arama) -->
+              <div *ngIf="textInspectorTab() === 'presets'" class="space-y-2 p-2.5 bg-dark-950/70 rounded-xl border border-slate-800 max-h-[380px] overflow-y-auto">
                 <div class="flex items-center justify-between">
-                  <span class="text-[10px] font-bold text-slate-300 uppercase">🔥 Viral Metin Şablonları (12 Preset)</span>
-                  <span class="text-[9px] text-slate-500">Tek Tıkla Uygula</span>
+                  <span class="text-[10px] font-bold text-slate-300 uppercase">🔥 CapCut Metin Şablonları ({{ filteredTextPresets().length }})</span>
+                  <span class="text-[9px] text-emerald-400 font-mono">30 Preset</span>
+                </div>
+                <div class="flex gap-1">
+                  <input
+                    type="text"
+                    [ngModel]="textPresetSearchQuery()"
+                    (ngModelChange)="textPresetSearchQuery.set($event)"
+                    placeholder="🔍 Şablon ara (subscribe, haber, neon, daktilo, konum)..."
+                    class="flex-1 bg-dark-900 border border-slate-700 rounded-lg px-2 py-1 text-[10px] text-white placeholder-slate-500 focus:border-brand-cyan outline-none" />
+                  <button
+                    *ngIf="textPresetSearchQuery()"
+                    type="button"
+                    (click)="textPresetSearchQuery.set('')"
+                    class="px-2 py-1 bg-dark-800 text-slate-400 hover:text-white rounded-lg text-[10px] cursor-pointer">
+                    ✕
+                  </button>
                 </div>
                 <div class="grid grid-cols-2 gap-1.5">
                   <button
-                    *ngFor="let preset of studio.textPresets"
+                    *ngFor="let preset of filteredTextPresets()"
                     type="button"
                     (click)="applyTextPreset(preset)"
                     class="p-2 rounded-xl border border-slate-800 hover:border-brand-cyan/60 text-left flex flex-col justify-between gap-1 transition-all cursor-pointer group overflow-hidden"
@@ -3627,15 +3742,36 @@ export interface ContextMenuState {
             <button type="button" (click)="showTransitionModal.set(false)" class="w-7 h-7 rounded-lg bg-dark-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center text-sm cursor-pointer">✕</button>
           </div>
 
-          <div class="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-            <!-- Kategori Filtresi (45 FFmpeg xfade Geçiş Efekti) -->
+          <div class="p-5 space-y-3.5 max-h-[72vh] overflow-y-auto">
+            <!-- CapCut Geçiş Arama Çubuğu (Screenshot 3a & 3b) -->
+            <div class="flex gap-1.5">
+              <input
+                type="text"
+                [ngModel]="transitionSearchQuery()"
+                (ngModelChange)="transitionSearchQuery.set($event)"
+                placeholder="🔍 67 geçiş efektinde ara (sol, güneş flaşı, geçmişe dönüş, morf, 3d, bulut)..."
+                class="flex-1 bg-dark-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:border-brand-cyan outline-none" />
+              <button
+                *ngIf="transitionSearchQuery()"
+                type="button"
+                (click)="transitionSearchQuery.set('')"
+                class="px-2.5 py-1 bg-dark-800 text-slate-400 hover:text-white rounded-xl text-xs cursor-pointer">
+                ✕
+              </button>
+            </div>
+
+            <!-- Kategori Filtresi (67 CapCut + GL Transitions + FFmpeg xfade Geçiş Efekti) -->
             <div class="flex items-center gap-1.5 overflow-x-auto pb-1 text-[10px] no-scrollbar">
               <button type="button" (click)="selectedTransitionCategory.set('all')" [ngClass]="selectedTransitionCategory() === 'all' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">Tümü ({{ studio.transitionLibrary.length }})</button>
-              <button type="button" (click)="selectedTransitionCategory.set('basic')" [ngClass]="selectedTransitionCategory() === 'basic' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">✨ Temel & Dissolve</button>
-              <button type="button" (click)="selectedTransitionCategory.set('slide')" [ngClass]="selectedTransitionCategory() === 'slide' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">💨 Kaydırma & Wipe</button>
-              <button type="button" (click)="selectedTransitionCategory.set('zoom')" [ngClass]="selectedTransitionCategory() === 'zoom' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🚀 Zoom & Squeeze</button>
-              <button type="button" (click)="selectedTransitionCategory.set('shape')" [ngClass]="selectedTransitionCategory() === 'shape' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">⭕ Geometrik & Maske</button>
-              <button type="button" (click)="selectedTransitionCategory.set('glitch')" [ngClass]="selectedTransitionCategory() === 'glitch' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">⚡ Glitch, Dilim & Rüzgar</button>
+              <button type="button" (click)="selectedTransitionCategory.set('trend')" [ngClass]="selectedTransitionCategory() === 'trend' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🔥 Trend</button>
+              <button type="button" (click)="selectedTransitionCategory.set('slide')" [ngClass]="selectedTransitionCategory() === 'slide' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🎥 Kamera & Slayt</button>
+              <button type="button" (click)="selectedTransitionCategory.set('light')" [ngClass]="selectedTransitionCategory() === 'light' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">☀️ Işık & Flaş</button>
+              <button type="button" (click)="selectedTransitionCategory.set('blur')" [ngClass]="selectedTransitionCategory() === 'blur' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🌫️ Bulanıklık</button>
+              <button type="button" (click)="selectedTransitionCategory.set('zoom')" [ngClass]="selectedTransitionCategory() === 'zoom' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🚀 Zoom & Morf</button>
+              <button type="button" (click)="selectedTransitionCategory.set('3d')" [ngClass]="selectedTransitionCategory() === '3d' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">🧊 3D & Shader</button>
+              <button type="button" (click)="selectedTransitionCategory.set('glitch')" [ngClass]="selectedTransitionCategory() === 'glitch' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">⚡ Glitch & Dijital</button>
+              <button type="button" (click)="selectedTransitionCategory.set('shape')" [ngClass]="selectedTransitionCategory() === 'shape' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">⭕ Maske & Perde</button>
+              <button type="button" (click)="selectedTransitionCategory.set('basic')" [ngClass]="selectedTransitionCategory() === 'basic' ? 'bg-brand-cyan text-slate-950 font-bold' : 'bg-dark-950 text-slate-400 hover:text-white'" class="px-2.5 py-1 rounded-full border border-slate-700 whitespace-nowrap cursor-pointer">✨ Temel</button>
             </div>
 
             <!-- Canlı Geometrik Geçiş Önizleme Sahnesi (Mini-Preview Stage) -->
@@ -4003,11 +4139,21 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly textInspectorTab = signal<'style' | 'presets' | 'effects' | 'anim' | 'transform'>('style');
   readonly imageInspectorTab = signal<'ai' | 'adjust' | 'transform' | 'anim'>('ai');
   readonly selectedSfxCategory = signal<string>('all');
+  readonly sfxSearchQuery = signal<string>('');
+  readonly onlineSfxResults = signal<SfxLibraryItem[]>([]);
+  readonly activePreviewSfx = signal<SfxLibraryItem | null>(null);
+  private sfxSearchDebounce: any = null;
   readonly selectedStickerCategory = signal<string>('all');
+  readonly selectedStickerSource = signal<'all' | 'giphy_stickers' | 'giphy_gifs' | 'noto_animated' | 'iconify'>('all');
   readonly stickerSearchQuery = signal<string>('');
   readonly onlineStickerResults = signal<StickerLibraryItem[]>([]);
   private stickerSearchDebounce: any = null;
   readonly selectedTransitionCategory = signal<string>('all');
+  readonly transitionSearchQuery = signal<string>('');
+  readonly textPresetSearchQuery = signal<string>('');
+  readonly stockSearchQuery = signal<string>('');
+  readonly onlineStockImages = signal<{ title: string; thumb: string; url: string; source?: string }[]>([]);
+  private stockSearchDebounce: any = null;
   readonly onDemandAiLoading = signal<boolean>(false);
   readonly onDemandAiStatus = signal<string>('');
   private draggedClipId: string | null = null;
@@ -4060,16 +4206,52 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly selectedTransitionDuration = signal<number>(0.45);
   readonly editingTransitionDuration = this.selectedTransitionDuration;
 
+  readonly filteredTextPresets = computed<TextTemplatePreset[]>(() => {
+    const q = this.textPresetSearchQuery().trim().toLowerCase();
+    if (!q) return this.studio.textPresets;
+    return this.studio.textPresets.filter(
+      p => p.name.toLowerCase().includes(q) || p.badge.toLowerCase().includes(q) || p.id.toLowerCase().includes(q)
+    );
+  });
+
   readonly filteredTransitions = computed<TransitionLibraryItem[]>(() => {
     const cat = this.selectedTransitionCategory();
-    if (cat === 'all') return this.studio.transitionLibrary;
-    return this.studio.transitionLibrary.filter(item => item.category === cat);
+    const q = this.transitionSearchQuery().trim().toLowerCase();
+    let list = this.studio.transitionLibrary;
+    if (cat !== 'all') {
+      list = list.filter(item => item.category === cat);
+    }
+    if (q) {
+      list = list.filter(
+        item =>
+          item.name.toLowerCase().includes(q) ||
+          item.type.toLowerCase().includes(q) ||
+          (item.description || '').toLowerCase().includes(q)
+      );
+    }
+    return list;
   });
 
   readonly filteredSfxLibrary = computed<SfxLibraryItem[]>(() => {
     const cat = this.selectedSfxCategory();
-    if (cat === 'all') return this.studio.sfxLibrary;
-    return this.studio.sfxLibrary.filter(item => item.category === cat);
+    const q = this.sfxSearchQuery().trim().toLowerCase();
+    let localList = this.studio.sfxLibrary;
+    if (cat !== 'all') {
+      localList = localList.filter(item => item.category === cat);
+    }
+    if (q) {
+      localList = localList.filter(
+        item =>
+          item.name.toLowerCase().includes(q) ||
+          item.id.toLowerCase().includes(q) ||
+          item.description.toLowerCase().includes(q)
+      );
+    }
+    const online = this.onlineSfxResults();
+    if (q.length >= 2 && online.length > 0) {
+      return [...localList, ...online];
+    }
+    return localList;
   });
 
   readonly filteredStickers = computed<StickerLibraryItem[]>(() => {
@@ -4253,7 +4435,14 @@ export class EditorComponent implements OnInit, OnDestroy {
       { title: 'Modern Ofis', thumb: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=300&q=80', url: 'https://images.unsplash.com/photo-1497366216548-37526070297c?w=1080&q=80' }
     ]
   };
-  readonly currentCategoryImages = computed(() => this.stockImagesLibrary[this.selectedStockCategory()] || []);
+  readonly currentCategoryImages = computed(() => {
+    const q = this.stockSearchQuery().trim();
+    const online = this.onlineStockImages();
+    if (q.length >= 2 && online.length > 0) {
+      return online;
+    }
+    return this.stockImagesLibrary[this.selectedStockCategory()] || [];
+  });
 
   // Toplu Kesim & Trim Aracı Durumu
   readonly showCutAdjustModal = signal<boolean>(false);
@@ -4909,23 +5098,28 @@ export class EditorComponent implements OnInit, OnDestroy {
         overlayStyle: { backgroundColor: `rgba(0,0,0,${(intensity * 0.96).toFixed(2)})` }
       };
     }
-    if (type === 'fadewhite') {
+    if (type === 'fadewhite' || type === 'solarflash' || type === 'luminancemelt') {
       return {
         badge,
         outgoingCanvasStyle: { opacity: progress < 0.5 ? (1 - progress * 2).toFixed(2) : '0' },
-        overlayStyle: { backgroundColor: `rgba(255,255,255,${(intensity * 0.96).toFixed(2)})` },
+        overlayStyle: {
+          backgroundColor:
+            type === 'solarflash'
+              ? `rgba(253,224,71,${(intensity * 0.92).toFixed(2)})`
+              : `rgba(255,255,255,${(intensity * 0.96).toFixed(2)})`
+        },
         videoFilterExtra: `brightness(${(1 + intensity * 1.4).toFixed(2)})`
       };
     }
-    if (type === 'fadegrays') {
+    if (type === 'fadegrays' || type === 'snowflash') {
       return {
         badge,
         outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2), filter: `grayscale(${(intensity * 100).toFixed(0)}%)` },
-        overlayStyle: { backgroundColor: `rgba(100,116,139,${(intensity * 0.35).toFixed(2)})` },
-        videoFilterExtra: `grayscale(${(intensity * 100).toFixed(0)}%) contrast(${(1 + intensity * 0.3).toFixed(2)})`
+        overlayStyle: { backgroundColor: `rgba(148,163,184,${(intensity * 0.35).toFixed(2)})` },
+        videoFilterExtra: `grayscale(${(intensity * 100).toFixed(0)}%) contrast(${(1 + intensity * 0.35).toFixed(2)})`
       };
     }
-    if (type === 'dissolve') {
+    if (type === 'dissolve' || type === 'clouddissolve') {
       return {
         badge,
         outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2) },
@@ -4943,7 +5137,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
 
     // 2. Doğrusal Wipe (Silinme) Geçişleri: Outgoing Canvas A silinirken altındaki Incoming Video B tam ekran görünür!
-    if (type === 'wipeleft') {
+    if (type === 'wipeleft' || type === 'pagecurl' || type === 'directionalwarp') {
       const cutPct = Math.round(progress * 100);
       return {
         badge,
@@ -4971,7 +5165,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         videoTranslateX: hasSnap ? 0 : -(1 - progress) * 8
       };
     }
-    if (type === 'wipeup') {
+    if (type === 'wipeup' || type === 'reelroll') {
       const cutPct = Math.round(progress * 100);
       return {
         badge,
@@ -4985,7 +5179,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         videoTranslateY: hasSnap ? 0 : (1 - progress) * 8
       };
     }
-    if (type === 'wipedown') {
+    if (type === 'wipedown' || type === 'windowblinds') {
       const cutPct = Math.round(progress * 100);
       return {
         badge,
@@ -5101,7 +5295,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
 
     // 5. Dairesel İris & Geometrik Kapı Geçişleri (circleopen, circleclose, circlecrop, rectcrop, vertopen, vertclose, horzopen, horzclose)
-    if (type === 'circleopen' || type === 'circlecrop' || type === 'circleclose') {
+    if (type === 'circleopen' || type === 'circlecrop' || type === 'circleclose' || type === 'irisglow' || type === 'burnportal' || type === 'pinwheel') {
       const radius = Math.round((1 - progress) * 75);
       return {
         badge,
@@ -5109,7 +5303,12 @@ export class EditorComponent implements OnInit, OnDestroy {
           clipPath: `circle(${radius}% at 50% 50%)`,
           opacity: hasSnap ? '1' : '0'
         },
-        overlayStyle: { boxShadow: `inset 0 0 ${Math.round(intensity * 40)}px rgba(6,182,212,0.45)` },
+        overlayStyle: {
+          boxShadow:
+            type === 'burnportal'
+              ? `inset 0 0 ${Math.round(intensity * 55)}px rgba(249,115,22,0.65)`
+              : `inset 0 0 ${Math.round(intensity * 40)}px rgba(6,182,212,0.45)`
+        },
         videoScale: hasSnap ? 1.0 : 1 + intensity * 0.12
       };
     }
@@ -5124,7 +5323,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         overlayStyle: { border: `${Math.round(intensity * 6)}px solid rgba(6,182,212,0.5)` }
       };
     }
-    if (type === 'vertopen' || type === 'vertclose') {
+    if (type === 'vertopen' || type === 'vertclose' || type === 'doorway') {
       const bar = Math.round(progress * 50);
       return {
         badge,
@@ -5148,7 +5347,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
 
     // 6. Zoom Crash & Squeeze (Sıkıştırma) Geçişleri
-    if (type === 'zoomin') {
+    if (type === 'zoomin' || type === 'zoommorph' || type === 'zoomsnap') {
       return {
         badge,
         outgoingCanvasStyle: {
@@ -5161,7 +5360,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         videoFilterExtra: `blur(${Math.round(intensity * 4)}px)`
       };
     }
-    if (type === 'squeezeh') {
+    if (type === 'squeezeh' || type === 'cubespin') {
       return {
         badge,
         outgoingCanvasStyle: {
@@ -5185,7 +5384,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
 
     // 7. Glitch, Pixelize, Blur, Slice & Wind Geçişleri
-    if (type === 'hblur') {
+    if (type === 'hblur' || type === 'vortexblur') {
       return {
         badge,
         outgoingCanvasStyle: {
@@ -5197,7 +5396,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         videoScale: 1 + intensity * 0.06
       };
     }
-    if (type === 'pixelize') {
+    if (type === 'pixelize' || type === 'hexagonalize') {
       return {
         badge,
         outgoingCanvasStyle: { opacity: (1 - progress).toFixed(2) },
@@ -5208,7 +5407,14 @@ export class EditorComponent implements OnInit, OnDestroy {
         videoFilterExtra: `contrast(${(1 + intensity * 1.4).toFixed(2)}) saturate(${(1 + intensity * 0.8).toFixed(2)}) blur(${Math.round(intensity * 3)}px)`
       };
     }
-    if (type === 'hlslice' || type === 'hrslice' || type === 'vuslice' || type === 'vdslice') {
+    if (
+      type === 'hlslice' ||
+      type === 'hrslice' ||
+      type === 'vuslice' ||
+      type === 'vdslice' ||
+      type === 'glitchmemories' ||
+      type === 'blurayscan'
+    ) {
       const isVert = type.startsWith('v');
       const deg = isVert ? 90 : 0;
       const jitter = (progress > 0.5 ? 1 : -1) * intensity * 12;
@@ -8424,11 +8630,12 @@ export class EditorComponent implements OnInit, OnDestroy {
   // --- FAZ 3: SES EFEKTLERİ (SFX), CANLI BGM & -14 LUFS METOTLARI ---
   previewSfxItem(sfx: SfxLibraryItem, event?: MouseEvent): void {
     event?.stopPropagation();
-    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85);
+    this.activePreviewSfx.set(sfx);
+    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85, sfx.sourceUrl);
   }
 
   previewSfxClip(sfx: EdlSfxClip): void {
-    this.studioEngine.playSynthesizedSfx(sfx.presetId || sfx.synthPreset || 'whoosh-fast', sfx.volume ?? 0.85);
+    this.studioEngine.playSynthesizedSfx(sfx.presetId || sfx.synthPreset || 'whoosh-fast', sfx.volume ?? 0.85, sfx.sourceUrl);
     if (this.videoRef?.nativeElement) {
       this.videoRef.nativeElement.currentTime = sfx.start;
       this.currentTime.set(sfx.start);
@@ -8437,7 +8644,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   addSfxToTimeline(sfx: SfxLibraryItem): void {
     const start = parseFloat(this.currentTime().toFixed(2));
-    const wavDataUri = this.studioEngine.generateSfxWavDataUri(sfx.id, sfx.duration);
+    const sourceUrl = sfx.sourceUrl || this.studioEngine.generateSfxWavDataUri(sfx.id, sfx.duration);
     const newClip: EdlSfxClip = {
       id: `sfx_${Date.now()}`,
       name: sfx.name,
@@ -8445,7 +8652,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       category: sfx.category,
       presetId: sfx.id,
       synthPreset: sfx.synthPreset || sfx.id,
-      sourceUrl: wavDataUri,
+      sourceUrl,
       start,
       duration: sfx.duration,
       volume: 0.85,
@@ -8453,7 +8660,8 @@ export class EditorComponent implements OnInit, OnDestroy {
     };
 
     // Anında sesli geri bildirim ver ve anında (0ms) yerel EDL'e ekle
-    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85);
+    this.activePreviewSfx.set(sfx);
+    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85, sfx.sourceUrl);
     const patch: EdlPatchDto = { sfxClips: [newClip] };
     this.applyOptimisticPatch(patch);
     this.edlService.patchEdl(this.projectId, patch).subscribe();
@@ -8543,31 +8751,31 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (type === 'fadeblack') {
       return { opacity: p.toFixed(2), filter: `brightness(${(1 - intensity * 0.9).toFixed(2)})` };
     }
-    if (type === 'fadewhite') {
+    if (type === 'fadewhite' || type === 'solarflash' || type === 'luminancemelt') {
       return { opacity: p.toFixed(2), filter: `brightness(${(1 + intensity * 1.8).toFixed(2)})` };
     }
-    if (type === 'fadegrays') {
-      return { opacity: p.toFixed(2), filter: `grayscale(${(intensity * 100).toFixed(0)}%)` };
+    if (type === 'fadegrays' || type === 'snowflash' || type === 'clouddissolve') {
+      return { opacity: p.toFixed(2), filter: `grayscale(${(intensity * 100).toFixed(0)}%) contrast(1.25)` };
     }
-    if (type === 'wipeleft') {
+    if (type === 'wipeleft' || type === 'pagecurl' || type === 'directionalwarp') {
       return { clipPath: `inset(0 ${Math.round((1 - p) * 100)}% 0 0)` };
     }
     if (type === 'wiperight') {
       return { clipPath: `inset(0 0 0 ${Math.round((1 - p) * 100)}%)` };
     }
-    if (type === 'wipeup') {
+    if (type === 'wipeup' || type === 'reelroll') {
       return { clipPath: `inset(0 0 ${Math.round((1 - p) * 100)}% 0)` };
     }
-    if (type === 'wipedown') {
+    if (type === 'wipedown' || type === 'windowblinds') {
       return { clipPath: `inset(${Math.round((1 - p) * 100)}% 0 0 0)` };
     }
-    if (type === 'circleopen' || type === 'circlecrop') {
+    if (type === 'circleopen' || type === 'circlecrop' || type === 'irisglow' || type === 'burnportal' || type === 'pinwheel') {
       return { clipPath: `circle(${Math.round(p * 75)}% at 50% 50%)` };
     }
     if (type === 'circleclose') {
       return { clipPath: `circle(${Math.round((1 - p) * 75)}% at 50% 50%)` };
     }
-    if (type === 'vertopen' || type === 'vertclose') {
+    if (type === 'vertopen' || type === 'vertclose' || type === 'doorway') {
       const bar = Math.round((1 - p) * 50);
       return { clipPath: `inset(0 ${bar}% 0 ${bar}%)` };
     }
@@ -8591,23 +8799,32 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (type === 'slidedown' || type === 'smoothdown' || type === 'coverdown' || type === 'revealdown') {
       return { transform: `translateY(${Math.round((p - 1) * 100)}%)` };
     }
-    if (type === 'zoomin') {
+    if (type === 'zoomin' || type === 'zoommorph' || type === 'zoomsnap') {
       return { transform: `scale(${(0.5 + p * 0.5).toFixed(2)})`, opacity: p.toFixed(2) };
     }
-    if (type === 'squeezeh') {
+    if (type === 'squeezeh' || type === 'cubespin') {
       return { transform: `scaleX(${p.toFixed(2)})` };
     }
     if (type === 'squeezev') {
       return { transform: `scaleY(${p.toFixed(2)})` };
     }
-    if (type === 'pixelize' || type === 'hlslice' || type === 'hrslice' || type === 'vuslice' || type === 'vdslice') {
+    if (
+      type === 'pixelize' ||
+      type === 'hexagonalize' ||
+      type === 'glitchmemories' ||
+      type === 'blurayscan' ||
+      type === 'hlslice' ||
+      type === 'hrslice' ||
+      type === 'vuslice' ||
+      type === 'vdslice'
+    ) {
       return {
         opacity: p.toFixed(2),
         transform: `skewX(${Math.round(intensity * 16)}deg)`,
         filter: `hue-rotate(${Math.round(intensity * 110)}deg) contrast(1.4)`
       };
     }
-    if (type === 'hblur' || type.endsWith('wind')) {
+    if (type === 'hblur' || type === 'vortexblur' || type.endsWith('wind')) {
       return {
         opacity: p.toFixed(2),
         filter: `blur(${Math.round(intensity * 6)}px)`
@@ -9919,6 +10136,17 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
+  setStickerSource(source: 'all' | 'giphy_stickers' | 'giphy_gifs' | 'noto_animated' | 'iconify'): void {
+    this.selectedStickerSource.set(source);
+    const q = this.stickerSearchQuery().trim();
+    if (q.length >= 2) {
+      this.onStickerSearchInput(q);
+    } else if (source === 'giphy_stickers' || source === 'giphy_gifs') {
+      // GIPHY sekmesine tıklandığında arama kutusu boşsa otomatik trend GIF/Sticker getir
+      this.onStickerSearchInput('trending');
+    }
+  }
+
   onStickerSearchInput(query: string): void {
     this.stickerSearchQuery.set(query);
     if (this.stickerSearchDebounce) {
@@ -9931,12 +10159,62 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     this.stickerSearchDebounce = setTimeout(async () => {
       try {
-        const items = await this.studio.searchIconifyStickers(q);
+        const items = await this.studio.searchIconifyStickers(q, this.selectedStickerSource());
         this.onlineStickerResults.set(items);
       } catch {
         this.onlineStickerResults.set([]);
       }
-    }, 280);
+    }, 260);
+  }
+
+  onSfxSearchInput(query: string): void {
+    this.sfxSearchQuery.set(query);
+    if (this.sfxSearchDebounce) {
+      clearTimeout(this.sfxSearchDebounce);
+    }
+    const q = (query || '').trim();
+    if (q.length < 2) {
+      this.onlineSfxResults.set([]);
+      return;
+    }
+    this.sfxSearchDebounce = setTimeout(async () => {
+      try {
+        const items = await this.studio.searchOnlineSfx(q);
+        this.onlineSfxResults.set(items);
+      } catch {
+        this.onlineSfxResults.set([]);
+      }
+    }, 320);
+  }
+
+  onStockSearchInput(query: string): void {
+    this.stockSearchQuery.set(query);
+    if (this.stockSearchDebounce) {
+      clearTimeout(this.stockSearchDebounce);
+    }
+    const q = (query || '').trim();
+    if (q.length < 2) {
+      this.onlineStockImages.set([]);
+      return;
+    }
+    this.stockSearchDebounce = setTimeout(async () => {
+      try {
+        const items = await this.studio.searchOnlineStockImages(q);
+        this.onlineStockImages.set(items);
+      } catch {
+        this.onlineStockImages.set([]);
+      }
+    }, 320);
+  }
+
+  loadCustomGoogleFont(fontName: string): void {
+    const clean = (fontName || '').trim();
+    if (!clean) return;
+    const item = this.studio.addCustomGoogleFont(clean);
+    if (item && this.inspectorData && this.inspectorData.type === 'text') {
+      this.inspectorData.font = item.family;
+      this.onInspectorChange();
+    }
   }
 
   addAssetAudioToSfxTrack(asset: ProjectAssetDto, customDuration?: number): void {

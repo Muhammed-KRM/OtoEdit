@@ -57,7 +57,12 @@ class ImageOverlay:
         # DÜZELTME 2: os.path.basename yerine MD5 URL hash kullanarak .../512.gif çakışmasını önle
         clean_path = source.split("?")[0]
         ext = os.path.splitext(clean_path)[1].lower()
-        if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".apng", ".mp4", ".mov", ".webm", ".mkv"):
+        allowed_exts = (
+            ".png", ".jpg", ".jpeg", ".gif", ".webp", ".apng",
+            ".mp4", ".mov", ".webm", ".mkv",
+            ".mp3", ".wav", ".ogg", ".flac", ".m4a", ".aac",
+        )
+        if ext not in allowed_exts:
             ext = ".png"
         url_hash = hashlib.md5(source.encode("utf-8")).hexdigest()[:12]
         local_target = os.path.join(temp_dir, f"img_{url_hash}{ext}")
@@ -79,10 +84,15 @@ class ImageOverlay:
                     self.minio.client.fget_object(bucket, key, local_target)
                     return local_target
 
-            # HTTP / HTTPS URL (dış bağlantılar)
+            # HTTP / HTTPS URL (dış bağlantılar: Wikimedia, Freesound, Giphy, Noto Emoji vb.)
             if source.startswith("http://") or source.startswith("https://"):
-                logger.info(f"URL'den görsel indiriliyor: {source}")
-                urllib.request.urlretrieve(source, local_target)
+                logger.info(f"URL'den medya indiriliyor: {source}")
+                req = urllib.request.Request(
+                    source,
+                    headers={"User-Agent": "OtoEdit/1.0 (https://otoedit.app; media-engine)"},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp, open(local_target, "wb") as out_f:
+                    out_f.write(resp.read())
                 return local_target
 
             # S3 / MinIO URI
@@ -148,6 +158,13 @@ class ImageOverlay:
             lower_path = local_path.lower()
             is_video = lower_path.endswith((".mp4", ".mov", ".webm", ".mkv"))
             is_animated = lower_path.endswith((".gif", ".webp", ".apng"))
+            if not is_animated and lower_path.endswith(".png"):
+                try:
+                    with open(local_path, "rb") as pf:
+                        if b"acTL" in pf.read(128):
+                            is_animated = True
+                except Exception:
+                    pass
 
             # Statik görsellerde PIL / OpenCV ön işlemelerini (Pre-baked <10ms) uygula
             if not is_animated and not is_video:

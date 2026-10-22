@@ -13,6 +13,8 @@ export interface TextTemplatePreset {
   id: string;
   name: string;
   badge: string;
+  category?: 'trend' | 'social' | 'news' | 'cinematic' | 'gaming' | 'vlog' | 'academic';
+  sampleText?: string;
   previewBg: string;
   previewStyle: string;
   previewTextColor?: string;
@@ -29,12 +31,16 @@ export interface SfxLibraryItem {
   synthPreset: string;
   description: string;
   peaks: number[];
+  sourceUrl?: string;
+  creator?: string;
+  license?: string;
+  isOnline?: boolean;
 }
 
 export interface StickerLibraryItem {
   id: string;
   name: string;
-  category: 'animated' | 'social' | 'arrows' | 'emoji' | 'badges' | 'effects';
+  category: 'animated' | 'fluent3d' | 'social' | 'arrows' | 'emoji' | 'badges' | 'effects' | 'giphy';
   preview: string;
   dataUrl: string;
   dataUri?: string;
@@ -45,11 +51,20 @@ export interface StickerLibraryItem {
 export interface TransitionLibraryItem {
   type: EdlTransition['type'];
   name: string;
-  category: 'Temel' | 'Kamera / Whip' | 'Işık / Flaş' | 'Dijital & Maske' | 'Perde & Bölme' | 'Sinematik & Özel';
+  category: 'Trend' | 'Temel' | 'Kamera / Whip' | 'Işık / Flaş' | 'Bulanıklık' | 'Dijital & Maske' | 'Perde & Bölme' | '3D & Shader' | 'Sinematik & Özel';
   icon: string;
   defaultDuration: number;
   recommendedSfx: string;
   description?: string;
+}
+
+export interface OnlineStockImageItem {
+  id: string;
+  title: string;
+  thumb: string;
+  url: string;
+  source: string;
+  creator?: string;
 }
 
 @Injectable({
@@ -186,11 +201,32 @@ export class StudioEngineService {
     { name: 'Space Mono', family: 'Space Mono', category: 'Siber & Kod' },
     { name: 'Electrolize', family: 'Electrolize', category: 'Siber & Kod' },
     { name: 'Michroma (Geniş Sci-Fi)', family: 'Michroma', category: 'Siber & Kod' },
-    { name: 'Wallpoet (Stencil Cyber)', family: 'Wallpoet', category: 'Siber & Kod' }
+    { name: 'Wallpoet (Stencil Cyber)', family: 'Wallpoet', category: 'Siber & Kod' },
+    { name: 'Rubik Glitch (Bozuk Siber)', family: 'Rubik Glitch', category: 'Siber & Kod' },
+    { name: 'Rubik Wet Paint (Sprey)', family: 'Rubik Wet Paint', category: 'Viral & Başlık' },
+    { name: 'Bungee Shade (3D Gölgeli)', family: 'Bungee Shade', category: 'Viral & Başlık' },
+    { name: 'Rampart One (3D Blok)', family: 'Rampart One', category: 'Viral & Başlık' },
+    { name: 'Monoton (Neon Çizgi)', family: 'Monoton', category: 'Siber & Kod' },
+    { name: 'Creepster (Korku / Cadılar Bayramı)', family: 'Creepster', category: 'Viral & Başlık' },
+    { name: 'Nosifer (Damla Korku)', family: 'Nosifer', category: 'Viral & Başlık' },
+    { name: 'Special Elite (Eski Daktilo)', family: 'Special Elite', category: 'Siber & Kod' },
+    { name: 'Courier Prime (Senaryo)', family: 'Courier Prime', category: 'Siber & Kod' },
+    { name: 'IBM Plex Mono', family: 'IBM Plex Mono', category: 'Siber & Kod' },
+    { name: 'Bricolage Grotesque', family: 'Bricolage Grotesque', category: 'Modern Sans' },
+    { name: 'Archivo', family: 'Archivo', category: 'Modern Sans' },
+    { name: 'Unbounded (Geniş Fütüristik)', family: 'Unbounded', category: 'Viral & Başlık' },
+    { name: 'Dela Gothic One (Ultra Kalın)', family: 'Dela Gothic One', category: 'Viral & Başlık' },
+    { name: 'Climate Crisis', family: 'Climate Crisis', category: 'Viral & Başlık' },
+    { name: 'Instrument Serif', family: 'Instrument Serif', category: 'Sinematik & Serif' },
+    { name: 'Young Serif', family: 'Young Serif', category: 'Sinematik & Serif' },
+    { name: 'Noto Serif Display', family: 'Noto Serif Display', category: 'Sinematik & Serif' },
+    { name: 'Fredoka (Yuvarlak Pop)', family: 'Fredoka', category: 'Modern Sans' },
+    { name: 'Comfortaa', family: 'Comfortaa', category: 'Modern Sans' }
   ];
 
   /**
    * Seçilen Google Font'u tarayıcıda ilk kez kullanıldığında dinamik olarak <link> ile yükler.
+   * Türkçe (latin-ext) karakter setini eksiksiz içerir.
    */
   ensureFontLoaded(fontFamily?: string): void {
     if (!fontFamily || typeof document === 'undefined') return;
@@ -205,8 +241,26 @@ export class StudioEngineService {
     link.id = id;
     link.rel = 'stylesheet';
     const encoded = encodeURIComponent(clean).replace(/%20/g, '+');
-    link.href = `https://fonts.googleapis.com/css2?family=${encoded}:ital,wght@0,400;0,700;0,900;1,400;1,700&display=swap`;
+    link.href = `https://fonts.googleapis.com/css2?family=${encoded}:ital,wght@0,400;0,700;0,900;1,400;1,700&subset=latin,latin-ext&display=swap`;
     document.head.appendChild(link);
+  }
+
+  /**
+   * Google Fonts üzerindeki 1.600+ yazı tipinden herhangi birini canlı olarak kütüphaneye ekler ve yükler.
+   */
+  addCustomGoogleFont(familyName: string, category: StudioFontOption['category'] = 'Modern Sans'): StudioFontOption | null {
+    const clean = (familyName || '').trim();
+    if (!clean) return null;
+    this.ensureFontLoaded(clean);
+    const existing = this.fonts.find(f => f.family.toLowerCase() === clean.toLowerCase());
+    if (existing) return existing;
+    const newFont: StudioFontOption = {
+      name: `${clean} (Google Fonts)`,
+      family: clean,
+      category
+    };
+    this.fonts.unshift(newFont);
+    return newFont;
   }
 
   // 2. 16 HAZIR VİRAL METİN ŞABLONU (CAPCUT & PHOTOSHOP PRESETS)
@@ -548,6 +602,388 @@ export class StudioEngineService {
         animation: 'pop-up',
         exitAnimation: 'fade'
       }
+    },
+    // --- YENİ CAPCUT TREND ŞABLONLARI (Görsel 2'deki CapCut Metin Şablonları) ---
+    {
+      id: 'capcut_subscribe_btn',
+      name: '🔔 SUBSCRIBE / ABONE OL',
+      badge: '🔴 Sosyal',
+      category: 'social',
+      sampleText: '🔔 ABONE OL',
+      previewBg: 'linear-gradient(135deg, #450a0a, #090d16)',
+      previewStyle: 'font-family: Montserrat; font-weight: 900; color: #FFF; background: #DC2626; padding: 3px 12px; border-radius: 999px; box-shadow: 0 4px 12px rgba(220,38,38,0.6);',
+      props: {
+        font: 'Montserrat',
+        fontSize: 48,
+        fontWeight: 900,
+        color: '#FFFFFF',
+        fillType: 'solid',
+        strokeWidth: 0,
+        boxStyle: 'pill',
+        boxBgColor: '#DC2626',
+        boxPadding: 18,
+        allCaps: true,
+        letterSpacing: 2,
+        animation: 'pop-up',
+        exitAnimation: 'scale-out',
+        loopAnimation: 'pulse'
+      }
+    },
+    {
+      id: 'capcut_chapter_end',
+      name: '🎬 Chapter End / Bölüm Sonu',
+      badge: '🎬 Sinematik',
+      category: 'cinematic',
+      sampleText: 'BÖLÜM SONU',
+      previewBg: 'linear-gradient(135deg, #090d16, #1e293b)',
+      previewStyle: 'font-family: "Playfair Display"; font-style: italic; font-weight: 900; color: #F8FAFC; -webkit-text-stroke: 1.5px #000; text-shadow: 0 4px 10px #000;',
+      props: {
+        font: 'Playfair Display',
+        fontSize: 58,
+        italic: true,
+        color: '#F8FAFC',
+        fillType: 'solid',
+        strokeColor: '#000000',
+        strokeWidth: 4,
+        shadowColor: '#000000',
+        shadowDistance: 6,
+        shadowBlur: 8,
+        boxStyle: 'none',
+        allCaps: false,
+        letterSpacing: 2,
+        animation: 'blur-in',
+        exitAnimation: 'fade'
+      }
+    },
+    {
+      id: 'capcut_live_breaking_news',
+      name: '📺 LIVE BREAKING NEWS',
+      badge: '📺 Haber',
+      category: 'news',
+      sampleText: '🔴 SON DAKİKA HABER',
+      previewBg: 'linear-gradient(135deg, #1e3a8a, #450a0a)',
+      previewStyle: 'font-family: Oswald; font-weight: 800; color: #FFF; background: #1D4ED8; border: 2px solid #EF4444; padding: 2px 10px; border-radius: 4px;',
+      props: {
+        font: 'Oswald',
+        fontSize: 48,
+        color: '#FFFFFF',
+        fillType: 'solid',
+        strokeColor: '#EF4444',
+        strokeWidth: 2,
+        boxStyle: 'badge',
+        boxBgColor: '#1E3A8A',
+        boxPadding: 16,
+        borderRadius: 8,
+        allCaps: true,
+        letterSpacing: 2,
+        animation: 'slide-right',
+        exitAnimation: 'slide-left'
+      }
+    },
+    {
+      id: 'capcut_cloud_3d',
+      name: '☁️ CLOUD Kabartma Glow',
+      badge: '☁️ Trend',
+      category: 'trend',
+      sampleText: 'CLOUD',
+      previewBg: 'linear-gradient(135deg, #0f172a, #1e1b4b)',
+      previewStyle: 'font-family: "Titan One"; color: #090d16; -webkit-text-stroke: 2px #FFF; filter: drop-shadow(0 0 8px #FFF);',
+      props: {
+        font: 'Titan One',
+        fontSize: 64,
+        color: '#0F172A',
+        fillType: 'solid',
+        strokeColor: '#FFFFFF',
+        strokeWidth: 6,
+        glowEnabled: true,
+        glowColor: '#FFFFFF',
+        glowRadius: 18,
+        boxStyle: 'none',
+        allCaps: true,
+        letterSpacing: 3,
+        animation: 'bounce',
+        loopAnimation: 'float'
+      }
+    },
+    {
+      id: 'capcut_angel_metallic',
+      name: '🪽 ANGEL Gümüş Gotik',
+      badge: '🪽 Estetik',
+      category: 'cinematic',
+      sampleText: 'ANGEL',
+      previewBg: 'linear-gradient(135deg, #18181b, #09090b)',
+      previewStyle: 'font-family: Cinzel; font-weight: 900; color: #E2E8F0; text-shadow: 0 0 12px rgba(255,255,255,0.7);',
+      props: {
+        font: 'Cinzel',
+        fontSize: 62,
+        color: '#F8FAFC',
+        fillType: 'gradient',
+        gradientStart: '#FFFFFF',
+        gradientEnd: '#64748B',
+        gradientAngle: 180,
+        strokeColor: '#090D16',
+        strokeWidth: 3,
+        glowEnabled: true,
+        glowColor: '#CBD5E1',
+        glowRadius: 14,
+        boxStyle: 'none',
+        allCaps: true,
+        letterSpacing: 5,
+        animation: 'blur-in',
+        exitAnimation: 'fade'
+      }
+    },
+    {
+      id: 'capcut_location_pin',
+      name: '📍 LOCATION Konum Kartı',
+      badge: '📍 Konum',
+      category: 'vlog',
+      sampleText: '📍 İSTANBUL, TÜRKİYE',
+      previewBg: 'linear-gradient(135deg, #090d16, #1e293b)',
+      previewStyle: 'font-family: Montserrat; font-weight: 800; color: #FFF; border-left: 3px solid #EF4444; padding-left: 8px;',
+      props: {
+        font: 'Montserrat',
+        fontSize: 44,
+        fontWeight: 900,
+        color: '#FFFFFF',
+        fillType: 'solid',
+        strokeColor: '#000000',
+        strokeWidth: 3,
+        boxStyle: 'rounded',
+        boxBgColor: 'rgba(15, 23, 42, 0.85)',
+        boxPadding: 14,
+        borderRadius: 10,
+        allCaps: true,
+        letterSpacing: 2,
+        animation: 'slide-up',
+        exitAnimation: 'fade'
+      }
+    },
+    {
+      id: 'capcut_like_follow_share',
+      name: '❤️ LIKE • + FOLLOW • ↗ SHARE',
+      badge: '📱 TikTok',
+      category: 'social',
+      sampleText: '❤️ BEĞEN • + TAKİP ET',
+      previewBg: 'linear-gradient(135deg, #090d16, #31102f)',
+      previewStyle: 'font-family: Outfit; font-weight: 800; color: #FFF; background: #000; border: 1.5px solid #22D3EE; text-shadow: 1px 1px 0 #EC4899; padding: 2px 10px; border-radius: 999px;',
+      props: {
+        font: 'Outfit',
+        fontSize: 44,
+        color: '#FFFFFF',
+        fillType: 'solid',
+        strokeColor: '#EC4899',
+        strokeWidth: 2,
+        outerStrokeColor: '#22D3EE',
+        outerStrokeWidth: 2,
+        boxStyle: 'pill',
+        boxBgColor: 'rgba(0, 0, 0, 0.90)',
+        boxPadding: 16,
+        allCaps: true,
+        letterSpacing: 2,
+        animation: 'pop-up',
+        loopAnimation: 'pulse'
+      }
+    },
+    {
+      id: 'capcut_whatsapp_call',
+      name: '📞 CALL NOW / İletişim Rozeti',
+      badge: '📞 Çağrı',
+      category: 'social',
+      sampleText: '📞 HEMEN ARA',
+      previewBg: 'linear-gradient(135deg, #064e3b, #090d16)',
+      previewStyle: 'font-family: Poppins; font-weight: 800; color: #FFF; background: #16A34A; padding: 3px 12px; border-radius: 999px;',
+      props: {
+        font: 'Poppins',
+        fontSize: 46,
+        color: '#FFFFFF',
+        fillType: 'solid',
+        strokeWidth: 0,
+        boxStyle: 'pill',
+        boxBgColor: '#16A34A',
+        boxPadding: 18,
+        allCaps: true,
+        letterSpacing: 1,
+        animation: 'bounce',
+        loopAnimation: 'wiggle'
+      }
+    },
+    {
+      id: 'capcut_live_stream_moments',
+      name: '🎮 Live Stream Best Moments',
+      badge: '🎮 Yayın',
+      category: 'gaming',
+      sampleText: 'EN İYİ ANLAR',
+      previewBg: 'linear-gradient(135deg, #1e293b, #090d16)',
+      previewStyle: 'font-family: "Chakra Petch"; font-weight: 800; color: #090d16; background: #FFF; border: 2px solid #F59E0B; padding: 2px 8px;',
+      props: {
+        font: 'Chakra Petch',
+        fontSize: 48,
+        color: '#0F172A',
+        fillType: 'solid',
+        strokeColor: '#F59E0B',
+        strokeWidth: 2,
+        boxStyle: 'badge',
+        boxBgColor: '#FFFFFF',
+        boxPadding: 14,
+        borderRadius: 6,
+        allCaps: true,
+        letterSpacing: 1,
+        animation: 'zoom-crash',
+        exitAnimation: 'fade'
+      }
+    },
+    {
+      id: 'capcut_thanks_watching',
+      name: '✨ Thanks For Watching',
+      badge: '✨ Kapanış',
+      category: 'vlog',
+      sampleText: 'İZLEDİĞİNİZ İÇİN TEŞEKKÜRLER',
+      previewBg: 'linear-gradient(135deg, #1e1b4b, #090d16)',
+      previewStyle: 'font-family: "Luckiest Guy"; color: #BAE6FD; -webkit-text-stroke: 2px #1E3A8A;',
+      props: {
+        font: 'Luckiest Guy',
+        fontSize: 56,
+        color: '#BAE6FD',
+        fillType: 'gradient',
+        gradientStart: '#FFFFFF',
+        gradientEnd: '#38BDF8',
+        gradientAngle: 180,
+        strokeColor: '#1E3A8A',
+        strokeWidth: 6,
+        boxStyle: 'none',
+        allCaps: true,
+        letterSpacing: 2,
+        animation: 'bounce',
+        loopAnimation: 'float'
+      }
+    },
+    {
+      id: 'capcut_today_story',
+      name: '🌈 TODAY STORY Renkli Pop',
+      badge: '🌈 Hikaye',
+      category: 'vlog',
+      sampleText: 'GÜNÜN HİKAYESİ',
+      previewBg: 'linear-gradient(135deg, #3b0764, #0f172a)',
+      previewStyle: 'font-family: Fredoka; font-weight: 900; color: #F43F5E; -webkit-text-stroke: 1.5px #FFF; text-shadow: 2px 2px 0 #38BDF8;',
+      props: {
+        font: 'Fredoka',
+        fontSize: 56,
+        color: '#F43F5E',
+        fillType: 'gradient',
+        gradientStart: '#FACC15',
+        gradientEnd: '#EC4899',
+        gradientAngle: 90,
+        strokeColor: '#FFFFFF',
+        strokeWidth: 5,
+        outerStrokeColor: '#0F172A',
+        outerStrokeWidth: 4,
+        boxStyle: 'none',
+        allCaps: true,
+        animation: 'pop-up',
+        loopAnimation: 'wiggle'
+      }
+    },
+    {
+      id: 'capcut_academic_concept',
+      name: '⚖️ Akademik / Belgesel Kartı',
+      badge: '⚖️ Akademik',
+      category: 'academic',
+      sampleText: 'TEKVİNÎ ŞERİAT',
+      previewBg: 'linear-gradient(135deg, #0f172a, #020617)',
+      previewStyle: 'font-family: Montserrat; font-weight: 800; color: #F8FAFC; background: rgba(15,23,42,0.92); border: 1px solid #38BDF8; padding: 3px 10px; border-radius: 8px;',
+      props: {
+        font: 'Montserrat',
+        fontSize: 56,
+        fontWeight: 800,
+        color: '#F8FAFC',
+        fillType: 'solid',
+        strokeColor: '#020617',
+        strokeWidth: 3,
+        boxStyle: 'rounded',
+        boxBgColor: '#0F172A',
+        boxPadding: 16,
+        borderRadius: 12,
+        allCaps: true,
+        letterSpacing: 1,
+        animation: 'slide-up',
+        exitAnimation: 'fade'
+      }
+    },
+    {
+      id: 'capcut_enjoy_life_serif',
+      name: '🌿 Enjoy Your Life Minimal',
+      badge: '🌿 Minimal',
+      category: 'cinematic',
+      sampleText: 'Hayatın Ritmini Yakala.',
+      previewBg: 'linear-gradient(135deg, #1c1917, #090d16)',
+      previewStyle: 'font-family: "Cormorant Garamond"; font-weight: 700; color: #F5F5F4; letter-spacing: 1px;',
+      props: {
+        font: 'Cormorant Garamond',
+        fontSize: 54,
+        color: '#F5F5F4',
+        fillType: 'solid',
+        strokeColor: '#000000',
+        strokeWidth: 2,
+        shadowColor: '#000000',
+        shadowDistance: 4,
+        shadowBlur: 6,
+        boxStyle: 'none',
+        allCaps: false,
+        letterSpacing: 2,
+        animation: 'fade',
+        exitAnimation: 'fade'
+      }
+    },
+    {
+      id: 'capcut_ultimas_noticias',
+      name: '📰 Manşet Çerçeve Kutu',
+      badge: '📰 Manşet',
+      category: 'news',
+      sampleText: 'ÖZEL DOSYA',
+      previewBg: 'linear-gradient(135deg, #0c4a6e, #090d16)',
+      previewStyle: 'font-family: "Archivo Black"; color: #FFF; background: #0284C7; padding: 3px 10px; border-left: 4px solid #FACC15;',
+      props: {
+        font: 'Archivo Black',
+        fontSize: 50,
+        color: '#FFFFFF',
+        fillType: 'solid',
+        strokeColor: '#0F172A',
+        strokeWidth: 3,
+        boxStyle: 'rounded',
+        boxBgColor: '#0369A1',
+        boxPadding: 16,
+        borderRadius: 8,
+        allCaps: true,
+        letterSpacing: 1,
+        animation: 'slide-left',
+        exitAnimation: 'fade'
+      }
+    },
+    {
+      id: 'capcut_glitch_horror',
+      name: '👻 Korku / Glitch Başlık',
+      badge: '👻 Korku',
+      category: 'gaming',
+      sampleText: 'KARANLIK SIR',
+      previewBg: 'linear-gradient(135deg, #3f000b, #090d16)',
+      previewStyle: 'font-family: Creepster; color: #EF4444; text-shadow: 0 0 10px #7F1D1D;',
+      props: {
+        font: 'Creepster',
+        fontSize: 64,
+        color: '#EF4444',
+        fillType: 'solid',
+        strokeColor: '#000000',
+        strokeWidth: 5,
+        glowEnabled: true,
+        glowColor: '#DC2626',
+        glowRadius: 16,
+        boxStyle: 'none',
+        allCaps: true,
+        letterSpacing: 3,
+        animation: 'glitch',
+        loopAnimation: 'shake'
+      }
     }
   ];
 
@@ -639,7 +1075,29 @@ export class StudioEngineService {
     { id: 'retro-powerup', name: '8-Bit Güçlenme (Power-Up)', category: 'funny', icon: '🍄', duration: 0.75, synthPreset: 'success-chime', description: 'Hızlı arpejli seviye ve güç artışı', peaks: [0.5, 0.7, 0.85, 0.95, 1.0, 0.8] },
     { id: 'crowd-applause', name: 'Stüdyo Alkış & Tezahürat', category: 'funny', icon: '👏', duration: 1.50, synthPreset: 'whoosh-fast', description: 'Başarı anları için coşkulu alkış efekti', peaks: [0.4, 0.8, 0.95, 1.0, 0.9, 0.75, 0.5, 0.2] },
     { id: 'cricket-awkward', name: 'Cırcır Böceği (Soğuk Sessizlik)', category: 'funny', icon: '🦗', duration: 1.20, synthPreset: 'keyboard-typing', description: 'Kimsenin gülmediği garip sessizlik anı', peaks: [0.7, 0.1, 0.7, 0.1, 0.7, 0.1, 0.7] },
-    { id: 'anime-wow', name: 'Parlak Anime Şaşkınlık', category: 'funny', icon: '🤩', duration: 0.85, synthPreset: 'success-chime', description: 'Etkileyici ve parlak anlar için ışıltılı akor', peaks: [0.8, 1.0, 0.9, 0.7, 0.4, 0.15] }
+    { id: 'anime-wow', name: 'Parlak Anime Şaşkınlık', category: 'funny', icon: '🤩', duration: 0.85, synthPreset: 'success-chime', description: 'Etkileyici ve parlak anlar için ışıltılı akor', peaks: [0.8, 1.0, 0.9, 0.7, 0.4, 0.15] },
+
+    // --- CAPCUT REVAÇTA, ASMR, MAKİNELER & ISLIK (24 YENİ SES EFEKTİ — Görsel 1) ---
+    { id: 'capcut-swish-large', name: 'Swish Whoosh (Large 794558)', category: 'whoosh', icon: '🌪️', duration: 0.62, synthPreset: 'swoosh-deep', description: 'CapCut Revaçta: Geniş sahne kaydırma ve konu geçişi', peaks: [0.15, 0.45, 0.85, 1.0, 0.92, 0.65, 0.3, 0.1] },
+    { id: 'canon-50d-shutter', name: 'Canon 50D DSLR Shutter Click', category: 'ui', icon: '📷', duration: 0.40, synthPreset: 'camera-shutter', description: 'CapCut Revaçta: Gerçekçi DSLR ayna ve deklanşör sesi', peaks: [0.95, 0.25, 1.0, 0.35, 0.1] },
+    { id: 'stinger-camera-shut', name: 'Stinger Camera Shutter Flash', category: 'ui', icon: '📸', duration: 0.50, synthPreset: 'camera-shutter', description: 'CapCut Revaçta: Flaş dolumlu keskin fotoğraf çekim sesi', peaks: [1.0, 0.6, 0.9, 0.5, 0.2] },
+    { id: 'click-small-button', name: 'Click (Small Button Sound)', category: 'ui', icon: '🔘', duration: 0.18, synthPreset: 'mouse-click', description: 'CapCut Revaçta: Küçük mekanik buton tıklama sesi', peaks: [1.0, 0.3, 0.8, 0.1] },
+    { id: 'realistic-keyboard-rapid', name: 'Realistic Keyboard Typing (Rapid)', category: 'ui', icon: '⌨️', duration: 1.10, synthPreset: 'keyboard-typing', description: 'CapCut Revaçta: Hızlı mekanik klavye yazım serisi', peaks: [0.9, 0.2, 0.85, 0.15, 0.95, 0.2, 0.8, 0.1, 0.9, 0.25, 0.85] },
+    { id: 'whistle-wolf-up', name: 'Hayranlık Islığı (Whistle)', category: 'funny', icon: '😗', duration: 0.85, synthPreset: 'tension-riser', description: 'Islık Sesleri: Şaşkınlık ve beğeni ıslığı', peaks: [0.3, 0.8, 0.95, 0.4, 0.9, 1.0, 0.5] },
+    { id: 'whistle-referee', name: 'Hakem Düdüğü (Faul / Dur)', category: 'funny', icon: '⚽', duration: 0.55, synthPreset: 'ding-bright', description: 'Islık Sesleri: Keskin hakem uyarı düdüğü', peaks: [0.95, 1.0, 0.95, 0.9, 0.3] },
+    { id: 'asmr-page-whisper', name: 'ASMR Kitap Sayfası Hışırtısı', category: 'foley', icon: '📖', duration: 0.65, synthPreset: 'whoosh-fast', description: 'ASMR & Foley: Yakın mikrofon kağıt ve sayfa dokusu', peaks: [0.2, 0.5, 0.75, 0.6, 0.3, 0.1] },
+    { id: 'asmr-mechanical-switch', name: 'ASMR Blue Switch Tuş Sesi', category: 'foley', icon: '🎛️', duration: 0.32, synthPreset: 'keyboard-type', description: 'ASMR & Foley: Tok mekanik switch tıklaması', peaks: [0.95, 0.2, 0.85, 0.1] },
+    { id: 'asmr-coffee-pour', name: 'ASMR Sıcak Kahve & Buz', category: 'ambience', icon: '☕', duration: 1.20, synthPreset: 'pop-bubble', description: 'Vlog & ASMR: Rahatlatıcı içecek doldurma dokusu', peaks: [0.3, 0.6, 0.5, 0.7, 0.6, 0.4, 0.2] },
+    { id: 'machine-film-projector', name: 'Eski 8mm Film Projektörü', category: 'foley', icon: '📽️', duration: 1.10, synthPreset: 'keyboard-typing', description: 'Makineler: Nostaljik sinema makarası dönüş sesi', peaks: [0.6, 0.3, 0.65, 0.3, 0.6, 0.3, 0.65, 0.3] },
+    { id: 'machine-vhs-insert', name: 'VHS Kaset Takma & Sarma', category: 'foley', icon: '📼', duration: 0.85, synthPreset: 'camera-shutter', description: 'Makineler: Retro kaset mekanizması sesi', peaks: [0.8, 0.4, 0.95, 0.6, 0.3] },
+    { id: 'machine-printer-matrix', name: 'Adli Daktilo / Matris Yazıcı', category: 'foley', icon: '🖨️', duration: 0.90, synthPreset: 'keyboard-typing', description: 'Makineler: Belge ve kanun maddesi yazdırma sesi', peaks: [0.85, 0.4, 0.9, 0.35, 0.85, 0.4, 0.9] },
+    { id: 'gavel-court-hammer', name: 'Mahkeme Hakim Tokmağı (Gavel)', category: 'impact', icon: '⚖️', duration: 0.65, synthPreset: 'cinematic-hit', description: 'Hukuk & Belgesel: Tok ahşap mahkeme karar tokmağı', peaks: [1.0, 0.3, 0.95, 0.4, 0.15] },
+    { id: 'stamp-seal-thud', name: 'Resmi Mühür Basma (Stamp)', category: 'impact', icon: '🔏', duration: 0.42, synthPreset: 'cinematic-hit', description: 'Belgesel & Kanun: Kağıda sert mühür vurma sesi', peaks: [0.95, 0.8, 0.3, 0.05] },
+    { id: 'sword-unsheathe', name: 'Tarihi Kılıç Çekme (Metal)', category: 'cinematic', icon: '🗡️', duration: 0.75, synthPreset: 'ding-bright', description: 'Tarih & Destan: Keskin metalik kılıç sıyırma tınısı', peaks: [0.4, 0.9, 1.0, 0.75, 0.4, 0.15] },
+    { id: 'deep-gong-oriental', name: 'Tarihi Kubbe / Gong Rezonansı', category: 'cinematic', icon: '🕌', duration: 1.65, synthPreset: 'sub-bass-drop', description: 'Derin ve mistik bölüm başlangıcı rezonansı', peaks: [1.0, 0.95, 0.85, 0.72, 0.58, 0.42, 0.25, 0.1] },
+    { id: 'game-level-complete', name: 'Oyun Görev Tamamlandı', category: 'musical', icon: '🎮', duration: 0.95, synthPreset: 'success-chime', description: 'Oyun: Parlak zafer ve görev başarısı fanfarı', peaks: [0.7, 0.85, 0.95, 1.0, 0.9, 0.6, 0.2] },
+    { id: 'game-hit-damage', name: 'Oyun Hasar / Can Kaybı (Oof)', category: 'funny', icon: '💔', duration: 0.38, synthPreset: 'error-buzzer', description: 'Oyun: Hızlı darbe ve puan kaybı efekti', peaks: [1.0, 0.75, 0.35, 0.1] },
+    { id: 'variety-spring-pop', name: 'Çeşitlilik Şovu Komik Vurgu', category: 'funny', icon: '🎪', duration: 0.50, synthPreset: 'pop-bubble', description: 'Çeşitlilik Şovu: TV şovu tarzı neşeli balon vurgusu', peaks: [0.4, 1.0, 0.8, 0.5, 0.2] }
   ];
 
   // 4. 45 FFMPEG XFADE VİDEO VE SAHNE GEÇİŞ EFEKTİ (8 KATEGORİ, %100 RENDER MOTORU UYUMLU)
@@ -697,7 +1155,30 @@ export class StudioEngineService {
     { type: 'diagtr', name: 'Çapraz Sağ-Üst Perde (Diag TR)', category: 'Perde & Bölme', icon: '↗️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
     { type: 'diagbl', name: 'Çapraz Sol-Alt Perde (Diag BL)', category: 'Perde & Bölme', icon: '↙️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
     { type: 'diagbr', name: 'Çapraz Sağ-Alt Perde (Diag BR)', category: 'Perde & Bölme', icon: '↘️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
-    { type: 'coverleft', name: 'Üzerini Örterek Kayma (Cover)', category: 'Perde & Bölme', icon: '🃏', defaultDuration: 0.4, recommendedSfx: 'pop-card-flip' }
+    { type: 'coverleft', name: 'Üzerini Örterek Kayma (Cover)', category: 'Perde & Bölme', icon: '🃏', defaultDuration: 0.4, recommendedSfx: 'pop-card-flip' },
+
+    // --- CAPCUT TREND & GL-TRANSITIONS SHADER GEÇİŞLERİ (22 YENİ — Görsel 3 & 4) ---
+    { type: 'smoothleft', name: 'Sol Kaydırma (CapCut Sol / Whoosh)', category: 'Trend', icon: '⬅️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast', description: 'Konu bitimi ve açıklama öncesi standart sola kaydırmalı geçiş' },
+    { type: 'diagbl', name: 'Sol Alt Kayma (CapCut Sol Alt)', category: 'Trend', icon: '↙️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast', description: 'Sol alt köşeye doğru diyagonal kaydırmalı geçiş' },
+    { type: 'solarflash', name: 'Güneş Flaşı (Solar Flash)', category: 'Işık / Flaş', icon: '☀️', defaultDuration: 0.40, recommendedSfx: 'whoosh-flames', description: 'CapCut Trend: Sıcak güneş parlaması ile sahne geçişi' },
+    { type: 'snowflash', name: 'Karlı Flaş (White Strobe)', category: 'Işık / Flaş', icon: '❄️', defaultDuration: 0.35, recommendedSfx: 'camera-shutter', description: 'CapCut Trend: Parlak beyaz flaş patlaması' },
+    { type: 'zoommorph', name: 'Yakın Plan Morf (Zoom Morph)', category: 'Trend', icon: '🔭', defaultDuration: 0.45, recommendedSfx: 'whoosh-zoom-in', description: 'CapCut Trend: Merkeze hızla yakınlaşarak yeni sahneye morf olma' },
+    { type: 'vortexblur', name: 'Sisli Girdap (Vortex Blur)', category: 'Bulanıklık', icon: '🌀', defaultDuration: 0.50, recommendedSfx: 'swoosh-deep', description: 'CapCut Trend: Bulanık girdap hareketiyle yumuşak geçiş' },
+    { type: 'pagecurl', name: 'Uçan Kağıt / Sayfa Çevirme', category: '3D & Shader', icon: '📄', defaultDuration: 0.50, recommendedSfx: 'page-turn', description: 'GL-Transitions PageCurl: Kitap sayfası çevrilir gibi geçiş' },
+    { type: 'irisglow', name: 'Işıltı Çemberi (Iris Glow)', category: 'Trend', icon: '💫', defaultDuration: 0.50, recommendedSfx: 'whoosh-sparkle', description: 'CapCut Trend: Merkezden dışa doğru genişleyen dairesel ışıltı' },
+    { type: 'burnportal', name: 'Yanmış Portal (Burn Transition)', category: 'Trend', icon: '🔥', defaultDuration: 0.55, recommendedSfx: 'whoosh-flames', description: 'GL-Transitions Burn: Renk ve ışık yanmasıyla sahne açılışı' },
+    { type: 'blurayscan', name: 'Blu-ray Lazer Tarama', category: 'Dijital & Maske', icon: '💿', defaultDuration: 0.40, recommendedSfx: 'whoosh-cyber', description: 'CapCut Trend: Yatay optik tarama çizgileriyle geçiş' },
+    { type: 'zoomsnap', name: 'Zoom Snap (Anlık Vurgu)', category: 'Trend', icon: '⚡', defaultDuration: 0.35, recommendedSfx: 'thud-punch', description: 'CapCut Trend: Hızlı zoom ve darbe ile keskin geçiş' },
+    { type: 'reelroll', name: 'Renkli Makara (Film Roll)', category: 'Kamera / Whip', icon: '🎞️', defaultDuration: 0.45, recommendedSfx: 'machine-film-projector', description: 'CapCut Trend: Sinema film şeridi gibi dikey makara kayması' },
+    { type: 'clouddissolve', name: 'Bulutlar (Dreamy Dissolve)', category: 'Bulanıklık', icon: '☁️', defaultDuration: 0.55, recommendedSfx: 'whoosh-air', description: 'CapCut Trend: Yumuşak bulut dokusuyla eriyerek geçiş' },
+    { type: 'cubespin', name: '3D Küp Dönüşü (GL Cube)', category: '3D & Shader', icon: '🧊', defaultDuration: 0.50, recommendedSfx: 'whoosh-whip', description: 'GL-Transitions Cube: 3 boyutlu küp yüzeyi döndürme geçişi' },
+    { type: 'doorway', name: '3D Kapı Açılışı (GL Doorway)', category: '3D & Shader', icon: '🚪', defaultDuration: 0.55, recommendedSfx: 'swoosh-deep', description: 'GL-Transitions Doorway: İki yana açılan 3D kapı geçişi' },
+    { type: 'glitchmemories', name: 'Glitch Anılar (GL Glitch)', category: 'Dijital & Maske', icon: '👾', defaultDuration: 0.40, recommendedSfx: 'digital-glitch', description: 'GL-Transitions GlitchMemories: RGB kaymalı dijital bozulma' },
+    { type: 'directionalwarp', name: 'Esnek Bükülme (Directional Warp)', category: 'Bulanıklık', icon: '🌊', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast', description: 'GL-Transitions DirectionalWarp: Sola doğru elastik piksel bükülmesi' },
+    { type: 'pinwheel', name: 'Rüzgar Gülü (GL Pinwheel)', category: '3D & Shader', icon: '🎡', defaultDuration: 0.50, recommendedSfx: 'whoosh-fast', description: 'GL-Transitions Pinwheel: Dönen pervane kanatlarıyla geçiş' },
+    { type: 'windowblinds', name: 'Panjur Perde (Window Blinds)', category: 'Perde & Bölme', icon: '🪟', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast', description: 'GL-Transitions WindowBlinds: Yatay şerit panjur açılışı' },
+    { type: 'hexagonalize', name: 'Altıgen Petek (Hexagonalize)', category: '3D & Shader', icon: '🐝', defaultDuration: 0.50, recommendedSfx: 'whoosh-cyber', description: 'GL-Transitions Hexagonalize: Altıgen mozaik petek dönüşümü' },
+    { type: 'luminancemelt', name: 'Işık Erimesi (Luminance Melt)', category: 'Işık / Flaş', icon: '🕯️', defaultDuration: 0.55, recommendedSfx: 'swoosh-deep', description: 'GL-Transitions LuminanceMelt: Parlak piksellerin aşağı akarak erimesi' }
   ];
 
   // 5. ZENGİN ANİMASYONLU EMOJİ (GOOGLE NOTO GIF) + 3D/VEKTÖR ÇIKARTMA PAKETİ + CANLI 200.000+ ICONIFY ARAMA
@@ -836,73 +1317,398 @@ export class StudioEngineService {
     { id: 'stk_mindblown', name: '🤯 Şok Rozeti', category: 'emoji', preview: '🤯', dataUrl: this.emojiToDataUrl('🤯') },
     { id: 'stk_money', name: '💰 Para Rozeti', category: 'emoji', preview: '💰', dataUrl: this.emojiToDataUrl('💰') },
     { id: 'stk_idea', name: '💡 Fikir Rozeti', category: 'emoji', preview: '💡', dataUrl: this.emojiToDataUrl('💡') },
-    { id: 'stk_crown', name: '👑 Kral Tacı', category: 'badges', preview: '👑', dataUrl: this.emojiToDataUrl('👑') }
+    { id: 'stk_crown', name: '👑 Kral Tacı', category: 'badges', preview: '👑', dataUrl: this.emojiToDataUrl('👑') },
+
+    // --- YENİ GOOGLE NOTO HAREKETLİ GIF & MICROSOFT FLUENT 3D ANİMASYONLU EMOJİLER (Görsel 5) ---
+    { id: 'anim_chefkiss', name: '👨‍🍳 Mükemmel (Chef Kiss)', category: 'animated', preview: '👨‍🍳 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f90c/512.gif' },
+    { id: 'anim_rofl', name: '🤣 Kahkaha Криzi (ROFL)', category: 'animated', preview: '🤣 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f923/512.gif' },
+    { id: 'anim_butterfly', name: '🦋 Hareketli Kelebek', category: 'animated', preview: '🦋 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f98b/512.gif' },
+    { id: 'anim_ghost', name: '👻 Sevimli Hayalet', category: 'animated', preview: '👻 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f47b/512.gif' },
+    { id: 'anim_pumpkin', name: '🎃 Cadılar Bayramı Kabak', category: 'animated', preview: '🎃 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f383/512.gif' },
+    { id: 'anim_snowman', name: '⛄ Kardan Adam', category: 'animated', preview: '⛄ CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/26c4/512.gif' },
+    { id: 'anim_cat_wry', name: '😼 Şaşkın Kedi (Cat Meme)', category: 'animated', preview: '😼 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f63c/512.gif' },
+    { id: 'anim_bell', name: '🔔 Bildirim Zili', category: 'animated', preview: '🔔 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f514/512.gif' },
+    { id: 'anim_scales', name: '⚖️ Adalet Terazisi', category: 'animated', preview: '⚖️ CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/2696_fe0f/512.gif' },
+    { id: 'anim_books', name: '📚 Kitaplar / Külliyat', category: 'animated', preview: '📚 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4da/512.gif' },
+    { id: 'anim_graduation', name: '🎓 Akademik Kep', category: 'animated', preview: '🎓 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f393/512.gif' },
+    { id: 'anim_muscle', name: '💪 Güç / Azim', category: 'animated', preview: '💪 CANLI', isAnimated: true, dataUrl: 'https://fonts.gstatic.com/s/e/notoemoji/latest/1f4aa/512.gif' },
+
+    // --- CAPCUT ÖZEL ÇIKARTMALARI (Görsel 5: Sayaç, Abone Ol El Tıklama, Sansür Mozaik, Kırmızı Ok, Daire) ---
+    {
+      id: 'stk_cinema_countdown',
+      name: '⏱️ Sinema Geri Sayım (4-3-2-1)',
+      category: 'effects',
+      preview: '⏱️ SAYAÇ 4',
+      dataUrl: this.svgToDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="260" height="260" viewBox="0 0 260 260"><circle cx="130" cy="130" r="118" fill="#1e293b" stroke="#e2e8f0" stroke-width="6"/><circle cx="130" cy="130" r="92" fill="none" stroke="#94a3b8" stroke-width="4" stroke-dasharray="14 8"/><line x1="10" y1="130" x2="250" y2="130" stroke="#cbd5e1" stroke-width="3"/><line x1="130" y1="10" x2="130" y2="250" stroke="#cbd5e1" stroke-width="3"/><text x="130" y="168" font-family="Arial, sans-serif" font-weight="900" font-size="120" fill="#ffffff" text-anchor="middle">4</text></svg>`)
+    },
+    {
+      id: 'stk_subscribe_hand_click',
+      name: '👆 SUBSCRIBE + El Tıklama',
+      category: 'social',
+      preview: '👆 SUBSCRIBE',
+      dataUrl: this.svgToDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="380" height="140" viewBox="0 0 380 140"><rect x="16" y="20" width="280" height="74" rx="14" fill="#dc2626" stroke="#ffffff" stroke-width="4"/><text x="156" y="68" font-family="Arial, sans-serif" font-weight="900" font-size="32" fill="#ffffff" text-anchor="middle" letter-spacing="2">SUBSCRIBE</text><circle cx="332" cy="57" r="28" fill="#334155" stroke="#fff" stroke-width="3"/><text x="332" y="68" font-size="28" text-anchor="middle">🔔</text><text x="80" y="122" font-size="48">👆</text></svg>`)
+    },
+    {
+      id: 'stk_like_follow_3d',
+      name: '❤️ LIKE / FOLLOW 3D Bar',
+      category: 'social',
+      preview: '❤️ LIKE/FOLLOW',
+      dataUrl: this.svgToDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="360" height="130" viewBox="0 0 360 130"><polygon points="30,25 330,25 310,65 50,65" fill="#ef4444" stroke="#fff" stroke-width="3"/><polygon points="50,65 310,65 330,105 30,105" fill="#2563eb" stroke="#fff" stroke-width="3"/><text x="180" y="53" font-family="Arial, sans-serif" font-weight="900" font-size="26" fill="#fff" text-anchor="middle" letter-spacing="3">LIKE</text><text x="180" y="94" font-family="Arial, sans-serif" font-weight="900" font-size="26" fill="#fff" text-anchor="middle" letter-spacing="3">FOLLOW</text></svg>`)
+    },
+    {
+      id: 'stk_pixel_censor_bar',
+      name: '🟦 Sansür Mozaik Barı (Censor)',
+      category: 'effects',
+      preview: '🟦 SANSÜR',
+      dataUrl: this.svgToDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="360" height="100" viewBox="0 0 360 100"><rect x="0" y="10" width="45" height="40" fill="#cbd5e1"/><rect x="45" y="10" width="45" height="40" fill="#475569"/><rect x="90" y="10" width="45" height="40" fill="#94a3b8"/><rect x="135" y="10" width="45" height="40" fill="#1e293b"/><rect x="180" y="10" width="45" height="40" fill="#e2e8f0"/><rect x="225" y="10" width="45" height="40" fill="#64748b"/><rect x="270" y="10" width="45" height="40" fill="#334155"/><rect x="315" y="10" width="45" height="40" fill="#f8fafc"/><rect x="0" y="50" width="45" height="40" fill="#334155"/><rect x="45" y="50" width="45" height="40" fill="#f1f5f9"/><rect x="90" y="50" width="45" height="40" fill="#1e293b"/><rect x="135" y="50" width="45" height="40" fill="#cbd5e1"/><rect x="180" y="50" width="45" height="40" fill="#475569"/><rect x="225" y="50" width="45" height="40" fill="#94a3b8"/><rect x="270" y="50" width="45" height="40" fill="#e2e8f0"/><rect x="315" y="50" width="45" height="40" fill="#64748b"/></svg>`)
+    },
+    {
+      id: 'stk_arrow_down_bold',
+      name: '⬇️ Kırmızı Kalın Aşağı Ok',
+      category: 'arrows',
+      preview: '⬇️ AŞAĞI OK',
+      dataUrl: this.svgToDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="220" height="260" viewBox="0 0 220 260"><path d="M110 20 L110 190 M45 140 L110 215 L175 140" stroke="#ffffff" stroke-width="34" stroke-linecap="round" stroke-linejoin="round" fill="none"/><path d="M110 20 L110 190 M45 140 L110 215 L175 140" stroke="#ef4444" stroke-width="22" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>`)
+    },
+    {
+      id: 'stk_loading_spinner',
+      name: '🔄 Yükleniyor Halkası (Loading)',
+      category: 'effects',
+      preview: '🔄 LOADING',
+      dataUrl: this.svgToDataUrl(`<svg xmlns="http://www.w3.org/2000/svg" width="240" height="240" viewBox="0 0 240 240"><circle cx="120" cy="120" r="84" fill="none" stroke="#ffffff" stroke-width="18" stroke-dasharray="320 180" stroke-linecap="round"/><circle cx="120" cy="120" r="84" fill="none" stroke="#38bdf8" stroke-width="10" stroke-dasharray="320 180" stroke-linecap="round"/></svg>`)
+    }
   ];
 
+  private notoEmojiCatalogCache: Array<{ codepoint: string; tags: string[]; category: string }> | null = null;
+
   /**
-   * Iconify 200.000+ Açık Kaynak Vektör Sticker & İkon Motoru araması.
-   * Türkçe anahtar kelimeleri otomatik İngilizce ikon terimleriyle zenginleştirir.
+   * Çoklu Açık Kaynak Sticker & GIF Arama Motoru:
+   * 1. GIPHY v1 Transparent Stickers & GIFs API (CORS: *, Sıfır Kurulum)
+   * 2. Google Noto 881 Hareketli Emoji Kataloğu (512x512 Şeffaf GIF)
+   * 3. Iconify 200.000+ Vektör Çıkartma & İkon API
    */
-  async searchIconifyStickers(query: string): Promise<StickerLibraryItem[]> {
+  async searchIconifyStickers(query: string, sourceMode: 'all' | 'giphy_stickers' | 'giphy_gifs' | 'noto_animated' | 'iconify' = 'all'): Promise<StickerLibraryItem[]> {
     const q = (query || '').trim().toLowerCase();
     if (!q) return [];
 
     const trMap: Record<string, string> = {
       'ateş': 'fire flame',
       'alev': 'fire flame',
-      'ok': 'arrow',
+      'ok': 'arrow point',
+      'ok işareti': 'arrow point here',
+      'daire': 'circle highlight ring',
       'kalp': 'heart love',
       'para': 'money cash dollar coin',
       'yıldız': 'star sparkle',
-      'roket': 'rocket',
+      'roket': 'rocket launch',
       'kral': 'crown king',
       'taç': 'crown',
       'oyun': 'gamepad gaming',
       'müzik': 'music note audio',
       'kamera': 'camera video',
       'uyarı': 'warning alert',
-      'onay': 'check verified',
+      'onay': 'check verified yes',
       'tik': 'check tick',
-      'çarpı': 'close cross error',
-      'youtube': 'youtube',
-      'instagram': 'instagram',
+      'çarpı': 'close cross error no',
+      'youtube': 'youtube subscribe',
+      'instagram': 'instagram follow',
       'tiktok': 'tiktok',
-      'abone': 'bell subscribe',
+      'abone': 'subscribe bell button',
+      'abone ol': 'subscribe button bell',
       'zil': 'bell notification',
       'şimşek': 'lightning bolt zap',
       'fikir': 'lightbulb idea',
       'ampul': 'lightbulb',
       'hediye': 'gift present',
       'araba': 'car racing',
-      'kupa': 'trophy award',
+      'kupa': 'trophy award winner',
       'elmas': 'diamond gem',
-      'gülümseme': 'smile emoji',
-      'korku': 'skull ghost',
-      'patlama': 'explosion boom'
+      'gülümseme': 'smile laugh emoji',
+      'komik': 'funny laugh lol cat',
+      'kedi': 'funny cat meme',
+      'alkış': 'clap applause bravo',
+      'şaşkın': 'shocked wow mindblown',
+      'korku': 'skull ghost scary',
+      'patlama': 'explosion boom',
+      'hukuk': 'justice scales law gavel',
+      'adalet': 'justice scales court',
+      'kitap': 'book reading library',
+      'sayaç': 'countdown timer'
     };
 
     const mappedQuery = trMap[q] || q;
+    const results: StickerLibraryItem[] = [];
+    const giphyKey = 'GlVGYHkr3WSBnllca54iNt0yFbjz7L65';
+
+    const tasks: Promise<void>[] = [];
+
+    // 1. GIPHY Şeffaf Hareketli Stickerlar (veya GIF'ler)
+    if (sourceMode === 'all' || sourceMode === 'giphy_stickers' || sourceMode === 'giphy_gifs') {
+      const endpoint = sourceMode === 'giphy_gifs' ? 'gifs' : 'stickers';
+      const limit = sourceMode === 'all' ? 16 : 30;
+      tasks.push(
+        fetch(`https://api.giphy.com/v1/${endpoint}/search?api_key=${giphyKey}&q=${encodeURIComponent(mappedQuery)}&limit=${limit}&rating=g&lang=tr`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(data => {
+            const list = Array.isArray(data?.data) ? data.data : [];
+            for (const item of list) {
+              const gifUrl = item?.images?.original?.url || item?.images?.fixed_height?.url;
+              const previewUrl = item?.images?.fixed_height?.url || gifUrl;
+              if (!gifUrl) continue;
+              results.push({
+                id: `giphy_${item.id}`,
+                name: (item.title || mappedQuery).replace(/Sticker|GIF/gi, '').trim() || 'Hareketli GIF',
+                category: 'animated',
+                preview: 'GIF',
+                isAnimated: true,
+                dataUrl: gifUrl,
+                dataUri: previewUrl
+              });
+            }
+          })
+          .catch(() => {})
+      );
+    }
+
+    // 2. Google Noto 881 Hareketli Emoji Kataloğu
+    if (sourceMode === 'all' || sourceMode === 'noto_animated') {
+      tasks.push(
+        this.searchNotoAnimatedEmojis(mappedQuery, sourceMode === 'noto_animated' ? 30 : 10)
+          .then(items => {
+            results.push(...items);
+          })
+          .catch(() => {})
+      );
+    }
+
+    // 3. Iconify 200.000+ Vektör Sticker & İkon Motoru
+    if (sourceMode === 'all' || sourceMode === 'iconify') {
+      const limit = sourceMode === 'iconify' ? 36 : 16;
+      tasks.push(
+        fetch(`https://api.iconify.design/search?query=${encodeURIComponent(mappedQuery)}&limit=${limit}`)
+          .then(r => (r.ok ? r.json() : null))
+          .then(data => {
+            const icons: string[] = Array.isArray(data?.icons) ? data.icons : [];
+            for (let idx = 0; idx < icons.length; idx++) {
+              const [prefix, name] = icons[idx].split(':');
+              const svgUrl = `https://api.iconify.design/${prefix}/${name}.svg?height=256`;
+              results.push({
+                id: `iconify_${prefix}_${name}_${idx}`,
+                name: `${name.replace(/-/g, ' ')} (${prefix})`,
+                category: 'effects',
+                preview: name.slice(0, 12).toUpperCase(),
+                dataUrl: svgUrl
+              });
+            }
+          })
+          .catch(() => {})
+      );
+    }
+
+    await Promise.allSettled(tasks);
+    return results;
+  }
+
+  /**
+   * Google Noto 881 Hareketli Emoji resmi JSON kataloğunda arama yapar.
+   */
+  async searchNotoAnimatedEmojis(query: string, limit = 18): Promise<StickerLibraryItem[]> {
     try {
-      const url = `https://api.iconify.design/search?query=${encodeURIComponent(mappedQuery)}&limit=36`;
-      const resp = await fetch(url);
-      if (!resp.ok) return [];
-      const data = await resp.json();
-      const icons: string[] = Array.isArray(data?.icons) ? data.icons : [];
-      return icons.map((iconFull, idx) => {
-        const [prefix, name] = iconFull.split(':');
-        const svgUrl = `https://api.iconify.design/${prefix}/${name}.svg?height=256`;
-        return {
-          id: `iconify_${prefix}_${name}_${idx}`,
-          name: `${name.replace(/-/g, ' ')} (${prefix})`,
-          category: 'effects',
-          preview: name.slice(0, 12).toUpperCase(),
-          dataUrl: svgUrl
-        };
-      });
-    } catch (err) {
-      console.warn('[ICONIFY-SEARCH] Arama hatası:', err);
+      if (!this.notoEmojiCatalogCache) {
+        const resp = await fetch('https://googlefonts.github.io/noto-emoji-animation/data/api.json');
+        if (resp.ok) {
+          const data = await resp.json();
+          const rawIcons = Array.isArray(data?.icons) ? data.icons : [];
+          this.notoEmojiCatalogCache = rawIcons.map((ic: any) => ({
+            codepoint: String(ic.codepoint || ''),
+            tags: Array.isArray(ic.tags) ? ic.tags.map((t: string) => t.replace(/:/g, '').toLowerCase()) : [],
+            category: Array.isArray(ic.categories) && ic.categories[0] ? String(ic.categories[0]) : ''
+          }));
+        } else {
+          this.notoEmojiCatalogCache = [];
+        }
+      }
+      const tokens = query.toLowerCase().split(/\s+/).filter(Boolean);
+      const matched = (this.notoEmojiCatalogCache || []).filter(item =>
+        tokens.some(tok => item.tags.some(tag => tag.includes(tok)))
+      );
+      return matched.slice(0, limit).map(item => ({
+        id: `noto_anim_${item.codepoint}`,
+        name: `✨ ${item.tags[0] || item.codepoint} (Noto GIF)`,
+        category: 'animated',
+        preview: 'GIF',
+        isAnimated: true,
+        dataUrl: `https://fonts.gstatic.com/s/e/notoemoji/latest/${item.codepoint}/512.gif`
+      }));
+    } catch {
       return [];
     }
+  }
+
+  /**
+   * Canlı Çevrimiçi Ses Efekti (SFX) Arama Motoru:
+   * Openverse Audio API (Freesound CC0/CC-BY HQ MP3) + Wikimedia Commons Audio API üzerinden
+   * sıfır API anahtarıyla binlerce gerçek ses efektini arar ve anında önizleme/indirme sağlar.
+   */
+  async searchOnlineSfx(query: string): Promise<SfxLibraryItem[]> {
+    const q = (query || '').trim().toLowerCase();
+    if (!q) return [];
+
+    const trSfxMap: Record<string, string> = {
+      'geçiş': 'whoosh transition swish',
+      'kaydırma': 'whoosh swipe',
+      'rüzgar': 'whoosh wind swoosh',
+      'klavye': 'keyboard typing mechanical',
+      'daktilo': 'typewriter typing',
+      'yazı': 'typing keyboard',
+      'tıklama': 'mouse click button',
+      'buton': 'button click ui',
+      'çan': 'bell ding chime',
+      'zil': 'bell ring notification',
+      'tın': 'bell ding crystal chime',
+      'patlama': 'explosion boom blast',
+      'darbe': 'cinematic hit impact punch',
+      'yumruk': 'punch hit thud',
+      'kamera': 'camera shutter click flash',
+      'fotoğraf': 'camera shutter',
+      'alkış': 'applause clapping crowd',
+      'gülme': 'laugh funny',
+      'kahkaha': 'laughter crowd',
+      'komik': 'cartoon boing funny pop',
+      'ıslık': 'whistle',
+      'kalp': 'heartbeat pulse',
+      'saat': 'clock ticking timer',
+      'alarm': 'alarm siren alert',
+      'korku': 'horror suspense jumpscare',
+      'para': 'cash register coin money',
+      'kasa': 'cash register cha ching',
+      'su': 'water drop splash',
+      'sayfa': 'page turn paper flip',
+      'mühür': 'stamp thud gavel',
+      'mahkeme': 'gavel court hammer',
+      'oyun': 'arcade retro 8bit powerup'
+    };
+
+    const mappedQuery = trSfxMap[q] || q;
+    const results: SfxLibraryItem[] = [];
+
+    const openverseTask = fetch(
+      `https://api.openverse.org/v1/audio/?q=${encodeURIComponent(mappedQuery)}&length=shortest&page_size=18`
+    )
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        const items = Array.isArray(data?.results) ? data.results : [];
+        for (const item of items) {
+          const audioUrl = String(item?.url || '');
+          if (!audioUrl || !audioUrl.startsWith('http')) continue;
+          const durSec = item.duration ? Math.max(0.3, Math.min(12.0, Number(item.duration) / 1000)) : 1.5;
+          results.push({
+            id: `ov_sfx_${item.id}`,
+            name: String(item.title || mappedQuery).slice(0, 42),
+            category: 'ui',
+            icon: '🌐',
+            duration: Number(durSec.toFixed(2)),
+            synthPreset: 'whoosh-fast',
+            description: `${item.source || 'Freesound'} • ${item.creator || 'CC0'} (${(item.license || 'cc0').toUpperCase()})`,
+            peaks: [0.25, 0.75, 1.0, 0.85, 0.6, 0.35, 0.15],
+            sourceUrl: audioUrl,
+            creator: String(item.creator || 'Freesound'),
+            license: String(item.license || 'CC0'),
+            isOnline: true
+          });
+        }
+      })
+      .catch(() => {});
+
+    const wikiTask = fetch(
+      `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent('filetype:audio sound effect ' + mappedQuery)}&gsrnamespace=6&gsrlimit=12&prop=imageinfo&iiprop=url|size|mime|duration&format=json&origin=*`
+    )
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        const pages = data?.query?.pages ? Object.values(data.query.pages) : [];
+        for (const p of pages as any[]) {
+          const ii = Array.isArray(p?.imageinfo) ? p.imageinfo[0] : null;
+          const url = String(ii?.url || '');
+          const dur = Number(ii?.duration || 1.5);
+          if (!url || dur > 15.0 || dur <= 0.05) continue;
+          const cleanTitle = String(p?.title || '')
+            .replace(/^File:/i, '')
+            .replace(/\.(ogg|oga|mp3|wav|flac)$/i, '')
+            .replace(/[_-]+/g, ' ');
+          results.push({
+            id: `wiki_sfx_${p.pageid}`,
+            name: cleanTitle.slice(0, 42),
+            category: 'ui',
+            icon: '🔊',
+            duration: Number(Math.max(0.25, dur).toFixed(2)),
+            synthPreset: 'whoosh-fast',
+            description: 'Wikimedia Commons • Açık Lisanslı Stüdyo Sesi',
+            peaks: [0.3, 0.8, 0.95, 0.7, 0.4, 0.15],
+            sourceUrl: url,
+            creator: 'Wikimedia Commons',
+            license: 'CC',
+            isOnline: true
+          });
+        }
+      })
+      .catch(() => {});
+
+    await Promise.allSettled([openverseTask, wikiTask]);
+    return results;
+  }
+
+  /**
+   * Canlı Çevrimiçi Ücretsiz Stok Görsel / B-Roll Arama Motoru (Openverse + Wikimedia Commons).
+   */
+  async searchOnlineStockImages(query: string): Promise<OnlineStockImageItem[]> {
+    const q = (query || '').trim();
+    if (!q) return [];
+    const results: OnlineStockImageItem[] = [];
+
+    const openverseTask = fetch(
+      `https://api.openverse.org/v1/images/?q=${encodeURIComponent(q)}&page_size=16&aspect_ratio=wide`
+    )
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        const items = Array.isArray(data?.results) ? data.results : [];
+        for (const item of items) {
+          if (!item?.url) continue;
+          results.push({
+            id: `ov_img_${item.id}`,
+            title: String(item.title || q).slice(0, 40),
+            thumb: String(item.thumbnail || item.url),
+            url: String(item.url),
+            source: String(item.source || 'Openverse'),
+            creator: String(item.creator || '')
+          });
+        }
+      })
+      .catch(() => {});
+
+    const wikiTask = fetch(
+      `https://commons.wikimedia.org/w/api.php?action=query&generator=search&gsrsearch=${encodeURIComponent('filetype:bitmap ' + q)}&gsrnamespace=6&gsrlimit=12&prop=imageinfo&iiprop=url&iiurlwidth=640&format=json&origin=*`
+    )
+      .then(r => (r.ok ? r.json() : null))
+      .then(data => {
+        const pages = data?.query?.pages ? Object.values(data.query.pages) : [];
+        for (const p of pages as any[]) {
+          const ii = Array.isArray(p?.imageinfo) ? p.imageinfo[0] : null;
+          const thumb = String(ii?.thumburl || ii?.url || '');
+          const full = String(ii?.url || thumb);
+          if (!thumb) continue;
+          const cleanTitle = String(p?.title || q).replace(/^File:/i, '').replace(/\.[a-z0-9]+$/i, '').replace(/_/g, ' ');
+          results.push({
+            id: `wiki_img_${p.pageid}`,
+            title: cleanTitle.slice(0, 40),
+            thumb,
+            url: thumb,
+            source: 'Wikimedia'
+          });
+        }
+      })
+      .catch(() => {});
+
+    await Promise.allSettled([openverseTask, wikiTask]);
+    return results;
   }
 
   private svgToDataUrl(svg: string): string {

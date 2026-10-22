@@ -188,7 +188,34 @@ class PillowGraphicsEngine:
 
         target_path = os.path.join(target_dir, f"{slug}.ttf")
 
-        # 2. Google Fonts GitHub Raw URL'lerinden doğrudan .ttf indirmeyi dene
+        # 2. Birincil Yöntem: Resmi Google Fonts CSS2 API üzerinden tam glifli (Türkçe latin-ext destekli) .ttf indirme
+        encoded_fam = urllib.parse.quote(base_family).replace("%20", "+")
+        for weight_suffix in (":wght@400;700;900", ":wght@700", ":wght@400", ""):
+            css_url = f"https://fonts.googleapis.com/css2?family={encoded_fam}{weight_suffix}"
+            try:
+                req = urllib.request.Request(css_url, headers={"User-Agent": "Mozilla/5.0"})
+                with urllib.request.urlopen(req, timeout=3.5) as resp:
+                    css_text = resp.read().decode("utf-8", errors="ignore")
+                    ttf_urls = re.findall(r"url\((https://fonts\.gstatic\.com/[^)]+\.(?:ttf|otf))\)", css_text)
+                    if ttf_urls:
+                        chosen_ttf_url = ttf_urls[-1]
+                        ttf_req = urllib.request.Request(chosen_ttf_url, headers={"User-Agent": "Mozilla/5.0"})
+                        with urllib.request.urlopen(ttf_req, timeout=3.5) as ttf_resp:
+                            ttf_bytes = ttf_resp.read()
+                            if ttf_bytes and len(ttf_bytes) > 1024 and ttf_bytes[:4] in (b"\x00\x01\x00\x00", b"OTTO", b"true"):
+                                with open(target_path, "wb") as f_out:
+                                    f_out.write(ttf_bytes)
+                                logger.info(f"⬇️ Google Font otomatik indirildi (Google CSS2 TTF): {clean_family} -> {target_path}")
+                                return target_path
+            except urllib.error.HTTPError:
+                continue
+            except urllib.error.URLError:
+                cls._NETWORK_UNREACHABLE = True
+                break
+            except Exception:
+                continue
+
+        # 3. Yedek: Google Fonts GitHub Raw URL'lerinden doğrudan .ttf indirmeyi dene
         raw_urls = [
             f"https://raw.githubusercontent.com/google/fonts/main/ofl/{slug_no_dash}/{family_no_spaces}-Bold.ttf",
             f"https://raw.githubusercontent.com/google/fonts/main/ofl/{slug_no_dash}/{family_no_spaces}-Regular.ttf",
