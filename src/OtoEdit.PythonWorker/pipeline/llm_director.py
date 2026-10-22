@@ -10,7 +10,7 @@ Stage 5: DeterministicTimelineExecutor Çıktısı (overlays, sfx_list / sfxClip
 import os
 import tempfile
 from typing import Any, Dict, List, Optional
-from pipeline.holistic_analyzer import HolisticAnalyzer
+from pipeline.holistic_analyzer import ENGINE_VERSION, HolisticAnalyzer, audit_overlay_sync
 from pipeline.master_plan_validator import MasterPlanValidator
 from pipeline.safe_zone_vision_engine import DynamicTypographySizer, SafeZoneSpatialSolver
 from pipeline.theme_profiles import resolve_sub_theme
@@ -21,6 +21,9 @@ from services.web_image_crawler import WebImageCrawler
 from utils.logger import get_logger
 
 logger = get_logger("LlmDirector")
+
+# Otomatik yönetmen yazılarının arkasındaki yarı saydam siyah kutu (editörde ve render'da aynı)
+TEXT_BACKDROP_COLOR = "#00000080"
 
 
 class LlmDirector:
@@ -524,9 +527,33 @@ class LlmDirector:
             subtitles_enabled=subtitles_enabled,
         )
 
+        # Yazıların arkasındaki yarı saydam siyah kutu (editör/render) — Pydantic varsayılanına
+        # güvenmeden açıkça yazılır; böylece EDL hangi yoldan kaydedilirse kaydedilsin kutu kaybolmaz.
+        for ov in valid_overlays:
+            if isinstance(ov, dict) and ov.get("type") == "text" and not ov.get("backgroundColor"):
+                ov["backgroundColor"] = TEXT_BACKDROP_COLOR
+
+        # AŞAMA 5: Senkron Denetimi — her yazının, kendi transkriptindeki konuşulan kelimeyle aynı anda
+        # başladığını doğrula (farklı bir videonun transkripti veya kayma varsa loglarda anında görünür)
+        sync_report = audit_overlay_sync(valid_overlays, segments)
+        if sync_report["mismatches"]:
+            logger.warning(
+                f"[SyncAudit] {len(sync_report['mismatches'])}/{sync_report['checked']} yazı konuşulan "
+                f"kelimeyle eşleşmedi: {sync_report['mismatches'][:5]}"
+            )
+        else:
+            logger.info(f"[SyncAudit] {sync_report['checked']} yazının tamamı konuşulan kelimeyle senkron.")
+
+        logger.info(
+            f"[LlmDirector] Motor={ENGINE_VERSION} | Tema={theme_profile.id} | "
+            f"Overlay={len(valid_overlays)} SFX={len(valid_sfx)} Geçiş={len(valid_transitions)}"
+        )
+
         return {
             "theme_profile_id": theme_profile.id,
             "subject_summary": summary,
+            "engine_version": ENGINE_VERSION,
+            "sync_audit": sync_report,
             "overlays": valid_overlays,
             "sfx_list": valid_sfx,
             "sfxClips": valid_sfx,

@@ -125,6 +125,14 @@ class OverlayItem(BaseModel):
     flipH: Optional[bool] = False
     flipV: Optional[bool] = False
     dropShadow: Optional[bool] = False
+    # Otonom Yönetmen (LlmDirector) tipografi & kurgu meta alanları — Pydantic'in bunları
+    # sessizce atmaması için açıkça tanımlanır (yan sütun genişliği, satır aralığı, mini-tema rolü)
+    maxWidthCqi: Optional[float] = None
+    lineHeight: Optional[float] = None
+    stackCount: Optional[int] = None
+    subThemeRole: Optional[str] = None
+    actionType: Optional[str] = None
+    semanticPriority: Optional[bool] = None
 
 
 class SuggestionItem(BaseModel):

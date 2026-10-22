@@ -35,6 +35,9 @@ from utils.logger import get_logger
 
 logger = get_logger("HolisticAnalyzer")
 
+# Hangi analiz motorunun çalıştığını loglardan doğrulamak için sürüm etiketi
+ENGINE_VERSION = "holistic-v2.1-verbatim-lock+asr-glossary+sync-audit"
+
 
 @dataclass
 class WordToken:
@@ -653,6 +656,165 @@ class VerbatimTranscriptValidator:
         return events
 
 
+# ----------------------------------------------------------------------------
+# ASR (Whisper) yazım hatalarına dayanıklı sözlük eşleştirme
+# ----------------------------------------------------------------------------
+_ASR_PUNCT_RE = re.compile(r"^([^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ]*)(.*?)([^\wçğıöşüâîûÇĞİÖŞÜÂÎÛ'’-]*)$", re.UNICODE)
+
+
+def _asr_norm(word: str) -> str:
+    return VerbatimTranscriptValidator.normalize_root(word)
+
+
+def _build_asr_glossary() -> List[List[str]]:
+    """Sözlüklerdeki tetikleyici ifadelerden ASR düzeltmesinde kullanılacak güvenli öbek listesi."""
+    phrases: Set[str] = set()
+
+    def add(p: str) -> None:
+        p = to_turkish_lower(p.strip())
+        if not p:
+            return
+        words = p.split()
+        # Yanlış pozitifleri önlemek için: çok kelimeli öbekler veya en az 7 harfli tek kelimeler
+        if len(words) >= 2 or (len(words) == 1 and len(_asr_norm(words[0])) >= 7):
+            phrases.add(p)
+
+    for kw_tuple, *_rest in SHORT_CONCEPT_TERMS:
+        for k in kw_tuple:
+            add(k)
+    for kw_tuple, *_rest in KNOWN_PERSONS_WIKI_MAP:
+        for k in kw_tuple:
+            add(k)
+    for kw_tuple, *_rest in KNOWN_WORKS_WIKI_MAP:
+        for k in kw_tuple:
+            add(k)
+    return [p.split() for p in sorted(phrases, key=lambda s: -len(s))]
+
+
+def canonicalize_asr_variants(segments: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Whisper'ın terimleri fonetik olarak yanlış yazdığı yerleri ('kudus delili' -> 'hudus delili',
+    'imkam delili' -> 'imkan delili') analiz için sözlükteki doğru yazıma çevirir.
+    Kelime zaman damgaları DEĞİŞMEZ; yalnızca analizcinin kendi kopyasındaki metin düzeltilir
+    (editördeki altyazı/transkript etkilenmez).
+    """
+    import copy
+    import difflib
+
+    glossary = _build_asr_glossary()
+    out = copy.deepcopy(segments)
+    fixes = 0
+    for seg in out:
+        words = seg.get("words") or []
+        if not words:
+            continue
+        norms = [_asr_norm(str(w.get("word", ""))) for w in words]
+        i = 0
+        while i < len(words):
+            matched = False
+            for phrase in glossary:
+                m = len(phrase)
+                if i + m > len(words):
+                    continue
+                window = norms[i : i + m]
+                if any(not w for w in window):
+                    continue
+                phrase_norm = [_asr_norm(p) for p in phrase]
+                if window == phrase_norm:
+                    continue
+                joined_w = " ".join(window)
+                joined_p = " ".join(phrase_norm)
+                ratio = difflib.SequenceMatcher(None, joined_w, joined_p).ratio()
+                if m >= 2:
+                    exact_words = sum(1 for a, b in zip(window, phrase_norm) if a == b)
+                    ok = ratio >= 0.86 and exact_words >= 1 and abs(len(joined_w) - len(joined_p)) <= 2
+                else:
+                    ok = ratio >= 0.88 and abs(len(joined_w) - len(joined_p)) <= 1
+                if not ok:
+                    continue
+                for k in range(m):
+                    w_obj = words[i + k]
+                    raw = str(w_obj.get("word", ""))
+                    pm = _ASR_PUNCT_RE.match(raw.strip())
+                    lead, trail = (pm.group(1), pm.group(3)) if pm else ("", "")
+                    w_obj["word"] = f"{lead}{phrase[k]}{trail}"
+                    norms[i + k] = phrase_norm[k]
+                logger.info(f"[ASR-Glossary] '{joined_w}' -> '{' '.join(phrase)}' @ {float(words[i].get('start', 0)):.2f}s")
+                fixes += 1
+                i += m
+                matched = True
+                break
+            if not matched:
+                i += 1
+        seg["text"] = " ".join(str(w.get("word", "")).strip() for w in words).strip()
+    return out, fixes
+
+
+def audit_overlay_sync(
+    overlays: List[Dict[str, Any]],
+    segments: List[Dict[str, Any]],
+    lead_tolerance: float = 1.2,
+    lag_tolerance: float = 2.5,
+) -> Dict[str, Any]:
+    """
+    Her otomatik yazının, aynı projenin transkriptinde etiket kelimelerinden birinin konuşulduğu
+    ana yakın başladığını doğrular. Farklı bir videonun transkriptiyle üretilmiş veya kaymış
+    planlar burada 'mismatch' olarak yakalanır.
+    """
+    import difflib
+
+    spoken: List[Tuple[float, str]] = []
+    for seg in segments or []:
+        words = seg.get("words") or []
+        if words:
+            for w in words:
+                spoken.append((float(w.get("start", seg.get("start", 0.0))), _asr_norm(str(w.get("word", "")))))
+        else:
+            parts = str(seg.get("text", "")).split()
+            s0 = float(seg.get("start", 0.0))
+            s1 = max(s0 + 0.2, float(seg.get("end", s0 + 2.0)))
+            step = (s1 - s0) / max(1, len(parts))
+            for k, p in enumerate(parts):
+                spoken.append((s0 + k * step, _asr_norm(p)))
+    spoken.sort(key=lambda x: x[0])
+
+    def word_spoken_near(label_word: str, ts: float) -> bool:
+        lw = _asr_norm(label_word)
+        if len(lw) < 2:
+            return False
+        for st, sp in spoken:
+            if st < ts - lead_tolerance:
+                continue
+            if st > ts + lag_tolerance:
+                break
+            if not sp:
+                continue
+            if sp == lw or sp.startswith(lw[:4]) or (len(sp) >= 4 and lw.startswith(sp[:4])):
+                return True
+            if len(lw) >= 4 and difflib.SequenceMatcher(None, lw, sp).ratio() >= 0.8:
+                return True
+        return False
+
+    checked = 0
+    mismatches: List[Dict[str, Any]] = []
+    for ov in overlays or []:
+        if not isinstance(ov, dict) or ov.get("type") != "text":
+            continue
+        content = str(ov.get("content") or ov.get("text") or "").strip()
+        if not content:
+            continue
+        try:
+            ts = float(ov.get("timestamp", ov.get("start", 0.0)))
+        except (TypeError, ValueError):
+            continue
+        label_words = [w for w in re.split(r"[\s\-/]+", content) if len(_asr_norm(w)) >= 2]
+        if not label_words:
+            continue
+        checked += 1
+        if not any(word_spoken_near(w, ts) for w in label_words):
+            mismatches.append({"timestamp": round(ts, 2), "content": content})
+    return {"checked": checked, "mismatches": mismatches}
+
 class HolisticAnalyzer:
     """
     Videoyu kelime-zamanlamalı (Word-Synchronized) olarak analiz eden ve:
@@ -676,6 +838,9 @@ class HolisticAnalyzer:
     ) -> Tuple[ThemeProfile, str, List[ChapterPlan]]:
         normalized_cuts = self._normalize_cuts(cuts or [])
         active_segments = self._filter_active_segments(segments, normalized_cuts)
+        # Whisper'ın fonetik yazım hatalarını ('kudus delili' -> 'hudus delili') analiz kopyasında düzelt
+        active_segments, asr_fixes = canonicalize_asr_variants(active_segments)
+        logger.info(f"[HolisticAnalyzer] Motor={ENGINE_VERSION} | ASR sözlük düzeltmesi={asr_fixes}")
         full_text = " ".join(str(s.get("text", "")).strip() for s in active_segments)
 
         # 1. Kilitli ThemeProfile tespiti
@@ -1571,6 +1736,14 @@ class HolisticAnalyzer:
 
         work_clean = " ".join(filtered_words).strip()
         work_upper = to_turkish_upper(work_clean)
+        # Bilinen bir esere karşılık geliyorsa sözlükteki doğru yazımı/wiki başlığını kullan
+        # ('Lemeat' -> 'LEMEÂT'); bilinmeyen eserlerde konuşulan ad aynen kalır.
+        wiki_tr_q, wiki_en_q = work_clean, work_clean
+        work_norm = VerbatimTranscriptValidator.normalize_root(work_clean.replace(" ", ""))
+        for kw_tuple, k_title, k_wiki_tr, k_wiki_en in KNOWN_WORKS_WIKI_MAP:
+            if any(VerbatimTranscriptValidator.normalize_root(k.split()[0]) == work_norm for k in kw_tuple):
+                work_upper, wiki_tr_q, wiki_en_q = k_title, k_wiki_tr, k_wiki_en
+                break
         if len(work_upper) < 3 or s_start - seen_works.get(work_upper, -999.0) < 240.0:
             return None
 
@@ -1613,11 +1786,11 @@ class HolisticAnalyzer:
             end_sec=ev_end,
             text_primary=work_upper,
             text_secondary="Eser / Kitap",
-            primary_web_query_tr=work_clean,
-            secondary_stock_query_en=work_clean,
-            fallback_minimal_query_en=work_clean,
-            person_wiki_tr=work_clean,
-            person_wiki_en=work_clean,
+            primary_web_query_tr=wiki_tr_q,
+            secondary_stock_query_en=wiki_en_q,
+            fallback_minimal_query_en=wiki_en_q,
+            person_wiki_tr=wiki_tr_q,
+            person_wiki_en=wiki_en_q,
             semantic_priority=True,
         )
 

@@ -823,6 +823,7 @@ export interface ContextMenuState {
 
             <!-- Video En-Boy Oranına Kilitli Sahne (Video & Kaplamalar Birebir Kilitli) -->
             <div 
+              #playerStage
               style="container-type: inline-size; container-name: player;"
               class="relative flex items-center justify-center w-full max-h-[460px] shadow-2xl overflow-hidden"
               [style.aspectRatio]="videoAspectRatio()"
@@ -893,7 +894,7 @@ export interface ContextMenuState {
                    selectedOverlayId() === ov.id ? 'ring-2 ring-brand-cyan shadow-glow-sm' : ''
                 ]"
                 [style.color]="ov.color || '#FFFFFF'"
-                [style.backgroundColor]="ov.backgroundColor || 'transparent'"
+                [style.backgroundColor]="getOverlayBackgroundColor(ov)"
                 [style.fontFamily]="ov.font || 'Inter, sans-serif'">
                 
                 <div [ngClass]="[getOverlayAnimationClass(ov), (ov.type === 'video' && ov.fullScreen) ? 'w-full h-full' : '']" [style.transform]="getOverlay3DTransform(ov)">
@@ -948,10 +949,8 @@ export interface ContextMenuState {
                 <!-- 1B. Normal & Photoshop Stil Metin Kaplaması (Gradient, Çift Kontur, Neon Glow, Pill/Marker, Typewriter) -->
                 <span 
                   *ngIf="ov.type === 'text' && (!ov.curveBend || (ov.curveBend >= -1 && ov.curveBend <= 1))" 
-                  class="font-bold whitespace-pre-line break-words inline-block transition-all"
-                  [ngStyle]="getTextOverlayStyle(ov)">
-                  {{ getRenderedOverlayText(ov) }}
-                </span>
+                  class="font-bold inline-block transition-all"
+                  [ngStyle]="getTextOverlayStyle(ov)">{{ getRenderedOverlayText(ov) }}</span>
 
                 <!-- 2. Görsel / B-Roll / Sticker / GIF / PiP Video Kaplaması -->
                 <div 
@@ -6226,6 +6225,8 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.playerResizeObserver?.disconnect();
+    this.playerResizeObserver = null;
     if (this.modalPreviewTimer) {
       clearInterval(this.modalPreviewTimer);
       this.modalPreviewTimer = null;
@@ -8512,8 +8513,51 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   private _textMeasureCtx: CanvasRenderingContext2D | null = null;
 
+  /** Monitördeki gerçek oynatıcı sahnesinin (container-type: inline-size) piksel genişliği — cqi hesapları için. */
+  readonly playerWidthPx = signal(818);
+  /** Web fontları yüklendiğinde metin ölçümlerini yeniden tetiklemek için sayaç. */
+  readonly fontsReadyTick = signal(0);
+  private playerResizeObserver: ResizeObserver | null = null;
+  private fontsReadyHooked = false;
+
+  @ViewChild('playerStage') set playerStageEl(el: ElementRef<HTMLDivElement> | undefined) {
+    this.playerResizeObserver?.disconnect();
+    this.playerResizeObserver = null;
+    const node = el?.nativeElement;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const w0 = node.getBoundingClientRect().width;
+    if (w0 > 50) this.playerWidthPx.set(w0);
+    this.playerResizeObserver = new ResizeObserver(entries => {
+      const w = entries[0]?.contentRect?.width || 0;
+      if (w > 50 && Math.abs(w - this.playerWidthPx()) > 0.5) {
+        this.playerWidthPx.set(w);
+      }
+    });
+    this.playerResizeObserver.observe(node);
+
+    if (!this.fontsReadyHooked && typeof document !== 'undefined' && (document as any).fonts?.ready) {
+      this.fontsReadyHooked = true;
+      (document as any).fonts.ready.then(() => this.fontsReadyTick.update(v => v + 1));
+      (document as any).fonts.addEventListener?.('loadingdone', () => this.fontsReadyTick.update(v => v + 1));
+    }
+  }
+
+  /**
+   * Kaplama arka plan rengi. Worker (Pydantic OverlayItem) otomatik yönetmen yazılarına
+   * varsayılan olarak yarı saydam siyah (#00000080) kutu verir; bu alan herhangi bir nedenle
+   * eksik kalsa bile otomatik yönetmen yazılarının kutusu kaybolmaz.
+   */
+  getOverlayBackgroundColor(ov: OverlayItem): string {
+    if (ov.backgroundColor) return ov.backgroundColor;
+    const isAutoDirectorText = ov.type === 'text' && (String(ov.id || '').startsWith('ad_') || !!(ov as any).subThemeRole);
+    return isAutoDirectorText ? '#00000080' : 'transparent';
+  }
+
   private measureOverlayTextPx(text: string, fontSpec: string, letterSpacingPx: number = 0): number {
     if (!text) return 0;
+    const cacheKey = `${this.fontsReadyTick()}|${fontSpec}|${letterSpacingPx}|${text}`;
+    const cached = this._textMeasureCache.get(cacheKey);
+    if (cached !== undefined) return cached;
     if (!this._textMeasureCtx && typeof document !== 'undefined') {
       const canvas = document.createElement('canvas');
       this._textMeasureCtx = canvas.getContext('2d');
@@ -8524,8 +8568,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     this._textMeasureCtx.font = fontSpec;
     const baseWidth = this._textMeasureCtx.measureText(text).width;
     const extraSpacing = Math.max(0, text.length - 1) * (letterSpacingPx || 0);
-    return baseWidth + extraSpacing;
+    const result = baseWidth + extraSpacing;
+    if (this._textMeasureCache.size > 4000) this._textMeasureCache.clear();
+    this._textMeasureCache.set(cacheKey, result);
+    return result;
   }
+  private _textMeasureCache = new Map<string, number>();
 
   /**
    * Metin tek satırda yan koridor sınırını (maxWidthCqi) aşıyorsa, kelimeleri
@@ -8553,8 +8601,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     const isSideColumn = posX <= 34 || posX >= 66;
     const maxCqi = isSideColumn ? ((ov as any).maxWidthCqi || 30) : 64;
 
-    const refCanvasWidthPx = 1920 * 0.46;
-    const maxBoxWidthPx = refCanvasWidthPx * (maxCqi / 100);
+    // Gerçek monitör sahnesi genişliği (cqi -> px). Font yüklemesi tamamlanınca yeniden ölç.
+    this.fontsReadyTick();
+    const stageWidthPx = this.playerWidthPx();
+    const maxBoxWidthPx = stageWidthPx * (maxCqi / 100);
     const isBox = ov.boxStyle && ov.boxStyle !== 'none';
     const padXPx = isBox ? (fSize * 0.58) : 4;
     const maxLineTextPx = Math.max(fSize * 4, maxBoxWidthPx - (padXPx * 2));
@@ -8564,23 +8614,38 @@ export class EditorComponent implements OnInit, OnDestroy {
       return raw;
     }
 
-    let bestSplitIdx = 1;
-    let bestMaxLineWidth = Number.POSITIVE_INFINITY;
-    for (let i = 1; i < words.length; i++) {
-      const line1 = words.slice(0, i).join(' ');
-      const line2 = words.slice(i).join(' ');
-      const w1 = this.measureOverlayTextPx(line1, fontSpec, letterSpacing);
-      const w2 = this.measureOverlayTextPx(line2, fontSpec, letterSpacing);
-      const currentMax = Math.max(w1, w2);
-      if (currentMax < bestMaxLineWidth) {
-        bestMaxLineWidth = currentMax;
-        bestSplitIdx = i;
+    // En az satır sayısıyla sığan, en uzun satırı en kısa olan dengeli bölmeyi bul (k = 2..n).
+    const n = words.length;
+    const lineW = (a: number, b: number) => this.measureOverlayTextPx(words.slice(a, b).join(' '), fontSpec, letterSpacing);
+    let bestLines: string[] = [raw];
+    for (let k = 2; k <= Math.min(n, 4); k++) {
+      // dp[j][i]: ilk i kelimeyi j satıra bölmenin minimum "en uzun satır" değeri
+      const dp: number[][] = Array.from({ length: k + 1 }, () => new Array(n + 1).fill(Number.POSITIVE_INFINITY));
+      const cut: number[][] = Array.from({ length: k + 1 }, () => new Array(n + 1).fill(0));
+      dp[0][0] = 0;
+      for (let j = 1; j <= k; j++) {
+        for (let i = j; i <= n; i++) {
+          for (let p = j - 1; p < i; p++) {
+            if (!isFinite(dp[j - 1][p])) continue;
+            const cand = Math.max(dp[j - 1][p], lineW(p, i));
+            if (cand < dp[j][i]) {
+              dp[j][i] = cand;
+              cut[j][i] = p;
+            }
+          }
+        }
       }
+      const lines: string[] = [];
+      let end = n;
+      for (let j = k; j >= 1; j--) {
+        const start = cut[j][end];
+        lines.unshift(words.slice(start, end).join(' '));
+        end = start;
+      }
+      bestLines = lines;
+      if (dp[k][n] <= maxLineTextPx) break;
     }
-
-    const bestLine1 = words.slice(0, bestSplitIdx).join(' ');
-    const bestLine2 = words.slice(bestSplitIdx).join(' ');
-    return `${bestLine1}\n${bestLine2}`;
+    return bestLines.join('\n');
   }
 
   getRenderedOverlayText(ov: OverlayItem): string {
@@ -8603,9 +8668,6 @@ export class EditorComponent implements OnInit, OnDestroy {
     const scale = ov.scale || 1;
     const rawFontSize = ov.fontSize || 48;
     const fSize = Math.max(14, (rawFontSize * 0.46) * scale);
-    const posX = ov.positionX ?? 50;
-    const isSideColumn = posX <= 34 || posX >= 66;
-    const sideMaxWidth = (ov as any).maxWidthCqi ? `${(ov as any).maxWidthCqi}cqi` : '31cqi';
     const angleRad = ((ov.shadowAngle ?? 45) * Math.PI) / 180;
     const dist = ov.shadowDistance ?? 4;
     const dx = Math.round(Math.cos(angleRad) * dist);
@@ -8637,12 +8699,14 @@ export class EditorComponent implements OnInit, OnDestroy {
       'text-align': ov.textAlign || 'center',
       'text-transform': ov.allCaps ? 'uppercase' : 'none',
       'letter-spacing.px': ov.letterSpacing || 0,
+      // Satır kırma tamamen getTightWrappedFullText() tarafından (\n ile) yapılır; tarayıcının
+      // kendi kendine kaydırması engellenir. Böylece kutu genişliği = en uzun satır + padding olur
+      // ve 2 satıra geçen yazılarda sağda/solda boş siyah alan kalmaz.
       'width': 'max-content',
-      'max-width': isSideColumn ? sideMaxWidth : '64cqi',
-      'white-space': 'pre-line',
+      'max-width': 'none',
+      'white-space': 'pre',
       'word-break': 'normal',
-      'overflow-wrap': 'break-word',
-      'text-wrap': 'wrap',
+      'overflow-wrap': 'normal',
       'box-sizing': 'border-box',
       'paint-order': 'stroke fill',
       '-webkit-text-stroke': ov.strokeWidth ? `${(ov.strokeWidth * 0.45).toFixed(1)}px ${ov.strokeColor || '#000'}` : 'none',

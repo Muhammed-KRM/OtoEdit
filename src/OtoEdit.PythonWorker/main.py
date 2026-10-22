@@ -37,6 +37,11 @@ def main():
     logger.info(f"📦 MinIO Endpoint: {Config.MINIO_ENDPOINT}")
     logger.info(f"🎙️ STT Motor Sırası: {Config.STT_ENGINE_ORDER}")
     logger.info(f"✂️ Jump-Cut Motoru: {Config.JUMPCUT_ENGINE} (Min Silence: {Config.JUMPCUT_MIN_SILENCE_MS}ms, Pad: {Config.JUMPCUT_PAD_MS}ms)")
+    try:
+        from pipeline.holistic_analyzer import ENGINE_VERSION
+        logger.info(f"Otonom Yonetmen Motoru: {ENGINE_VERSION}")
+    except Exception as ver_err:
+        logger.warning(f"Otonom Yonetmen motor surumu okunamadi: {ver_err}")
     logger.info("==================================================")
 
     Config.ensure_directories()
