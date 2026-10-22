@@ -180,10 +180,11 @@ class MasterPlanValidator:
         # "Ya ikisinde de gelmeli ya hiç gelmemeli ve ikisinde de aynı ses gelmeli":
         # - 24s kör SFX makası kaldırıldı!
         # - Onaylanan HER metin katmanına kendi Mini-Tema SFX'i (ding-bright, keyboard-type, pop-bubble)
-        #   ve onaylanan HER sahne geçişine (t - 0.10s) 'whoosh-fast' SFX'i %100 deterministik bağlanır.
+        #   ve onaylanan HER sahne geçişine (t - 0.15s) 'capcut-swish-large' (Swish Whoosh Large 794558) SFX'i %100 deterministik bağlanır.
         sfx_preset_map = {
-            "whoosh": ("whoosh-fast", "Whoosh Hızlı Geçiş", 0.42, "whoosh"),
-            "whoosh-fast": ("whoosh-fast", "Whoosh Hızlı Geçiş", 0.42, "whoosh"),
+            "capcut-swish-large": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
+            "whoosh": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
+            "whoosh-fast": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
             "pop": ("pop-bubble", "Pop Baloncuk (Kavram)", 0.25, "pop"),
             "pop-bubble": ("pop-bubble", "Pop Baloncuk (Kavram)", 0.25, "pop"),
             "ding": ("ding-bright", "Ding Parlak Çan (Tın)", 0.90, "ui"),
@@ -191,7 +192,7 @@ class MasterPlanValidator:
             "keyboard": ("keyboard-type", "Mekanik Klavye (Daktilo)", 0.45, "ui"),
             "keyboard-type": ("keyboard-type", "Mekanik Klavye (Daktilo)", 0.45, "ui"),
             "keyboard-typing": ("keyboard-type", "Mekanik Klavye (Daktilo)", 0.45, "ui"),
-            "impact": ("whoosh-fast", "Impact Whoosh", 0.45, "whoosh"),
+            "impact": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
         }
 
         repaired_sfx: List[Dict[str, Any]] = []
@@ -239,27 +240,27 @@ class MasterPlanValidator:
                 "boundOverlayId": ov_id,
             })
 
-        # Onaylanan her sahne geçişine (t - 0.10s) 'whoosh-fast' kaydırma sesi bağla
+        # Onaylanan her sahne geçişine (t - 0.15s) 'capcut-swish-large' (Swish Whoosh Large 794558) kaydırma sesi bağla
         for tr_idx, tr in enumerate(repaired_transitions):
             tr_ts = float(tr.get("timestamp") or tr.get("boundaryTime") or 0.0)
-            sfx_ts = round(max(0.05, tr_ts - 0.10), 2)
+            sfx_ts = round(max(0.05, tr_ts - 0.15), 2)
             if not any(
-                abs(float(s["start"]) - sfx_ts) < 0.18 and s["presetId"] == "whoosh-fast"
+                abs(float(s["start"]) - sfx_ts) < 0.22 and s["presetId"] in ("capcut-swish-large", "whoosh-fast")
                 for s in repaired_sfx
             ):
                 repaired_sfx.append({
                     "id": f"ad_sfx_tr_{tr_idx + 1}",
-                    "name": "Whoosh Hızlı Geçiş",
-                    "title": "Whoosh Hızlı Geçiş",
-                    "presetId": "whoosh-fast",
-                    "synthPreset": "whoosh-fast",
+                    "name": "Swish Whoosh (Large 794558)",
+                    "title": "Swish Whoosh (Large 794558)",
+                    "presetId": "capcut-swish-large",
+                    "synthPreset": "capcut-swish-large",
                     "type": "whoosh",
                     "category": "whoosh",
-                    "sourceUrl": "sfx://whoosh-fast",
+                    "sourceUrl": "sfx://capcut-swish-large",
                     "timestamp": sfx_ts,
                     "start": sfx_ts,
-                    "duration": 0.42,
-                    "volume": 0.20,
+                    "duration": 0.81,
+                    "volume": 0.22,
                     "subThemeRole": "TOPIC_TRANSITION",
                     "isTransitionSfx": True,
                 })

@@ -93,7 +93,10 @@ class AudioMixer:
         "keyboard": "keyboard-typing",
         "ding": "ding-bright",
         "pop": "pop-bubble",
-        "whoosh": "whoosh-fast",
+        "whoosh": "capcut-swish-large",
+        "whoosh-fast": "capcut-swish-large",
+        "swish": "capcut-swish-large",
+        "capcut-swish-large": "capcut-swish-large",
     }
 
     @classmethod

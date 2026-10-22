@@ -88,11 +88,11 @@ class LlmDirector:
         generated_sfx: List[Dict[str, Any]] = []
         generated_transitions: List[Dict[str, Any]] = []
 
-        # Mevcut kesimler varsa kesim sınırlarına sola kaydırmalı geçiş (smoothleft) + whoosh-fast SFX ekle
+        # Mevcut kesimler varsa kesim sınırlarına sola kaydırmalı geçiş (smoothleft) + capcut-swish-large SFX ekle
         normalized_cuts = self.analyzer._normalize_cuts(cuts or [])
         for c_idx, (c_start, c_end) in enumerate(normalized_cuts[:8]):
             tr_ts = round(c_start, 2)
-            sfx_ts = round(max(0.05, tr_ts - 0.10), 2)
+            sfx_ts = round(max(0.05, tr_ts - 0.15), 2)
             generated_transitions.append({
                 "id": f"ad_tr_cut_{c_idx + 1}",
                 "timestamp": tr_ts,
@@ -104,15 +104,16 @@ class LlmDirector:
             })
             generated_sfx.append({
                 "id": f"ad_sfx_tr_cut_{c_idx + 1}",
-                "name": "Whoosh Hızlı Geçiş",
-                "presetId": "whoosh-fast",
+                "name": "Swish Whoosh (Large 794558)",
+                "presetId": "capcut-swish-large",
+                "synthPreset": "capcut-swish-large",
                 "type": "whoosh",
                 "category": "whoosh",
-                "sourceUrl": "sfx://whoosh-fast",
+                "sourceUrl": "sfx://capcut-swish-large",
                 "timestamp": sfx_ts,
                 "start": sfx_ts,
-                "duration": 0.42,
-                "volume": 0.20,
+                "duration": 0.81,
+                "volume": 0.22,
                 "subThemeRole": "TOPIC_TRANSITION",
                 "isTransitionSfx": True,
             })
@@ -121,7 +122,7 @@ class LlmDirector:
         for ch_idx, ch in enumerate(chapter_plans):
             if ch_idx > 0 and ch.start_sec > 3.5:
                 tr_ts = round(ch.start_sec, 2)
-                sfx_ts = round(max(0.05, tr_ts - 0.10), 2)
+                sfx_ts = round(max(0.05, tr_ts - 0.15), 2)
                 generated_transitions.append({
                     "id": f"ad_tr_ch_{ch_idx}",
                     "timestamp": tr_ts,
@@ -133,15 +134,16 @@ class LlmDirector:
                 })
                 generated_sfx.append({
                     "id": f"ad_sfx_tr_ch_{ch_idx}",
-                    "name": "Whoosh Hızlı Geçiş",
-                    "presetId": "whoosh-fast",
+                    "name": "Swish Whoosh (Large 794558)",
+                    "presetId": "capcut-swish-large",
+                    "synthPreset": "capcut-swish-large",
                     "type": "whoosh",
                     "category": "whoosh",
-                    "sourceUrl": "sfx://whoosh-fast",
+                    "sourceUrl": "sfx://capcut-swish-large",
                     "timestamp": sfx_ts,
                     "start": sfx_ts,
-                    "duration": 0.42,
-                    "volume": 0.20,
+                    "duration": 0.81,
+                    "volume": 0.22,
                     "subThemeRole": "TOPIC_TRANSITION",
                     "isTransitionSfx": True,
                 })

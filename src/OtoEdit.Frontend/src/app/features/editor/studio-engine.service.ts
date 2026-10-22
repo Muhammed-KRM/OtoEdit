@@ -990,7 +990,7 @@ export class StudioEngineService {
   // 3. 76 KATEGORİZE STÜDYO SES EFEKTİ (SFX) KÜTÜPHANESİ (WEB AUDIO API SENTEZLEYİCİ İLE %100 ÇEVRİMDIŞI & 0ms GECİKME)
   readonly sfxLibrary: SfxLibraryItem[] = [
     // --- WHOOSH / GEÇİŞ (14) ---
-    { id: 'whoosh-fast', name: 'Whoosh Hızlı Geçiş', category: 'whoosh', icon: '💨', duration: 0.42, synthPreset: 'whoosh-fast', description: 'Hızlı sahne ve yazı geçişleri için rüzgar efekti', peaks: [0.1, 0.3, 0.7, 0.95, 1.0, 0.85, 0.5, 0.2, 0.05] },
+    { id: 'whoosh-fast', name: 'Swish Whoosh (Large 794558)', category: 'whoosh', icon: '💨', duration: 0.81, synthPreset: 'capcut-swish-large', description: 'Orijinal CapCut Swish Whoosh (Large 794558) kaydırmalı geçiş sesi', peaks: [0.28, 0.94, 0.88, 0.43, 0.45, 0.12, 0.04, 0.01] },
     { id: 'swoosh-deep', name: 'Swoosh Derin Sinematik', category: 'whoosh', icon: '🌪️', duration: 0.75, synthPreset: 'swoosh-deep', description: 'Ağır kamera dönüşleri ve Whip Pan için derin geçiş', peaks: [0.05, 0.2, 0.5, 0.8, 0.95, 0.9, 0.7, 0.4, 0.15, 0.05] },
     { id: 'whoosh-air', name: 'Hafif Hava Geçişi (Airy)', category: 'whoosh', icon: '🍃', duration: 0.38, synthPreset: 'whoosh-fast', description: 'Yumuşak B-Roll ve metin belirmesi için hava geçişi', peaks: [0.1, 0.4, 0.8, 0.9, 0.6, 0.3, 0.1] },
     { id: 'whoosh-whip', name: 'Kırbaç Kamera (Whip Pan)', category: 'whoosh', icon: '⚡', duration: 0.30, synthPreset: 'whoosh-fast', description: 'Çok hızlı sağa/sola kamera savrulma sesi', peaks: [0.2, 0.8, 1.0, 0.7, 0.2] },
@@ -1078,7 +1078,7 @@ export class StudioEngineService {
     { id: 'anime-wow', name: 'Parlak Anime Şaşkınlık', category: 'funny', icon: '🤩', duration: 0.85, synthPreset: 'success-chime', description: 'Etkileyici ve parlak anlar için ışıltılı akor', peaks: [0.8, 1.0, 0.9, 0.7, 0.4, 0.15] },
 
     // --- CAPCUT REVAÇTA, ASMR, MAKİNELER & ISLIK (24 YENİ SES EFEKTİ — Görsel 1) ---
-    { id: 'capcut-swish-large', name: 'Swish Whoosh (Large 794558)', category: 'whoosh', icon: '🌪️', duration: 0.62, synthPreset: 'swoosh-deep', description: 'CapCut Revaçta: Geniş sahne kaydırma ve konu geçişi', peaks: [0.15, 0.45, 0.85, 1.0, 0.92, 0.65, 0.3, 0.1] },
+    { id: 'capcut-swish-large', name: 'Swish Whoosh (Large 794558)', category: 'whoosh', icon: '🌪️', duration: 0.81, synthPreset: 'capcut-swish-large', description: 'Orijinal CapCut Swish Whoosh (Large 794558) eğitim ve kaydırmalı sahne geçişi', peaks: [0.28, 0.94, 0.88, 0.43, 0.45, 0.12, 0.04, 0.01] },
     { id: 'canon-50d-shutter', name: 'Canon 50D DSLR Shutter Click', category: 'ui', icon: '📷', duration: 0.40, synthPreset: 'camera-shutter', description: 'CapCut Revaçta: Gerçekçi DSLR ayna ve deklanşör sesi', peaks: [0.95, 0.25, 1.0, 0.35, 0.1] },
     { id: 'stinger-camera-shut', name: 'Stinger Camera Shutter Flash', category: 'ui', icon: '📸', duration: 0.50, synthPreset: 'camera-shutter', description: 'CapCut Revaçta: Flaş dolumlu keskin fotoğraf çekim sesi', peaks: [1.0, 0.6, 0.9, 0.5, 0.2] },
     { id: 'click-small-button', name: 'Click (Small Button Sound)', category: 'ui', icon: '🔘', duration: 0.18, synthPreset: 'mouse-click', description: 'CapCut Revaçta: Küçük mekanik buton tıklama sesi', peaks: [1.0, 0.3, 0.8, 0.1] },
@@ -1108,19 +1108,19 @@ export class StudioEngineService {
     { type: 'fadegrays', name: 'Griye Geçiş (Monochrome)', category: 'Temel', icon: '🩶', defaultDuration: 0.55, recommendedSfx: 'whoosh-air' },
     { type: 'dissolve', name: 'Kumlanma Çözülme (Dissolve)', category: 'Temel', icon: '✨', defaultDuration: 0.5, recommendedSfx: 'whoosh-sparkle' },
     { type: 'distance', name: 'Derinlik / Renk Mesafesi', category: 'Temel', icon: '🌌', defaultDuration: 0.5, recommendedSfx: 'swoosh-deep' },
-    { type: 'hblur', name: 'Yatay Hareket Bulanıklığı (Motion Blur)', category: 'Temel', icon: '💨', defaultDuration: 0.4, recommendedSfx: 'whoosh-fast' },
-    { type: 'wipeleft', name: 'Sola Perde Silme (Wipe Left)', category: 'Temel', icon: '◧', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
-    { type: 'wiperight', name: 'Sağa Perde Silme (Wipe Right)', category: 'Temel', icon: '◨', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
+    { type: 'hblur', name: 'Yatay Hareket Bulanıklığı (Motion Blur)', category: 'Temel', icon: '💨', defaultDuration: 0.4, recommendedSfx: 'capcut-swish-large' },
+    { type: 'wipeleft', name: 'Sola Perde Silme (Wipe Left)', category: 'Temel', icon: '◧', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large' },
+    { type: 'wiperight', name: 'Sağa Perde Silme (Wipe Right)', category: 'Temel', icon: '◨', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large' },
 
     // --- Kamera / Whip (12) ---
-    { type: 'slideleft', name: 'Hızlı Sola Kayma (Whip Left)', category: 'Kamera / Whip', icon: '⏪', defaultDuration: 0.35, recommendedSfx: 'whoosh-whip' },
-    { type: 'slideright', name: 'Hızlı Sağa Kayma (Whip Right)', category: 'Kamera / Whip', icon: '⏩', defaultDuration: 0.35, recommendedSfx: 'whoosh-whip' },
-    { type: 'slideup', name: 'Yukarı Savrulma (Whip Up)', category: 'Kamera / Whip', icon: '⏫', defaultDuration: 0.4, recommendedSfx: 'whoosh-fast' },
-    { type: 'slidedown', name: 'Aşağı Savrulma (Whip Down)', category: 'Kamera / Whip', icon: '⏬', defaultDuration: 0.4, recommendedSfx: 'whoosh-fast' },
-    { type: 'smoothleft', name: 'Elastik Sola Kayma (Smooth Left)', category: 'Kamera / Whip', icon: '⬅️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
-    { type: 'smoothright', name: 'Elastik Sağa Kayma (Smooth Right)', category: 'Kamera / Whip', icon: '➡️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
-    { type: 'smoothup', name: 'Elastik Yukarı (Smooth Up)', category: 'Kamera / Whip', icon: '⬆️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
-    { type: 'smoothdown', name: 'Elastik Aşağı (Smooth Down)', category: 'Kamera / Whip', icon: '⬇️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast' },
+    { type: 'slideleft', name: 'Hızlı Sola Kayma (Whip Left)', category: 'Kamera / Whip', icon: '⏪', defaultDuration: 0.35, recommendedSfx: 'capcut-swish-large' },
+    { type: 'slideright', name: 'Hızlı Sağa Kayma (Whip Right)', category: 'Kamera / Whip', icon: '⏩', defaultDuration: 0.35, recommendedSfx: 'capcut-swish-large' },
+    { type: 'slideup', name: 'Yukarı Savrulma (Whip Up)', category: 'Kamera / Whip', icon: '⏫', defaultDuration: 0.4, recommendedSfx: 'capcut-swish-large' },
+    { type: 'slidedown', name: 'Aşağı Savrulma (Whip Down)', category: 'Kamera / Whip', icon: '⏬', defaultDuration: 0.4, recommendedSfx: 'capcut-swish-large' },
+    { type: 'smoothleft', name: 'Elastik Sola Kayma (Smooth Left)', category: 'Kamera / Whip', icon: '⬅️', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large' },
+    { type: 'smoothright', name: 'Elastik Sağa Kayma (Smooth Right)', category: 'Kamera / Whip', icon: '➡️', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large' },
+    { type: 'smoothup', name: 'Elastik Yukarı (Smooth Up)', category: 'Kamera / Whip', icon: '⬆️', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large' },
+    { type: 'smoothdown', name: 'Elastik Aşağı (Smooth Down)', category: 'Kamera / Whip', icon: '⬇️', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large' },
     { type: 'zoomin', name: 'Yakınlaşarak Çarpma (Zoom Crash)', category: 'Kamera / Whip', icon: '🔍', defaultDuration: 0.4, recommendedSfx: 'sub-bass-drop' },
     { type: 'squeezeh', name: 'Yatay Sıkıştırma (Squeeze H)', category: 'Kamera / Whip', icon: '↔️', defaultDuration: 0.4, recommendedSfx: 'whoosh-whip' },
     { type: 'squeezev', name: 'Dikey Sıkıştırma (Squeeze V)', category: 'Kamera / Whip', icon: '↕️', defaultDuration: 0.4, recommendedSfx: 'whoosh-whip' },
@@ -1158,8 +1158,8 @@ export class StudioEngineService {
     { type: 'coverleft', name: 'Üzerini Örterek Kayma (Cover)', category: 'Perde & Bölme', icon: '🃏', defaultDuration: 0.4, recommendedSfx: 'pop-card-flip' },
 
     // --- CAPCUT TREND & GL-TRANSITIONS SHADER GEÇİŞLERİ (22 YENİ — Görsel 3 & 4) ---
-    { type: 'smoothleft', name: 'Sol Kaydırma (CapCut Sol / Whoosh)', category: 'Trend', icon: '⬅️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast', description: 'Konu bitimi ve açıklama öncesi standart sola kaydırmalı geçiş' },
-    { type: 'diagbl', name: 'Sol Alt Kayma (CapCut Sol Alt)', category: 'Trend', icon: '↙️', defaultDuration: 0.45, recommendedSfx: 'whoosh-fast', description: 'Sol alt köşeye doğru diyagonal kaydırmalı geçiş' },
+    { type: 'smoothleft', name: 'Sol Kaydırma (CapCut Sol / Swish Whoosh 794558)', category: 'Trend', icon: '⬅️', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large', description: 'Konu bitimi ve açıklama öncesi standart sola kaydırmalı geçiş (Swish Whoosh Large 794558)' },
+    { type: 'diagbl', name: 'Sol Alt Kayma (CapCut Sol Alt)', category: 'Trend', icon: '↙️', defaultDuration: 0.45, recommendedSfx: 'capcut-swish-large', description: 'Sol alt köşeye doğru diyagonal kaydırmalı geçiş' },
     { type: 'solarflash', name: 'Güneş Flaşı (Solar Flash)', category: 'Işık / Flaş', icon: '☀️', defaultDuration: 0.40, recommendedSfx: 'whoosh-flames', description: 'CapCut Trend: Sıcak güneş parlaması ile sahne geçişi' },
     { type: 'snowflash', name: 'Karlı Flaş (White Strobe)', category: 'Işık / Flaş', icon: '❄️', defaultDuration: 0.35, recommendedSfx: 'camera-shutter', description: 'CapCut Trend: Parlak beyaz flaş patlaması' },
     { type: 'zoommorph', name: 'Yakın Plan Morf (Zoom Morph)', category: 'Trend', icon: '🔭', defaultDuration: 0.45, recommendedSfx: 'whoosh-zoom-in', description: 'CapCut Trend: Merkeze hızla yakınlaşarak yeni sahneye morf olma' },
@@ -1738,13 +1738,16 @@ export class StudioEngineService {
    */
   playSfxPreset(presetId: string, volume = 0.85, customUrl?: string): void {
     try {
-      const rawId = (presetId || 'whoosh-fast').trim();
+      const rawId = (presetId || 'capcut-swish-large').trim();
       const wavIdMap: Record<string, string> = {
         'keyboard-type': 'keyboard-typing',
         'keyboard': 'keyboard-typing',
         'ding': 'ding-bright',
         'pop': 'pop-bubble',
-        'whoosh': 'whoosh-fast'
+        'whoosh': 'capcut-swish-large',
+        'whoosh-fast': 'capcut-swish-large',
+        'swish': 'capcut-swish-large',
+        'capcut-swish-large': 'capcut-swish-large'
       };
       const cleanId = wavIdMap[rawId] || rawId;
       const targetUrl =
@@ -2169,7 +2172,7 @@ export class StudioEngineService {
         exitAnimation: 'fade',
         allowStickers: false,
         minGapSec: 14,
-        allowedTransitions: ['fade', 'dissolve'],
+        allowedTransitions: ['smoothleft', 'slideleft', 'wipeleft', 'fade'],
         contextualImages: []
       };
     }
@@ -2190,7 +2193,7 @@ export class StudioEngineService {
         exitAnimation: 'fade',
         allowStickers: false,
         minGapSec: 18,
-        allowedTransitions: ['fade', 'dissolve'],
+        allowedTransitions: ['smoothleft', 'slideleft', 'wipeleft', 'fade'],
         contextualImages: []
       };
     }
@@ -2211,7 +2214,7 @@ export class StudioEngineService {
         exitAnimation: 'fade',
         allowStickers: false,
         minGapSec: 15,
-        allowedTransitions: ['fade', 'dissolve'],
+        allowedTransitions: ['smoothleft', 'slideleft', 'wipeleft', 'fade'],
         contextualImages: []
       };
     }
@@ -2231,7 +2234,7 @@ export class StudioEngineService {
       exitAnimation: 'fade',
       allowStickers: true,
       minGapSec: 12,
-      allowedTransitions: ['fade', 'dissolve'],
+      allowedTransitions: ['smoothleft', 'slideleft', 'wipeleft', 'fade'],
       contextualImages: []
     };
   }
@@ -2363,7 +2366,7 @@ export class StudioEngineService {
             boundaryTime: boundaryRaw,
             type: tType,
             duration: 0.45,
-            autoSfxId: 'whoosh-fast',
+            autoSfxId: 'capcut-swish-large',
             action: 'add'
           });
         }
@@ -2472,22 +2475,22 @@ export class StudioEngineService {
           });
         }
 
-        // Olaya Bağlı Zarif Mikro-SFX (Metronom döngüsü yok, ses seviyesi: 0.18)
+        // Olaya Bağlı Zarif Mikro-SFX (Metronom döngüsü yok, ses seviyesi: 0.18-0.22)
         if (itemSeqStamp - lastSfxSeqStart >= 14) {
-          const sfxPresetId = eIdx === 0 ? 'whoosh-fast' : 'pop-crisp';
-          const sfxDur = eIdx === 0 ? 0.42 : 0.25;
+          const sfxPresetId = eIdx === 0 ? 'capcut-swish-large' : 'pop-crisp';
+          const sfxDur = eIdx === 0 ? 0.81 : 0.25;
           sfxClips.push({
             id: `ad_sfx_${now}_${chIdx}_${eIdx}`,
-            name: eIdx === 0 ? 'Bölüm Geçiş Efekti' : 'Kavram Kartı Efekti',
-            title: eIdx === 0 ? 'Bölüm Geçiş Efekti' : 'Kavram Kartı Efekti',
+            name: eIdx === 0 ? 'Swish Whoosh (Large 794558)' : 'Kavram Kartı Efekti',
+            title: eIdx === 0 ? 'Swish Whoosh (Large 794558)' : 'Kavram Kartı Efekti',
             category: eIdx === 0 ? 'whoosh' : 'pop',
             presetId: sfxPresetId,
             synthPreset: sfxPresetId,
             sourceUrl: this.generateSfxWavDataUri(sfxPresetId, sfxDur),
             start: itemRawStamp,
             duration: sfxDur,
-            volume: 0.18,
-            peaks: [0.2, 0.7, 0.9, 0.5, 0.15],
+            volume: eIdx === 0 ? 0.22 : 0.18,
+            peaks: eIdx === 0 ? [0.28, 0.94, 0.88, 0.43, 0.45, 0.12, 0.04, 0.01] : [0.2, 0.7, 0.9, 0.5, 0.15],
             action: 'add'
           });
           lastSfxSeqStart = itemSeqStamp;
@@ -2509,7 +2512,7 @@ export class StudioEngineService {
           boundaryTime: boundary,
           type: tType,
           duration: 0.45,
-          autoSfxId: 'whoosh-fast',
+          autoSfxId: 'capcut-swish-large',
           action: 'add'
         });
       }
