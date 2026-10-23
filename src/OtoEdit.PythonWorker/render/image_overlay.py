@@ -2,8 +2,10 @@
 import base64
 import hashlib
 import os
+import shutil
 import urllib.request
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Set
+from PIL import Image
 from render.animation_effects import AnimationEffects
 from services.minio_client import MinioClient
 from services.bg_remover import BackgroundRemoverService
@@ -147,8 +149,9 @@ class ImageOverlay:
             if ov.get("type") in ("image", "video", "sticker", "gif")
         ]
         img_overlays.sort(key=lambda o: int(o.get("trackId") or o.get("track_id") or 1))
+        used_input_paths: Set[str] = set()
 
-        for ov in img_overlays:
+        for ov_idx, ov in enumerate(img_overlays):
             source = ov.get("source") or ov.get("sourceUrl") or ov.get("url") or ""
             local_path = self.resolve_image_path(source, temp_dir=temp_dir)
             if not local_path or not os.path.isfile(local_path):
@@ -166,8 +169,10 @@ class ImageOverlay:
                 except Exception:
                     pass
 
-            # Statik görsellerde PIL / OpenCV ön işlemelerini (Pre-baked <10ms) uygula
-            if not is_animated and not is_video:
+            is_text_badge = bool(ov.get("isTextBadge") or ov.get("is_text_badge"))
+
+            # Statik görsellerde PIL / OpenCV ön işlemelerini (Pre-baked <10ms) uygula (Metin rozetleri hariç)
+            if not is_animated and not is_video and not is_text_badge:
                 # 1. AI Arka Plan Kaldırma (Background Removal)
                 if ov.get("removeBg") or ov.get("remove_bg"):
                     try:
@@ -242,13 +247,27 @@ class ImageOverlay:
             loop_anim = ov.get("loopAnimation") or ov.get("loop_anim")
             keyframes = ov.get("keyframes")
 
+            # ffmpeg-python DAG'ında aynı dosyanın birden fazla katmanda kullanılması
+            # durumunda "multiple outgoing edges" hatasını önlemek için benzersiz yol ata
+            input_path_for_node = local_path
+            if input_path_for_node in used_input_paths:
+                ext = os.path.splitext(local_path)[1] or ".png"
+                unique_ov_path = os.path.join(temp_dir, f"_ov_node_{ov_idx:04d}{ext}")
+                if not os.path.exists(unique_ov_path):
+                    try:
+                        os.symlink(os.path.abspath(local_path), unique_ov_path)
+                    except Exception:
+                        shutil.copyfile(local_path, unique_ov_path)
+                input_path_for_node = unique_ov_path
+            used_input_paths.add(input_path_for_node)
+
             if is_video:
-                img_input = ffmpeg.input(local_path, ss=trim_start, t=duration)
+                img_input = ffmpeg.input(input_path_for_node, ss=trim_start, t=duration)
                 img_input = img_input.filter("setpts", f"PTS-STARTPTS+{start_t:.3f}/TB")
             elif is_animated:
-                img_input = ffmpeg.input(local_path, ignore_loop=0)
+                img_input = ffmpeg.input(input_path_for_node, ignore_loop=0)
             else:
-                img_input = ffmpeg.input(local_path)
+                img_input = ffmpeg.input(input_path_for_node)
 
             if is_fullscreen:
                 scale_w = base_w if base_w % 2 == 0 else base_w + 1
@@ -256,9 +275,14 @@ class ImageOverlay:
             else:
                 is_text_badge = bool(ov.get("isTextBadge") or ov.get("is_text_badge"))
                 if is_text_badge:
-                    # PillowGraphicsEngine tarafından üretilen metin rozetlerinin doğal genişliğini koru (~%42 tuval genişliği)
+                    # PillowGraphicsEngine tarafından 1920x1080 tuval için üretilen rozetin doğal piksel genişliğini koru
                     badge_scale = (scale / 160.0) if scale > 2.5 else scale
-                    scale_w = int(base_w * 0.42 * badge_scale)
+                    try:
+                        with Image.open(local_path) as badge_im:
+                            nat_w = badge_im.width
+                    except Exception:
+                        nat_w = int(base_w * 0.25)
+                    scale_w = int(round(nat_w * (base_w / 1920.0) * badge_scale))
                 else:
                     # UI'da scale=1.0 demek, 860px genişliğindeki player'da 160px-200px genişlik kaplamak demek
                     base_ui_ratio = (200.0 / 860.0) if is_video else (160.0 / 860.0)

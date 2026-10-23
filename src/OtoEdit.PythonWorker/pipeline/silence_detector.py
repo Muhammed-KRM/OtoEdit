@@ -1,10 +1,10 @@
 """
-OtoEdit Jump-Cut & Sessizlik Algılama Motoru (v2)
+OtoEdit Jump-Cut & Sessizlik Algılama Motoru (v2 / v3)
 - Silero VAD konuşma bölgeleri referans alınır.
 - 300ms'den kısa yetim konuşma adaları birleştirilerek mikro-klipler/çıtırtılar önlenir.
 - Doğal nefes araları (JUMPCUT_MIN_SILENCE_MS) korunur.
 - Konuşma başı/sonu için içe padding (JUMPCUT_PAD_MS) uygulanır.
-- Kelime zamanları varsa GUARD_MS ile mutlak kelime koruması sağlanır.
+- Kelime zamanları varsa Sıfır-Taban (Zero-Floor) Sönümlenme Takipçisi ve GUARD_MS ile mutlak kelime koruması sağlanır.
 - Tık/patlama seslerini önlemek için kenarlar RMS lokal minimumuna (Adım 6.5) oturtulur.
 """
 
@@ -15,7 +15,7 @@ import numpy as np
 from config import Config
 from models.edl_model import CutItem
 from pipeline.audio_analysis import AudioAnalysis, AudioAnalyzer, SpeechRegion
-from pipeline.word_refiner import compute_thresholds
+from pipeline.word_refiner import compute_thresholds, compute_zero_floor, refine_word_boundaries
 from utils.logger import get_logger
 
 logger = get_logger("SilenceDetector")
@@ -108,14 +108,13 @@ class SilenceDetector:
     ) -> List[CutItem]:
         """
         Jump-Cut v3: Kelime Tabanlı Duraklama Sıkıştırma Motoru
-        1. Kelimeler Transcriber'da word_refiner ile gerçek fonasyona kilitlenmiş gelir
-           (küme kırpması + kuyruk/atak koruması).
-        2. Tutulan (retake dışı) ardışık kelimeler arasındaki boşluk (>= 0.25s) kesilir:
-           - kelime sonu payı (trail): 0.12s, cümle sonunda 0.16s
-           - kelime başı payı (lead): 0.08s, cümle başında 0.10s
+        1. Kelimeler word_refiner ile gerçek fonasyona ve sıfır-taban (zero-floor) sönümlenme
+           sonuna kilitlenir (küme kırpması + ünsüz kapanması köprüsü + zero-floor kuyruk takibi).
+        2. Tutulan (retake dışı) ardışık kelimeler arasındaki boşluk (>= MIN_GAP) kesilir:
+           - kelimeye bitişik sönümlenen ses (örn. 'çıkamaz', 'hudûuuus') sıfır tabanına inene kadar korunur,
+           - kelime bittikten >= 0.3sn-1sn sonra gelen ve transkriptte kelimesi olmayan ayrık nefes/tık sesleri kesilir.
         3. Retake kesimleri sessizlikten ÇIKARILIR (subtract). Böylece retake bloğu
            yalnızca elenen kelimeleri kapsar; aradaki duraklamalar 'silence' olarak kalır.
-           Retake geri alındığında sessizlikler kesik kalmaya devam eder.
         4. Kenarlar RMS minimumuna yalnızca sessizliğin İÇİNE doğru (kelimeye taşmadan) yaslanır.
         """
         if analysis is None:
@@ -143,14 +142,45 @@ class SilenceDetector:
                 all_parsed.append((ws, we, wt))
 
         all_parsed.sort(key=lambda x: x[0])
+
+        # ÖNCE Retake kesimleri dışındaki (korunan) kelimeleri ham zaman damgalarıyla filtrele:
+        # Böylece retake içinde kalan bir kelimenin kuyruğu sönümlenme takibiyle uzayıp
+        # yanlışlıkla 'korunan kelime' (preserved_word) sınıfına sızamaz!
         rt_cuts = existing_cuts or []
         rt_intervals = self._merge_intervals([(float(c.start), float(c.end)) for c in rt_cuts])
 
         preserved_words = []
         for ws, we, wt in all_parsed:
-            in_rt = any(s - 0.05 <= ws and we <= e + 0.05 for s, e in rt_intervals)
+            w_mid = (ws + we) * 0.5
+            in_rt = any(
+                (s - 0.05 <= ws and we <= e + 0.05) or (s - 0.02 <= w_mid <= e + 0.02)
+                for s, e in rt_intervals
+            )
             if not in_rt:
                 preserved_words.append((ws, we, wt))
+
+        # Korunan kelimelerin sınırlarını Sıfır-Taban (Zero-Floor) Sönümlenme Takipçisi ile gerçek fonasyon sonuna kilitle:
+        # Böylece 'çıkamaz' ('-maz' hecesi ve 'ç' kapanması) veya 'hudûuuus' gibi uzatmalı/yumuşak bitişler
+        # ses tamamen sıfırlanana kadar kelimeye dahil edilir; 0.3sn-1sn sonra gelen ayrık sesler ise dışarıda bırakılır.
+        if getattr(analysis, "rms_envelope", None) is not None and len(analysis.rms_envelope) > 0 and preserved_words:
+            raw_spans = [(ws, we) for ws, we, _ in preserved_words]
+            raw_texts = [wt for _, _, wt in preserved_words]
+            refined_spans = refine_word_boundaries(
+                raw_spans,
+                analysis,
+                duration=getattr(analysis, "duration", None),
+                texts=raw_texts,
+            )
+            clamped_preserved = []
+            for (orig_s, orig_e, wt), (r_s, r_e) in zip(preserved_words, refined_spans):
+                # Retake kesim sınırlarının içine taşmayı engelle
+                for rts, rte in rt_intervals:
+                    if orig_e <= rts + 0.04 and r_e > rts:
+                        r_e = max(orig_s + 0.04, rts - 0.01)
+                    if orig_s >= rte - 0.04 and r_s < rte:
+                        r_s = min(r_e - 0.04, rte + 0.01)
+                clamped_preserved.append((r_s, r_e, wt))
+            preserved_words = clamped_preserved
 
         if len(preserved_words) < 2:
             return self.detect_v2(audio_path, analysis=analysis, transcript_words=transcript_words)
@@ -160,7 +190,7 @@ class SilenceDetector:
             f"Korunan {len(preserved_words)} kelime, {len(rt_cuts)} retake kesimi | Süre={analysis.duration:.1f}s"
         )
 
-        MIN_GAP = 0.40
+        MIN_GAP = max(0.55, min(0.75, (self.min_silence_ms or 650) / 1000.0))
         candidate_silences: List[Tuple[float, float]] = []
 
         # Video başı boşluğu
@@ -184,8 +214,8 @@ class SilenceDetector:
                 gap >= 1.5 or
                 (bool(w2_txt) and w2_txt[0].isupper())
             )
-            # Kelime sonu sönümlenme ve nefes koruma payı (Trail: 220ms - 280ms)
-            pad_trail = 0.28 if is_sent_end else 0.22
+            # Kelime sonu sönümlenme ve nefes koruma payı (Trail: 180ms - 240ms)
+            pad_trail = 0.24 if is_sent_end else 0.18
             # Sonraki kelime başı hece atak payı (Lead: 140ms - 180ms)
             pad_lead = 0.18 if is_sent_end else 0.14
 
@@ -197,23 +227,28 @@ class SilenceDetector:
         # Video sonu boşluğu
         last_we = max(run_end, preserved_words[-1][1])
         if (analysis.duration - last_we) >= MIN_GAP:
-            candidate_silences.append((last_we + 0.28, analysis.duration))
-
-        # Retake aralıklarını sessizlikten çıkar: retake = elenen kelimeler, silence = geri kalan boşluk
-        if rt_intervals:
-            candidate_silences = self._subtract_intervals(candidate_silences, rt_intervals)
+            candidate_silences.append((last_we + 0.24, analysis.duration))
 
         # Akustik güvenlik ağı: Whisper kelime zamanı hatalı olsa bile kesim kenarı sürekli
         # konuşma enerjisinin içine düşemez. (Kenara değen konuşma korunur; uzun duraklamanın
         # ortasındaki izole tik/nefes/yarım deneme adacıkları kesilmeye devam eder.)
+        # ÖNEMLİ: Retake çıkarma işleminden ÖNCE çalıştırılır ki retake sınırına değen sessizlik
+        # kenarları yanlışlıkla geri itilip 0 word'lü nefes/artık klipler üretmesin!
         thresholds = compute_thresholds(analysis)
         if thresholds is not None:
+            zero_floor = compute_zero_floor(analysis, thresholds[1])
             protected: List[Tuple[float, float]] = []
             for s, e in candidate_silences:
-                ps, pe = self._protect_speech_edges(s, e, analysis, thresholds[0])
+                ps, pe = self._protect_speech_edges(
+                    s, e, analysis, thresholds[0], zero_floor=zero_floor
+                )
                 if (pe - ps) >= 0.08:
                     protected.append((ps, pe))
             candidate_silences = protected
+
+        # Retake aralıklarını sessizlikten çıkar: retake = elenen kelimeler, silence = geri kalan boşluk
+        if rt_intervals:
+            candidate_silences = self._subtract_intervals(candidate_silences, rt_intervals)
 
         # Kenar İnce Ayarı: RMS minimumuna yalnızca sessizliğin içine doğru yaslama
         # (başlangıç ileri, bitiş geri → asla kelimeye taşmaz). Retake'e değen kenarlar sabit kalır.
@@ -386,16 +421,19 @@ class SilenceDetector:
         e: float,
         analysis: AudioAnalysis,
         speech_thresh: float,
-        edge_zone: float = 0.45,
-        min_run: float = 0.10,
-        join_gap: float = 0.15,
-        pad_after: float = 0.22,
-        pad_before: float = 0.14
+        edge_zone: float = 0.24,
+        min_run: float = 0.08,
+        join_gap: float = 0.22,
+        pad_after: float = 0.18,
+        pad_before: float = 0.12,
+        max_edge_shift: float = 0.85,
+        zero_floor: Optional[float] = None,
     ) -> Tuple[float, float]:
         """
         Kesim aralığı [s, e] içinde, kenarlara edge_zone kadar yakın sürekli konuşma
         enerjisi (>= min_run) varsa kenarı o konuşmanın dışına iter.
-        Kısa tıklar (< min_run) ve düşük enerjili nefesler etkilemez.
+        Ayrıca sol kenarda (kelime bitişi) zero_floor üstü bitişik sönümlenen ses varsa
+        tamamen sıfırlanana kadar kesim başlangıcını ileri taşır; ortadaki ayrık seslere dokunmaz.
         """
         rms = analysis.rms_envelope
         hop = analysis.rms_hop_ms / 1000.0
@@ -426,15 +464,34 @@ class SilenceDetector:
         speech = [(i0 * hop + a * hop, i0 * hop + b * hop) for a, b in joined if (b - a) * hop >= min_run]
         new_s, new_e = s, e
         for rs, re_ in speech:
-            if rs - new_s <= edge_zone:
+            if rs - new_s <= edge_zone and (re_ + pad_after - s) <= max_edge_shift:
                 new_s = max(new_s, re_ + pad_after)
             else:
                 break
         for rs, re_ in reversed(speech):
-            if new_e - re_ <= edge_zone:
+            if new_e - re_ <= edge_zone and (e - (rs - pad_before)) <= max_edge_shift:
                 new_e = min(new_e, rs - pad_before)
             else:
                 break
+
+        # Sol kenarda (kelime sonu) zero_floor üstü bitişik sönümlenme varsa sıfıra inene kadar ileri yürü
+        if zero_floor is not None and new_s < new_e:
+            z_idx = max(0, int(new_s / hop))
+            z_max = min(int(new_e / hop), z_idx + int(0.45 / hop))
+            z_dips = 0
+            last_above = new_s
+            while z_idx < z_max:
+                if rms[z_idx] >= zero_floor:
+                    z_dips = 0
+                    last_above = (z_idx + 1) * hop
+                else:
+                    z_dips += 1
+                    if z_dips > 4:
+                        break
+                z_idx += 1
+            if last_above > new_s:
+                new_s = min(new_e, last_above + 0.08)
+
         return round(new_s, 3), round(new_e, 3)
 
     def _merge_intervals(self, intervals: List[Tuple[float, float]]) -> List[Tuple[float, float]]:

@@ -20,82 +20,144 @@ class GeminiClient:
         self.proxy_key = getattr(Config, "ANTIGRAVITY_PROXY_KEY", "")
         self.proxy_model = getattr(Config, "ANTIGRAVITY_PROXY_MODEL", "gemini-3.8-flash-tiered")
         self.api_key = Config.GEMINI_API_KEY
+        self.api_keys: List[str] = list(getattr(Config, "GEMINI_API_KEYS", []) or ([] if not self.api_key else [self.api_key]))
+        self._key_idx = 0
+        self.groq_api_key = getattr(Config, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
+        self.groq_api_keys: List[str] = list(getattr(Config, "GROQ_API_KEYS", []) or ([] if not self.groq_api_key else [self.groq_api_key]))
+        self._groq_key_idx = 0
+        self.groq_models = ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "qwen/qwen3.8-27b"]
         self.model = None
+        self._genai = None
+        self._proxy_dead = False
+        self._gemini_dead = False
 
-        if self.proxy_key and self.proxy_url:
-            self.use_proxy = True
+        self.use_proxy = bool(self.proxy_key and self.proxy_url)
+        if self.use_proxy:
             logger.info(f"🌐 Antigravity Proxy istemcisi yapılandırıldı: {self.proxy_url} (Model: {self.proxy_model})")
-        elif self.api_key:
-            self.use_proxy = False
+
+        if self.api_keys:
             try:
                 import importlib
-                genai = importlib.import_module("google.generativeai")
-                genai.configure(api_key=self.api_key)
-                model_name = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-                self.model = genai.GenerativeModel(model_name)
-                logger.info(f"Gemini API istemcisi başarıyla yapılandırıldı. Model: {model_name}")
+                self._genai = importlib.import_module("google.generativeai")
+                self._genai.configure(api_key=self.api_keys[0])
+                model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+                if "3.8" in model_name:
+                    model_name = "gemini-2.5-flash"
+                self.model_name = model_name
+                self.model = self._genai.GenerativeModel(model_name)
+                logger.info(f"Gemini API yedek istemcisi hazır ({len(self.api_keys)} anahtar, Model: {model_name})")
             except Exception as e:
-                logger.warning(f"Gemini API başlatılamadı, fallback modu kullanılacak: {e}")
-        else:
-            self.use_proxy = False
-            logger.warning("Ne ANTIGRAVITY_PROXY_KEY ne de GEMINI_API_KEY tanımlı. Fallback motoru aktif.")
+                logger.warning(f"Gemini API başlatılamadı, diğer sağlayıcılar kullanılacak: {e}")
 
-    def _execute_with_retry(self, prompt: str, max_retries: int = 3) -> Optional[str]:
-        """Ağ veya Rate Limit durumlarında Exponential Backoff ile tekrar dener."""
-        delay = 2.0
-        if getattr(self, "use_proxy", False):
+        if self.groq_api_key:
+            logger.info("⚡ Groq Cloud LLM yedek istemcisi hazır (llama-3.3-70b-versatile).")
+
+    def _call_groq_llm(self, prompt: str, json_mode: bool = False) -> Optional[str]:
+        """Groq Cloud OpenAI-uyumlu uç noktasını anahtar havuzu rotasyonuyla çağırır."""
+        if not self.groq_api_keys:
+            return None
+        url = "https://api.groq.com/openai/v1/chat/completions"
+        for model_name in self.groq_models:
+            active_key = self.groq_api_keys[self._groq_key_idx % len(self.groq_api_keys)]
+            self._groq_key_idx += 1
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {active_key}",
+                "User-Agent": "OtoEdit/2.0",
+            }
+            payload: Dict[str, Any] = {
+                "model": model_name,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+            }
+            if json_mode:
+                payload["response_format"] = {"type": "json_object"}
+            try:
+                req = urllib.request.Request(
+                    url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=35) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    return content
+            except Exception as ex:
+                if "429" in str(ex):
+                    time.sleep(1.2)
+                logger.warning(f"Groq LLM ({model_name}) çağrısı başarısız: {ex}")
+        return None
+
+    def _execute_with_retry(self, prompt: str, max_retries: int = 2) -> Optional[str]:
+        """Önce Antigravity Proxy (aktifse), hata durumunda Groq LLM ve Gemini API havuzu ile çalıştırır."""
+        if getattr(self, "use_proxy", False) and not self._proxy_dead:
             url = f"{self.proxy_url}/chat/completions"
             payload = {
                 "model": self.proxy_model,
-                "messages": [{"role": "user", "content": prompt}]
+                "messages": [{"role": "user", "content": prompt}],
             }
             headers = {
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.proxy_key}"
+                "Authorization": f"Bearer {self.proxy_key}",
             }
-            for attempt in range(1, max_retries + 1):
-                try:
-                    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST")
-                    with urllib.request.urlopen(req, timeout=90) as resp:
-                        data = json.loads(resp.read().decode("utf-8"))
-                    content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    return content
-                except Exception as ex:
-                    logger.warning(f"Antigravity Proxy çağrı denemesi #{attempt} başarısız: {ex}")
-                    if attempt < max_retries:
-                        time.sleep(delay)
-                        delay *= 2.0
-                    else:
-                        logger.error(f"Antigravity Proxy tüm denemeler ({max_retries}) tükendi: {ex}")
-            return None
-
-        if not self.model:
-            return None
-
-        for attempt in range(1, max_retries + 1):
             try:
+                req = urllib.request.Request(
+                    url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=8) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    return content
+            except Exception as ex:
+                logger.warning(f"Antigravity Proxy erişilemez ({ex}); devre kesici aktif, Groq/Gemini yedeğine geçiliyor.")
+                self._proxy_dead = True
+
+        # 2. Hızlı Groq Cloud LLM Yedeği
+        if self.groq_api_key:
+            groq_res = self._call_groq_llm(prompt)
+            if groq_res:
+                return groq_res
+
+        # 3. Gemini API Anahtar Havuzu Rotasyonu
+        if self._gemini_dead or not self.model or not self._genai or not self.api_keys:
+            return None
+
+        delay = 1.5
+        total_attempts = max(max_retries, min(len(self.api_keys), 4))
+        for attempt in range(1, total_attempts + 1):
+            try:
+                key = self.api_keys[self._key_idx % len(self.api_keys)]
+                self._key_idx += 1
+                self._genai.configure(api_key=key)
+                self.model = self._genai.GenerativeModel(getattr(self, "model_name", "gemini-2.5-flash"))
                 response = self.model.generate_content(prompt)
                 if response and hasattr(response, "text"):
                     return response.text
-                return None
             except Exception as ex:
-                logger.warning(f"Gemini API çağrı denemesi #{attempt} başarısız: {ex}")
-                if attempt < max_retries:
+                logger.warning(f"Gemini API denemesi #{attempt} başarısız: {ex}")
+                if "API_KEY_INVALID" in str(ex) and attempt >= len(self.api_keys):
+                    self._gemini_dead = True
+                    break
+                if attempt < total_attempts:
                     time.sleep(delay)
-                    delay *= 2.0
-                else:
-                    logger.error(f"Gemini API tüm denemeler ({max_retries}) tükendi: {ex}")
         return None
 
     def is_available(self) -> bool:
-        """Gemini API veya Antigravity Proxy aktif mi kontrol eder."""
-        return bool(self.model or getattr(self, "use_proxy", False))
+        """Gemini API, Groq LLM veya Antigravity Proxy aktif mi kontrol eder."""
+        return bool(self.model or self.groq_api_key or (getattr(self, "use_proxy", False) and not self._proxy_dead))
 
-    def generate_text(self, prompt: str, max_retries: int = 3) -> Optional[str]:
-        """Genel metin/prompt üretimi için Gemini veya Antigravity Proxy'yi çağırır."""
+    def generate_text(self, prompt: str, max_retries: int = 2) -> Optional[str]:
+        """Genel metin/prompt üretimi için aktif LLM sağlayıcısını çağırır."""
         if not self.is_available():
             return None
         return self._execute_with_retry(prompt, max_retries=max_retries)
+
+    def generate_json(self, prompt: str, max_retries: int = 2) -> Any:
+        """Yapılandırılmış JSON yanıtı üretir ve güvenli şekilde parse eder."""
+        raw = self.generate_text(prompt, max_retries=max_retries)
+        if not raw:
+            return None
+        return self._safe_parse_json(raw)
 
     def generate_vision(self, prompt: str, image_path: str, max_retries: int = 2) -> Optional[str]:
         """Bir görsel dosyası (veya ekran görüntüsü) ile birlikte multimodal VLM analizi yapar."""

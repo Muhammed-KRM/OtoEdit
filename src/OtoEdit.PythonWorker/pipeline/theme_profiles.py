@@ -76,6 +76,7 @@ ACTION_TO_SUB_THEME_ROLE: Dict[str, str] = {
     "PERSON_INTRODUCTION": "PERSON_OR_WORK_CARD",
     "WORK_INTRODUCTION": "PERSON_OR_WORK_CARD",
     "STAT_OR_ARTICLE_CALLOUT": "PERSON_OR_WORK_CARD",
+    "CONCEPT_IMAGE_CARD": "PERSON_OR_WORK_CARD",
     "PROGRESSIVE_LIST": "PROGRESSIVE_LIST",
     "PAIRED_TERMS": "SINGLE_OR_PAIRED_TERM",
     "SINGLE_TERM": "SINGLE_OR_PAIRED_TERM",
@@ -83,7 +84,6 @@ ACTION_TO_SUB_THEME_ROLE: Dict[str, str] = {
     "DEFINITION_CALLOUT": "SINGLE_OR_PAIRED_TERM",
     "KEY_TERM_CALLOUT": "SINGLE_OR_PAIRED_TERM",
     "CHAPTER_TITLE_CARD": "TOPIC_TRANSITION",
-    "CONCEPT_IMAGE_CARD": "TOPIC_TRANSITION",
     "TOPIC_TRANSITION": "TOPIC_TRANSITION",
 }
 
@@ -172,7 +172,7 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
             "ENUMERATION_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
             "DEFINITION_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
             "KEY_TERM_CALLOUT": {"type": "pop", "presetId": "pop-bubble", "volume": 0.15},
-            "CONCEPT_IMAGE_CARD": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.20},
+            "CONCEPT_IMAGE_CARD": {"type": "ding", "presetId": "ding-bright", "volume": 0.18},
         },
         stroke_color_hex="#000000",
         stroke_width_px=5,

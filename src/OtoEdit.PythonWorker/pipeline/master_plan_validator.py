@@ -9,7 +9,7 @@ Oluşturulan kurgu planını 6 katı mühendislik kuralına göre denetler ve on
 6. Cümle sınırına mıknatıslanmış (sentence-boundary snapped) yumuşak bölüm geçişleri
 """
 
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from pipeline.theme_profiles import (
     ThemeProfile,
     extract_turkish_semantic_title,
@@ -29,11 +29,45 @@ class MasterPlanValidator:
         theme_profile: ThemeProfile,
         video_duration: float,
         subtitles_enabled: bool = True,
+        cuts: Optional[List[Tuple[float, float]]] = None,
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
         repaired_overlays: List[Dict[str, Any]] = []
         last_overlay_start = -999.0
+        last_overlay_seq_start = -999.0
         last_paired_group = ""
         safe_duration = max(5.0, float(video_duration or 30.0))
+
+        # Kesim aralıklarını normalize et ve birleştir (raw -> edited sequence zaman dönüşümü için)
+        merged_cuts: List[Tuple[float, float]] = []
+        for cs, ce in sorted(cuts or [], key=lambda x: float(x[0])):
+            cs_f, ce_f = float(cs), float(ce)
+            if ce_f <= cs_f:
+                continue
+            if merged_cuts and cs_f <= merged_cuts[-1][1] + 0.01:
+                merged_cuts[-1] = (merged_cuts[-1][0], max(merged_cuts[-1][1], ce_f))
+            else:
+                merged_cuts.append((cs_f, ce_f))
+
+        def raw_to_seq(t: float) -> float:
+            removed = 0.0
+            for cs, ce in merged_cuts:
+                if t >= ce:
+                    removed += (ce - cs)
+                elif t > cs:
+                    removed += (t - cs)
+                    break
+                else:
+                    break
+            return max(0.0, t - removed)
+
+        def is_inside_cut(s: float, e: float) -> bool:
+            mid = (s + e) / 2.0
+            for cs, ce in merged_cuts:
+                if (cs + 0.04 <= s <= ce - 0.04) and (cs + 0.04 <= mid <= ce - 0.04):
+                    return True
+            return False
+
+        edited_duration = max(5.0, raw_to_seq(safe_duration))
 
         # Kronolojik sırala (hem 'start' hem 'timestamp' destekli)
         sorted_ovs = sorted(
@@ -65,21 +99,27 @@ class MasterPlanValidator:
                 end = min(safe_duration - 0.1, start + (1.4 if is_sem else 3.0))
             dur = round(max(min_allowed_dur, end - start), 2)
 
+            # Kesim (Retake / Silence) aralığı içine düşen katmanları ele ki kesim sınırında üst üste yığılmasınlar
+            if merged_cuts and is_inside_cut(start, end):
+                continue
+
             # Kural 1: Tema Saflığı (Akademik/Kurumsal/Belgesel temalarda GIF/Sticker YASAK)
             if ov_type in ("sticker", "gif") and not theme_profile.allow_gifs:
                 logger.info(f"[Validator] Tema '{theme_profile.id}' gereği sticker elendi: t={start}s")
                 continue
 
-            # Kural 2: Minimum Zaman Boşluğu
+            # Kural 2: Minimum Zaman Boşluğu (hem ham zaman hem kurgulanmış sekans zamanı üzerinde)
             # - Aynı pairedGroupId'ye sahip Kümülatif Liste (Fizik, Kimya, Biyoloji...), İkili Kavram (Tabiat, Fıtrat)
             #   ve Kişi+Portre çiftleri birlikte ekranda yer alır.
             # - Kelime-senkronlu (semanticPriority=True) olaylar önceki olay biter bitmez başlayabilir.
             paired_group = str(ov.get("pairedGroupId") or "")
             is_same_pair = bool(paired_group and paired_group == last_paired_group)
             req_gap = 0.35 if is_sem else effective_min_gap
+            seq_start = raw_to_seq(start)
 
-            if not is_same_pair and (start - last_overlay_start < req_gap) and repaired_overlays:
-                continue
+            if not is_same_pair and repaired_overlays:
+                if (start - last_overlay_start < req_gap) or (seq_start - last_overlay_seq_start < req_gap):
+                    continue
 
             # Kural 3: Altyazı Kuşağı (Y ∈ [70%, 95%]) ve Birim Kontrolü (0..100)
             pos_x = float(ov.get("positionX", 76.0))
@@ -111,7 +151,7 @@ class MasterPlanValidator:
                 clean_title = extract_turkish_semantic_title(
                     raw_text, max_chars=max(36, theme_profile.max_chars_per_line)
                 )
-                if not clean_title:
+                if not clean_title or clean_title.upper() in ("DEĞERLİ İZLEYENLER", "DEĞERLİ İZLEYİCİLER", "ARKADAŞLAR"):
                     continue
                 ov["text"] = clean_title
                 ov["content"] = clean_title
@@ -149,32 +189,77 @@ class MasterPlanValidator:
 
             repaired_overlays.append(ov)
             last_overlay_start = start
+            last_overlay_seq_start = seq_start
             last_paired_group = paired_group
 
-        # Kural 5: Geçiş (Transitions) Denetimi (Sola kaydırmalı 'smoothleft' + Konu/Açıklama sınırları)
-        min_tr_edge = min(5.0, max(1.5, safe_duration * 0.08))
-        min_tr_gap = min(20.0, max(4.0, safe_duration * 0.015))
+        # Kural 5: Geçiş (Transitions) Denetimi ve Kesim Sınırına Mıknatıslama (Clip-Boundary Snapping)
+        # Editör ('clipTransitionBoundaries' ve 60fps geçiş motoru) her geçişin 'boundaryTime' değerini
+        # ardışık iki tutulan klip arasındaki kesim bitişiyle (next_clip.start) < 0.45s toleransla eşleştirir.
+        # Bu nedenle geçiş zamanlarını doğrudan en yakın tutulan klip başlangıcına (next_clip.start) mıknatıslıyoruz!
+        keep_clips: List[Tuple[float, float]] = []
+        cursor_t = 0.0
+        for cs, ce in merged_cuts:
+            if cs - cursor_t >= 0.12:
+                keep_clips.append((cursor_t, cs))
+            cursor_t = max(cursor_t, ce)
+        if safe_duration - cursor_t >= 0.12:
+            keep_clips.append((cursor_t, safe_duration))
+
+        clip_boundaries: List[Tuple[float, float]] = [
+            (keep_clips[i - 1][1], keep_clips[i][0])
+            for i in range(1, len(keep_clips))
+        ]
+
+        def snap_to_clip_boundary(raw_t: float) -> float:
+            if not clip_boundaries:
+                return raw_t
+            # 1. Geçiş zamanı doğrudan bir kesim aralığının [prev_end, next_start] içindeyse veya hemen kenarındaysa,
+            # kurgulanmış videoda o kesim tamamen atlandığı için geçiş tam next_start noktasındadır!
+            for prev_end, next_start in clip_boundaries:
+                if (prev_end - 0.45) <= raw_t <= (next_start + 0.45):
+                    return next_start
+            # 2. Kesim aralığının hemen dışında (<= 3.5s) ise en yakın kesim sınırının next_start noktasına mıknatısla
+            best_next_start: Optional[float] = None
+            best_dist = 9999.0
+            for prev_end, next_start in clip_boundaries:
+                dist = min(abs(raw_t - next_start), abs(raw_t - prev_end))
+                if dist <= 3.5 and dist < best_dist:
+                    best_dist = dist
+                    best_next_start = next_start
+            return best_next_start if best_next_start is not None else raw_t
+
+        # Uzun videolarda ilk 20 saniyede gereksiz jump-cut geçişi çıkmasını önle,
+        # ancak 20s sonrasındaki tüm gerçek semantik konu/bölüm geçişlerini koru!
+        min_tr_edge_seq = 20.0 if edited_duration >= 90.0 else min(5.0, max(1.5, edited_duration * 0.08))
+        min_tr_gap_seq = 11.0 if edited_duration >= 150.0 else min(8.0, max(4.0, edited_duration * 0.15))
         repaired_transitions: List[Dict[str, Any]] = []
-        last_tr_ts = 0.0
+        last_tr_seq_ts = -999.0
         for idx, tr in enumerate(sorted(transitions, key=lambda t: float(t.get("timestamp", 0.0)))):
-            ts = float(tr.get("timestamp") or tr.get("boundaryTime") or 0.0)
-            if ts <= min_tr_edge or ts >= safe_duration - min_tr_edge:
+            tr_id = str(tr.get("id") or "")
+            # Eski jump-cut kaynaklı ('ad_tr_cut_...') geçişleri temizle
+            if tr_id.startswith("ad_tr_cut_") and edited_duration >= 90.0:
                 continue
-            if ts - last_tr_ts < min_tr_gap and repaired_transitions:
+            raw_ts = float(tr.get("timestamp") or tr.get("boundaryTime") or 0.0)
+            ts = snap_to_clip_boundary(raw_ts)
+            seq_ts = raw_to_seq(ts)
+            if seq_ts <= min_tr_edge_seq or seq_ts >= edited_duration - min_tr_edge_seq:
+                continue
+            if (seq_ts - last_tr_seq_ts < min_tr_gap_seq) and repaired_transitions:
                 continue
             tr_type = str(tr.get("type") or "smoothleft")
             if tr_type not in theme_profile.allowed_transitions:
                 tr_type = theme_profile.allowed_transitions[0]
+            snapped_val = round(ts, 2)
             repaired_transitions.append({
                 "id": tr.get("id") or f"ad_transition_{idx + 1}",
-                "timestamp": round(ts, 2),
-                "boundaryTime": round(float(tr.get("boundaryTime") or ts), 2),
-                "boundarySourceTime": round(float(tr.get("boundarySourceTime") or ts), 2),
+                "timestamp": snapped_val,
+                "boundaryTime": snapped_val,
+                "boundarySourceTime": snapped_val,
                 "type": tr_type,
                 "transitionType": tr_type,
                 "duration": round(float(tr.get("duration", theme_profile.transition_duration_sec)), 2),
             })
-            last_tr_ts = ts
+            last_tr_seq_ts = seq_ts
 
         # Kural 6: 1-e-1 Görsel-İşitsel Senkrezis (Audio-Visual Synchresis)
         # "Ya ikisinde de gelmeli ya hiç gelmemeli ve ikisinde de aynı ses gelmeli":
@@ -240,12 +325,30 @@ class MasterPlanValidator:
                 "boundOverlayId": ov_id,
             })
 
-        # Onaylanan her sahne geçişine (t - 0.15s) 'capcut-swish-large' (Swish Whoosh Large 794558) kaydırma sesi bağla
+        # Kullanıcının manuel eklediği ('sfx_...' ID'li) özel SFX kliplerini koru
+        for orig_sfx in (sfx_list or []):
+            if not isinstance(orig_sfx, dict):
+                continue
+            orig_id = str(orig_sfx.get("id") or "")
+            if orig_id.startswith("sfx_"):
+                user_sfx = dict(orig_sfx)
+                s_val = float(
+                    user_sfx.get("start")
+                    if user_sfx.get("start") is not None
+                    else (user_sfx.get("timestamp") or 0.0)
+                )
+                user_sfx["start"] = round(s_val, 2)
+                user_sfx["timestamp"] = round(s_val, 2)
+                user_sfx.setdefault("presetId", str(user_sfx.get("synthPreset") or "pop-bubble"))
+                repaired_sfx.append(user_sfx)
+
+        # Onaylanan her sahne geçişine tam yeni klibin başladığı sınırda (tr_ts = next_clip.start)
+        # 'capcut-swish-large' (Swish Whoosh Large 794558) kaydırma sesi bağla (kesim içine düşmemesi için tr_ts - 0.15 yapılmaz!)
         for tr_idx, tr in enumerate(repaired_transitions):
             tr_ts = float(tr.get("timestamp") or tr.get("boundaryTime") or 0.0)
-            sfx_ts = round(max(0.05, tr_ts - 0.15), 2)
+            sfx_ts = round(max(0.05, tr_ts), 2)
             if not any(
-                abs(float(s["start"]) - sfx_ts) < 0.22 and s["presetId"] in ("capcut-swish-large", "whoosh-fast")
+                abs(float(s.get("start", 0.0)) - sfx_ts) < 0.22 and s.get("presetId") in ("capcut-swish-large", "whoosh-fast")
                 for s in repaired_sfx
             ):
                 repaired_sfx.append({
@@ -265,5 +368,5 @@ class MasterPlanValidator:
                     "isTransitionSfx": True,
                 })
 
-        repaired_sfx.sort(key=lambda s: float(s["start"]))
+        repaired_sfx.sort(key=lambda s: float(s.get("start", s.get("timestamp", 0.0))))
         return repaired_overlays, repaired_sfx, repaired_transitions

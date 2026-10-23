@@ -1735,13 +1735,14 @@ export class StudioEngineService {
 
   /**
    * Gerçek Stüdyo Ses Efektini (/assets/sfx/{presetId}.wav veya özel ses URL'si) çalar.
+   * maxDurationSec verilirse ses tam o sürede (timeline üzerindeki kutunun bittiği yerde) kesilir.
    */
-  playSfxPreset(presetId: string, volume = 0.85, customUrl?: string): void {
+  playSfxPreset(presetId: string, volume = 0.85, customUrl?: string, maxDurationSec?: number): void {
     try {
       const rawId = (presetId || 'capcut-swish-large').trim();
       const wavIdMap: Record<string, string> = {
-        'keyboard-type': 'keyboard-typing',
-        'keyboard': 'keyboard-typing',
+        'keyboard-type': 'keyboard-type',
+        'keyboard': 'keyboard-type',
         'ding': 'ding-bright',
         'pop': 'pop-bubble',
         'whoosh': 'capcut-swish-large',
@@ -1765,6 +1766,15 @@ export class StudioEngineService {
       const clone = baseAudio.cloneNode(true) as HTMLAudioElement;
       clone.volume = Math.max(0, Math.min(1.0, volume));
       clone.currentTime = 0;
+      if (maxDurationSec && maxDurationSec > 0.05) {
+        const stopMs = Math.max(50, Math.round(maxDurationSec * 1000));
+        setTimeout(() => {
+          try {
+            clone.pause();
+            clone.currentTime = 0;
+          } catch {}
+        }, stopMs);
+      }
       clone.play().catch(() => {
         // Yedek WebAudio geri dönüşü
         const ctx = this.getAudioContext();
@@ -1776,14 +1786,19 @@ export class StudioEngineService {
         source.connect(gain);
         gain.connect(ctx.destination);
         source.start(0);
+        if (maxDurationSec && maxDurationSec > 0.05) {
+          try {
+            source.stop(ctx.currentTime + maxDurationSec);
+          } catch {}
+        }
       });
     } catch (err) {
       console.warn('[STUDIO-SFX] Ses çalınamadı:', err);
     }
   }
 
-  playSynthesizedSfx(presetId: string, volume = 0.85, customUrl?: string): void {
-    this.playSfxPreset(presetId, volume, customUrl);
+  playSynthesizedSfx(presetId: string, volume = 0.85, customUrl?: string, maxDurationSec?: number): void {
+    this.playSfxPreset(presetId, volume, customUrl, maxDurationSec);
   }
 
   generateSfxWavDataUri(presetId: string, _duration?: number): string {

@@ -1,11 +1,11 @@
 """
-OtoEdit Akıllı Hatalı Tekrar Eleyici (Smart Retake Detector) V3
-TakeAligner motorunu kullanarak transkript kelime zaman damgaları üzerinden
-tekrar okumaları (retakes), cümle içi yeniden başlamaları (restarts) ve
-stüdyo meta-komutlarını tespit eder.
-
-Kural: Puanlama tabanlı rastgele seçim kaldırılmıştır. Okuma ve ders videolarında
-her zaman son (başarılı) take korunur, önceki hatalı denemeler budanır.
+OtoEdit Akıllı Hatalı Tekrar Eleyici (Smart Retake Detector) V4
+TakeAligner V4 ve 3-Aşamalı Çok Ajanlı TranscriptVerifier V4 motorlarını kullanarak:
+- Tekrar okumaları (retakes),
+- Cümle ortası birleştirmeleri (Mid-Sentence Prefix Stitch),
+- Fonetik dil sürçmelerini,
+- Stüdyo meta-komutlarını ve hayalet halüsinasyonları ("M.K.", "Thank you" vb.) tespit eder.
+- 3. tur sonunda %100 emin olunamayan kesimleri 'uncertain_retake' (Editörde Koyu Turuncu) olarak işaretler.
 """
 from typing import List, Dict, Any, Tuple, Set, Optional
 from models.edl_model import CutItem
@@ -20,11 +20,11 @@ logger = get_logger(__name__)
 
 
 class RetakeDetector:
-    """Take-Aware hizalama ile hatalı tekrarları deterministik budayan akıllı motor."""
+    """Take-Aware hizalama ve 3-Aşamalı Çok Ajanlı Doğrulama ile hatalı tekrarları budayan motor."""
 
     def __init__(
         self,
-        similarity_threshold: float = 0.75,
+        similarity_threshold: float = 0.74,
         transcript_verifier: Optional[TranscriptVerifier] = None
     ):
         self.similarity_threshold = similarity_threshold
@@ -57,12 +57,12 @@ class RetakeDetector:
         enable_ai_verification: bool = True
     ) -> List[CutItem]:
         """
-        Transkript kelimeleri üzerinden TakeAligner ile retake ve yarım okumaları tespit eder.
+        Transkript kelimeleri üzerinden TakeAligner V4 ve 3-Aşamalı TranscriptVerifier V4 ile
+        retake, cümle ortası birleştirme (stitch) ve yarım okumaları tespit eder.
         Sınırları enerji minimumuna (RMS) tek yönlü yaslar ve CutItem listesi döndürür.
         """
         words = getattr(transcript, "words", None) or []
         if not words:
-            # Fallback: segmentlerden kelimeleri topla veya metinden üret
             words = []
             for seg in getattr(transcript, "segments", []):
                 if getattr(seg, "words", None):
@@ -81,48 +81,49 @@ class RetakeDetector:
             logger.info("Transkriptte yeterli kelime bulunamadı, retake analizi atlandı.")
             return []
 
-        logger.info(f"Akıllı Retake analizi (Take-Aware v3) başlıyor ({len(words)} kelime taranıyor)...")
+        logger.info(f"Akıllı Retake analizi (Take-Aware V4 + 3-Pass Multi-Agent) başlıyor ({len(words)} kelime taranıyor)...")
 
         raw_cuts = self.aligner.detect_retakes(words)
-        logger.info(f"TakeAligner {len(raw_cuts)} aday retake/restart bölgesi buldu.")
+        logger.info(
+            f"TakeAligner V4 {len(raw_cuts)} aday retake/restart bölgesi ve "
+            f"{len(self.aligner.last_groups)} tekrar grubu buldu."
+        )
 
         cut_items: List[CutItem] = []
         for idx, rc in enumerate(raw_cuts, start=1):
             c_start = rc.start
             c_end = rc.end
 
-            # Kenarları lokal RMS enerji minimumuna oturt.
-            # Retake artık yalnızca elenen kelimeleri kapsadığı için kenarlar DIŞARI doğru
-            # (sessizliğe) yaslanır: başlangıç geriye, bitiş ileriye.
             if analysis is not None:
                 c_start = analysis.find_energy_minimum(c_start, search_window_sec=0.025, direction="backward_only")
                 c_end = analysis.find_energy_minimum(c_end, search_window_sec=0.025, direction="forward_only")
 
-            if (c_end - c_start) >= 0.15:
+            if (c_end - c_start) >= 0.02:
                 cut_items.append(CutItem(
                     id=f"cut_retake_{idx}",
-                    start=round(c_start, 2),
-                    end=round(c_end, 2),
-                    reason="smart_retake",
+                    start=round(c_start, 3),
+                    end=round(max(c_start + 0.03, c_end), 3),
+                    reason=rc.reason or "smart_retake",
                     source="auto",
                     command=rc.command
                 ))
 
-        # 3. AŞAMA: LLM TABANLI SEMANTİK VE YETİM KELİME DENETİMİ (Antigravity Gemini)
+        # 3-AŞAMALI ÇOK AJANLI DOĞRULAMA DÖNGÜSÜ (Paralel Parça Ajanları + Bağlam Ek Yeri + 3 Tur Küresel Kontrol)
         if enable_ai_verification and self.transcript_verifier:
             try:
                 ai_cuts = self.transcript_verifier.audit_transcript(
                     transcript=transcript,
                     analysis=analysis,
-                    existing_cuts=(silence_cuts or []) + cut_items
+                    existing_cuts=(silence_cuts or []) + cut_items,
+                    aligner_groups=self.aligner.last_groups,
                 )
                 if ai_cuts:
-                    logger.info(f"🧠 AI Transkript Denetçisinden {len(ai_cuts)} ek retake/yetim kesim eklendi.")
+                    logger.info(f"🧠 3-Aşamalı Çok Ajanlı Denetçiden {len(ai_cuts)} ek retake/belirsiz kesim eklendi.")
                     cut_items.extend(ai_cuts)
             except Exception as e:
                 logger.warning(f"AI Transkript Denetiminde hata (ihmal edildi): {e}")
 
-        # Sırala ve çakışanları birleştir
+        # Sırala ve yalnızca aynı reason olan çakışanları birleştir
         cut_items.sort(key=lambda c: c.start)
         merged: List[CutItem] = []
         for c in cut_items:
@@ -130,12 +131,17 @@ class RetakeDetector:
                 merged.append(c)
                 continue
             prev = merged[-1]
-            if c.start <= prev.end:
-                prev.end = max(prev.end, c.end)
+            if c.start <= prev.end and c.reason == prev.reason:
+                prev.end = round(max(prev.end, c.end), 3)
                 if c.command and c.command not in (prev.command or ""):
                     prev.command = f"{prev.command} | {c.command}"
             else:
                 merged.append(c)
 
-        logger.info(f"Akıllı Retake analizi tamamlandı: Toplam {len(merged)} hatalı tekrar budandı.")
+        smart_cnt = sum(1 for c in merged if c.reason == "smart_retake")
+        uncertain_cnt = sum(1 for c in merged if c.reason == "uncertain_retake")
+        logger.info(
+            f"Akıllı Retake analizi tamamlandı: Toplam {len(merged)} kesim "
+            f"({smart_cnt} kesin sarı retake, {uncertain_cnt} belirsiz koyu turuncu retake)."
+        )
         return merged

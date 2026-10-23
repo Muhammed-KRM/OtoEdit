@@ -483,12 +483,11 @@ def test_video_renderer_transitions_matching(tmp_path):
             temp_dir=str(tmp_path),
         )
         assert mock_run.called
-        called_cmd = mock_run.call_args[0][0]
-        cmd_str = " ".join(called_cmd)
-        assert "xfade=transition=dissolve:duration=0.500:offset=3.500" in cmd_str
-        assert "acrossfade=d=0.500" in cmd_str
-        assert len(out_files) == 1
-        assert abs(out_durs[0] - 8.5) < 0.01
+        all_cmds = [" ".join(c[0][0]) for c in mock_run.call_args_list]
+        assert any("xfade=transition=dissolve:duration=0.500:offset=0.250" in c for c in all_cmds)
+        assert any("acrossfade=d=0.500" in c for c in all_cmds)
+        assert len(out_files) == 3
+        assert abs(sum(out_durs) - 8.5) < 0.01
         assert os.path.isfile(concat_path)
 
 
@@ -867,7 +866,8 @@ def test_timeline_mapper_seq_timestamp_and_nearest_cut_boundary(tmp_path):
     assert remapped[0]["id"] == "ov_cut_boundary"
     assert abs(float(remapped[0]["timestamp"]) - 17.91) < 0.01
     assert remapped[1]["id"] == "ov_seq_explicit"
-    assert abs(float(remapped[1]["timestamp"]) - 3.24) < 0.01
+    # Raw timestamp 36.11 minus cut duration (32.27 - 17.91 = 14.36) = 21.75s
+    assert abs(float(remapped[1]["timestamp"]) - 21.75) < 0.01
 
 
 # ==============================================================================

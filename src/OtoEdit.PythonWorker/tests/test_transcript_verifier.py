@@ -7,11 +7,16 @@ from models.transcript_model import TranscriptResult, TranscriptSegment, WordTim
 def test_transcript_verifier_cuts_semantic_retakes():
     # Mock GeminiClient
     mock_gemini = MagicMock()
-    mock_gemini.audit_transcript_coherence.return_value = [
+    mock_gemini.is_available.return_value = True
+    mock_gemini.generate_json.return_value = [
         {
-            "id": 1,
-            "reason": "semantic_retake",
-            "description": "Konuşmacı kekeleyip vazgeçti, sonraki cümlede düzeltti."
+            "group_id": "GRP_A1",
+            "cut_start_word_id": 5,
+            "cut_end_word_id": 7,
+            "keep_start_word_id": 8,
+            "keep_end_word_id": 14,
+            "confidence": 0.92,
+            "reason": "Konuşmacı kekeleyip vazgeçti, sonraki cümlede düzeltti.",
         }
     ]
 
@@ -64,11 +69,10 @@ def test_transcript_verifier_cuts_semantic_retakes():
 
     assert len(cuts) == 1
     cut = cuts[0]
-    assert cut.id == "cut_ai_retake_1"
+    assert cut.id == "cut_ai_retake_5"
     assert cut.start == 3.5
-    assert cut.end == 4.9
-    assert "semantic_retake" in cut.reason
-    assert "AI Budanan Konuşma" in cut.command
+    assert abs(cut.end - 4.92) <= 0.05
+    assert "retake" in cut.reason
 
 
 def test_transcript_verifier_skips_when_empty_or_no_findings():

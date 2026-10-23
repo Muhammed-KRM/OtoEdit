@@ -3,7 +3,9 @@ OtoEdit Transcriber Orkestratörü
 - Tek kaynak AudioAnalysis nesnesinden beslenir.
 - AudioChunker ile VAD sessizlik sınırlarından parçalama yapar.
 - STTEngineChain ile sırasıyla Gemini 3.5 Transcribe -> Groq -> Antigravity Proxy -> Yerel Whisper zincirini çalıştırır.
-- GapFiller ile atlanan konuşma bölgelerini tespit edip kurtarır ("hiçbir kelime atlanmamalı").
+- Clean & Trim (word_refiner) adımını GapFiller'dan ÖNCE çalıştırarak Whisper'ın tekrar baskılama
+  (Repetition Suppression) sırasında komşu konuşma adalarının üzerine uzattığı kelimeleri gerçek akustik
+  sınırlarına çeker; ardından GapFiller V2 ile tüm boş/kısmi konuşma adalarını tespit edip kurtarır.
 - Çıktıyı altyazı segmentlerine bölerek EDL ve Karaoke motoruna uyumlu TranscriptResult olarak döner.
 """
 
@@ -30,7 +32,7 @@ class Transcriber:
     def __init__(self, engine_chain: Optional[STTEngineChain] = None):
         self.chain = engine_chain or STTEngineChain()
         self.chunker = AudioChunker(max_chunk_sec=Config.STT_CHUNK_MAX_SEC)
-        self.gap_filler = GapFiller(min_gap_sec=0.40)
+        self.gap_filler = GapFiller(min_gap_sec=0.45, intra_subgap_sec=0.65, stretched_word_sec=1.45, max_gaps=140)
 
     def transcribe(
         self,
@@ -44,8 +46,9 @@ class Transcriber:
         1. VAD & RMS analizi (verilmemişse yapar)
         2. Akıllı VAD parçalama
         3. STT Motor Zinciri (Gemini Transcribe -> Groq -> Proxy -> Local)
-        4. GapFiller (atlanan kelimeleri geri kazanma)
-        5. Altyazı mikro-segmentasyonu
+        4. İlk Akustik Kelime Kırpması (uzatılmış kelimeleri gerçek fonasyon sınırına çeker)
+        5. GapFiller V2 (boş ve kısmi konuşma adalarındaki kayıp tekrarları kurtarır)
+        6. Kurtarılan kelimelerle son akustik kırpma ve altyazı mikro-segmentasyonu
         """
         logger.info(f"🎙️ Transkripsiyon orkestrasyonu başlıyor: {os.path.basename(audio_path)} (VideoId={video_id})")
         t0 = time.time()
@@ -96,24 +99,32 @@ class Transcriber:
 
             logger.info(f"📊 STT Motor İstatistikleri: {engine_stats} (Toplam {len(all_words)} kelime)")
 
-            # 4. Kayıp Kelime Dedektörü (Gap Filler)
+            # 4. İlk Kelime Temizliği ve Akustik VAD Kırpması
+            # ÖNEMLİ: GapFiller'dan ÖNCE çalıştırılır ki Whisper'ın tekrar baskılama (Repetition Suppression)
+            # nedeniyle komşu konuşma adalarının üzerine doğru 3-7 sn uzattığı kelimeler (örn. 've' 39.4s-46.6s)
+            # gerçek akustik sınırlarına çekilsin ve kelimesiz kalan konuşma adaları GapFiller tarafından yakalanabilsin!
+            raw_pre_trim_words = list(all_words)
+            all_words = self.clean_and_trim_words(all_words, analysis)
+
+            # 5. Kayıp Kelime ve Tekrar Baskılama Kurtarıcısı (Gap Filler V2)
             if on_progress:
                 on_progress(total_chunks, total_chunks, "Kayıp kelimeler ve konuşma aralıkları taranıyor...")
             all_words = self.gap_filler.fill_gaps(
                 media_path=audio_path,
                 analysis=analysis,
                 words=all_words,
-                chain=self.chain
+                chain=self.chain,
+                raw_words=raw_pre_trim_words
             )
 
             if not all_words:
                 logger.warning("⚠️ Transkripsiyondan hiç kelime dönmedi, fallback üretiliyor.")
                 return self._generate_fallback_transcript(audio_path)
 
-            # 5. Adım 1: Kelime Temizliği ve Çift Yönlü VAD Kırpması
+            # 6. Kurtarılan yeni kelimeleri de çift yönlü VAD ve RMS zarfına kilitle
             all_words = self.clean_and_trim_words(all_words, analysis)
 
-            # 6. Altyazı segmentlerine böl (Karaoke & EDL uyumlu)
+            # 7. Altyazı segmentlerine böl (Karaoke & EDL uyumlu)
             segments = self._words_to_segments(all_words, max_words=6, max_duration=3.0)
 
             # WordTimestamp nesnelerine çevir
@@ -194,7 +205,28 @@ class Transcriber:
         if not cleaned_raw:
             return []
 
-        cleaned_raw.sort(key=lambda w: w.start)
+        cleaned_raw.sort(key=lambda w: (w.start, -w.end))
+
+        # 1.5. Parça (chunk) ve GapFiller sınırlarındaki örtüşen mükerrer kelimeleri tekilleştir,
+        # farklı kelimeler arasındaki küçük sınır örtüşmelerini ise kelime silmeden orta noktadan hizala.
+        deduped_raw: List[Word] = []
+        for w in cleaned_raw:
+            if not deduped_raw:
+                deduped_raw.append(w)
+                continue
+            prev = deduped_raw[-1]
+            ov = min(w.end, prev.end) - max(w.start, prev.start)
+            w_n = w.word.strip().lower().strip(".,!?;:\"'")
+            p_n = prev.word.strip().lower().strip(".,!?;:\"'")
+            if w_n and w_n == p_n and (abs(w.start - prev.start) <= 0.20 or ov > 0.02):
+                continue
+            if prev.end > w.start and w_n != p_n:
+                mid = round(max(prev.start + 0.04, min(prev.end, 0.5 * (prev.end + w.start))), 3)
+                prev.end = mid
+                if w.end > mid + 0.02:
+                    w.start = mid
+            deduped_raw.append(w)
+        cleaned_raw = deduped_raw
 
         # RMS zarfı yoksa veya analiz verilmemişse ham kelimelerle devam et
         rms = getattr(analysis, "rms_envelope", None) if analysis is not None else None

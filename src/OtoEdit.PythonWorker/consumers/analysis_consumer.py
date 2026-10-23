@@ -134,7 +134,7 @@ class AnalysisConsumer:
             # 🚀 REDIS IDEMPOTENCY KONTROLÜ (SHA-256 + Pipeline Bayrakları İle Bileşik Anahtar)
             video_hash = self.cache.compute_video_hash(local_video_path)
             cache_key = (
-                f"{video_hash}:fmt={video_format}:jc={int(auto_jumpcut)}:rt={int(auto_retake)}"
+                f"v4:{video_hash}:fmt={video_format}:jc={int(auto_jumpcut)}:rt={int(auto_retake)}"
                 f":br={int(auto_broll)}:sub={int(auto_subtitles)}:au={int(audio_enhancement)}"
                 f":gs={int(gesture_enabled)}:ad={int(auto_director)}"
             )

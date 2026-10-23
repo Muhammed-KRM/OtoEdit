@@ -26,9 +26,10 @@ export interface ContextMenuState {
   visible: boolean;
   x: number;
   y: number;
-  type: 'clip' | 'overlay' | 'timeline';
+  type: 'clip' | 'overlay' | 'timeline' | 'sfx';
   targetClip?: any;
   targetOverlay?: OverlayItem;
+  targetSfx?: EdlSfxClip;
   seekTime?: number;
 }
 
@@ -2197,8 +2198,135 @@ export interface ContextMenuState {
             </div>
           </div>
 
+          <!-- 2B. Durum: SFX (Ses Efekti) Seçili -->
+          <div *ngIf="selectedSfx() as sfx" class="space-y-4 animate-fade-in">
+            <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+              <div class="flex items-center gap-2">
+                <span class="p-1.5 rounded-lg bg-amber-500/20 text-amber-400 border border-amber-500/30 text-sm">🔊</span>
+                <div>
+                  <h4 class="text-xs font-extrabold text-white tracking-wide">Ses Efekti Denetçisi</h4>
+                  <p class="text-[10px] text-amber-400 font-mono truncate max-w-[165px]">{{ sfxInspectorData.name || sfx.name || 'SFX' }}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                (click)="selectedSfxId.set(null)"
+                class="p-1 rounded-md bg-dark-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs cursor-pointer"
+                title="Seçimi Kapat (Esc)">
+                ✕
+              </button>
+            </div>
+
+            <!-- Hızlı Dinle ve Çoğalt -->
+            <div class="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                (click)="previewSfxClip(sfx)"
+                class="py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+                <span>▶</span> Dinle / Önizle
+              </button>
+              <button
+                type="button"
+                (click)="duplicateSfxClip(sfx)"
+                class="py-2 px-3 rounded-lg bg-dark-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+                <span>📋</span> Çoğalt
+              </button>
+            </div>
+
+            <!-- Ses Efekti Türü / Preset Değiştirici -->
+            <div class="p-3 rounded-xl bg-dark-800/80 border border-slate-700/70 space-y-2.5">
+              <label class="text-[10px] font-bold text-slate-300 uppercase tracking-wider block">Ses Efekti Seçimi (Preset)</label>
+              <select
+                [(ngModel)]="sfxInspectorData.presetId"
+                (ngModelChange)="onSfxPresetSelectChange($event)"
+                class="w-full px-2.5 py-2 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white focus:border-amber-400 focus:outline-none">
+                <option *ngFor="let item of studio.sfxLibrary" [value]="item.id">
+                  {{ item.icon }} {{ item.name }} ({{ item.category }})
+                </option>
+              </select>
+
+              <div>
+                <label class="text-[10px] text-slate-400 block mb-1">Görünen Etiket Adı</label>
+                <input
+                  type="text"
+                  [(ngModel)]="sfxInspectorData.name"
+                  (ngModelChange)="onSfxInspectorChange()"
+                  (blur)="saveSfxInspector()"
+                  class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs text-white focus:border-amber-400 focus:outline-none" />
+              </div>
+            </div>
+
+            <!-- Ses Seviyesi (Volume) -->
+            <div class="p-3 rounded-xl bg-dark-800/80 border border-slate-700/70 space-y-2">
+              <div class="flex items-center justify-between text-xs">
+                <span class="text-slate-300 font-semibold">Ses Seviyesi (Gain)</span>
+                <span class="font-mono text-amber-400 font-bold">%{{ sfxInspectorData.volumePercent }}</span>
+              </div>
+              <input
+                type="range"
+                min="0"
+                max="200"
+                step="5"
+                [(ngModel)]="sfxInspectorData.volumePercent"
+                (ngModelChange)="onSfxInspectorChange()"
+                (change)="saveSfxInspector()"
+                class="w-full accent-amber-400 cursor-pointer" />
+              <div class="flex justify-between text-[9px] text-slate-500 font-mono">
+                <span>Sessiz (%0)</span>
+                <span>Standart (%85)</span>
+                <span>Boost (%200)</span>
+              </div>
+            </div>
+
+            <!-- Zamanlama (Başlangıç ve Süre) -->
+            <div class="p-3 rounded-xl bg-dark-800/80 border border-slate-700/70 space-y-2.5">
+              <span class="text-[10px] font-bold text-slate-300 uppercase tracking-wider block">Zaman Çizelgesi Konumu</span>
+              <div class="grid grid-cols-2 gap-2">
+                <div>
+                  <label class="text-[10px] text-slate-400 block mb-1">Başlangıç (sn)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0"
+                    [(ngModel)]="sfxInspectorData.seqStart"
+                    (ngModelChange)="onSfxInspectorChange()"
+                    (blur)="saveSfxInspector()"
+                    class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs font-mono text-white focus:border-amber-400 focus:outline-none" />
+                </div>
+                <div>
+                  <label class="text-[10px] text-slate-400 block mb-1">Süre (sn)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="0.2"
+                    max="15"
+                    [(ngModel)]="sfxInspectorData.duration"
+                    (ngModelChange)="onSfxInspectorChange()"
+                    (blur)="saveSfxInspector()"
+                    class="w-full px-2.5 py-1.5 rounded-lg bg-dark-900 border border-slate-700 text-xs font-mono text-white focus:border-amber-400 focus:outline-none" />
+                </div>
+              </div>
+              <button
+                type="button"
+                (click)="sfxInspectorData.seqStart = getVisTimeFromRawTime(currentTime()); onSfxInspectorChange(); saveSfxInspector()"
+                class="w-full py-1.5 rounded-lg bg-dark-900 hover:bg-slate-800 border border-slate-700 text-[11px] text-amber-300 font-semibold transition-colors cursor-pointer">
+                📍 Oynatma İmlecinin Olduğu Yere Taşı ({{ getVisTimeFromRawTime(currentTime()).toFixed(2) }}sn)
+              </button>
+            </div>
+
+            <!-- Sil Butonu -->
+            <div class="pt-2 border-t border-slate-800 flex flex-col gap-2">
+              <button
+                type="button"
+                (click)="removeSfxClip(sfx.id); selectedSfxId.set(null)"
+                class="w-full py-2 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 text-rose-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
+                <span>🗑</span> Ses Efektini Sil (Del)
+              </button>
+            </div>
+          </div>
+
           <!-- 3. Durum: Hiçbir Şey Seçili Değil -->
-          <div *ngIf="!selectedOverlay() && !selectedSubtitle() && selectedClipIds().length === 0" class="text-center py-8 space-y-4">
+          <div *ngIf="!selectedOverlay() && !selectedSubtitle() && !selectedSfx() && selectedClipIds().length === 0" class="text-center py-8 space-y-4">
             <div class="w-12 h-12 rounded-2xl bg-dark-800 border border-slate-700/80 flex items-center justify-center mx-auto text-xl shadow-inner">
               ⚙️
             </div>
@@ -2243,10 +2371,10 @@ export interface ContextMenuState {
               <span>Böl (B)</span>
             </button>
             <button 
-              *ngIf="selectedClipIds().length > 0 || selectedOverlayId()"
+              *ngIf="selectedClipIds().length > 0 || selectedOverlayId() || selectedSfxId()"
               (click)="deleteSelectedItems()" 
               class="px-2.5 py-1 rounded bg-rose-600/20 text-rose-300 hover:bg-rose-600/40 border border-rose-500/40 text-xs font-semibold flex items-center gap-1 transition-colors shadow-glow-sm cursor-pointer" 
-              title="Seçili Klip veya Katmanı Sil (Del)">
+              title="Seçili Klip, Katman veya Ses Efektini Sil (Del)">
               <span>🗑</span>
               <span>Sil (Del)</span>
             </button>
@@ -2291,6 +2419,14 @@ export interface ContextMenuState {
               title="Hatalı Tekrar (Retake) Kesimlerini İptal Et">
               <span>🔄</span>
               <span>{{ retakeCount() }} Retake'i Geri Al</span>
+            </button>
+            <button 
+              *ngIf="uncertainRetakeCount() > 0" 
+              (click)="deleteUncertainRetakeCuts()" 
+              class="px-2.5 py-1 rounded bg-orange-600/25 text-orange-300 hover:bg-orange-600/40 border border-orange-500/50 font-semibold text-xs shadow-glow-sm flex items-center gap-1.5 transition-all cursor-pointer" 
+              title="3-Aşamalı Doğrulama Sonrası Belirsiz Kalan (Koyu Turuncu) Retake Kesimlerini İptal Et">
+              <span>🟠</span>
+              <span>{{ uncertainRetakeCount() }} Belirsiz Retake'i Geri Al</span>
             </button>
 
             <!-- Toplu Kesim İnce Ayar (Milisaniye Trim) Butonu -->
@@ -2361,6 +2497,9 @@ export interface ContextMenuState {
             </button>
             <button (click)="rippleRetake.set(!rippleRetake())" [ngClass]="rippleRetake() ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-dark-800 text-slate-400 border-slate-700'" class="px-2 py-0.5 rounded border transition-colors cursor-pointer" title="Retake Kesimlerini Sıkıştır/Genişlet">
               🔄 Retake {{ rippleRetake() ? 'Sıkışık' : 'Açık' }}
+            </button>
+            <button (click)="rippleUncertainRetake.set(!rippleUncertainRetake())" [ngClass]="rippleUncertainRetake() ? 'bg-orange-600/25 text-orange-300 border-orange-500/50' : 'bg-dark-800 text-slate-400 border-slate-700'" class="px-2 py-0.5 rounded border transition-colors cursor-pointer" title="Belirsiz (Koyu Turuncu) Retake Kesimlerini Sıkıştır/Genişlet">
+              🟠 Belirsiz {{ rippleUncertainRetake() ? 'Sıkışık' : 'Açık' }}
             </button>
             <button (click)="rippleManual.set(!rippleManual())" [ngClass]="rippleManual() ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' : 'bg-dark-800 text-slate-400 border-slate-700'" class="px-2 py-0.5 rounded border transition-colors cursor-pointer" title="Manuel Kesimleri Sıkıştır/Genişlet">
               🖐 Manuel {{ rippleManual() ? 'Sıkışık' : 'Açık' }}
@@ -2718,9 +2857,10 @@ export interface ContextMenuState {
                     (contextmenu)="openClipContextMenu($event, clip)"
                     class="timeline-clip absolute top-0 bottom-0 transition-all border-r border-white/20 box-border group flex flex-col justify-between p-0 overflow-hidden min-w-[1px] select-none z-10 cursor-pointer"
                     [ngClass]="{
-                       'bg-amber-500/70 hover:bg-amber-500/80 backdrop-blur-xs': isRetakeClip(clip),
+                       'bg-orange-600/85 hover:bg-orange-500/90 border-l border-orange-300/60 backdrop-blur-xs': isUncertainRetakeClip(clip),
+                       'bg-amber-500/70 hover:bg-amber-500/80 backdrop-blur-xs': isRetakeClip(clip) && !isUncertainRetakeClip(clip),
                        'bg-rose-500/70 hover:bg-rose-500/80 backdrop-blur-xs': isManualClip(clip),
-                       'bg-rose-950/75 hover:bg-rose-900/85 backdrop-blur-xs': clip.isCut && !isRetakeClip(clip) && !isManualClip(clip),
+                       'bg-rose-950/75 hover:bg-rose-900/85 backdrop-blur-xs': clip.isCut && !isRetakeClip(clip) && !isUncertainRetakeClip(clip) && !isManualClip(clip),
                        'bg-emerald-600/20 hover:bg-emerald-500/35': !clip.isCut,
                        'ring-2 ring-inset ring-brand-yellow shadow-[0_0_12px_rgba(250,204,21,0.6)] z-20': selectedClipIds().includes(clip.id),
                        'opacity-45 border-dashed border-brand-cyan': draggedClipIdSignal() === clip.id
@@ -2747,8 +2887,8 @@ export interface ContextMenuState {
                     <!-- Üst Klip Başlığı -->
                     <div class="relative flex items-center justify-between px-1 pt-0.5 text-[9px] text-white/90 font-mono truncate pointer-events-none z-10 w-full overflow-hidden">
                       <span class="truncate font-semibold flex items-center gap-1">
-                        <span *ngIf="clip.isCut" class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
-                        <span>{{ clip.isCut ? (isRetakeClip(clip) ? '🔁 Retake' : '✕ Kesilen') : (clip.label || 'Klip') }}</span>
+                        <span *ngIf="clip.isCut" class="w-1.5 h-1.5 rounded-full" [ngClass]="isUncertainRetakeClip(clip) ? 'bg-orange-300' : 'bg-rose-400'"></span>
+                        <span>{{ clip.isCut ? (isUncertainRetakeClip(clip) ? '❓ Belirsiz Retake' : (isRetakeClip(clip) ? '🔁 Retake' : '✕ Kesilen')) : (clip.label || 'Klip') }}</span>
                       </span>
                       <span class="text-[8px] opacity-80">{{ clip.duration.toFixed(1) }}s</span>
                     </div>
@@ -2773,8 +2913,9 @@ export interface ContextMenuState {
 
                     <!-- Kesilen Alan Rozeti -->
                     <div *ngIf="clip.isCut" class="my-auto self-center pointer-events-none">
-                      <span class="px-1.5 py-0.5 rounded text-[8px] font-bold bg-rose-900/90 text-rose-200 border border-rose-600/50 shadow-sm">
-                        {{ isRetakeClip(clip) ? 'TEKRAR' : 'SESSİZLİK' }}
+                      <span class="px-1.5 py-0.5 rounded text-[8px] font-bold shadow-sm border"
+                            [ngClass]="isUncertainRetakeClip(clip) ? 'bg-orange-950/90 text-orange-200 border-orange-500/60' : 'bg-rose-900/90 text-rose-200 border-rose-600/50'">
+                        {{ isUncertainRetakeClip(clip) ? 'BELİRSİZ TEKRAR' : (isRetakeClip(clip) ? 'TEKRAR' : 'SESSİZLİK') }}
                       </span>
                     </div>
 
@@ -2915,20 +3056,39 @@ export interface ContextMenuState {
                 <div
                   *ngFor="let sfx of sfxClips(); trackBy: trackBySfxId"
                   (mousedown)="onSfxDragStart($event, sfx)"
-                  (click)="$event.stopPropagation(); previewSfxClip(sfx)"
+                  (click)="$event.stopPropagation(); selectSfx(sfx)"
+                  (contextmenu)="openSfxContextMenu($event, sfx)"
                   [ngStyle]="getSfxClipStyle(sfx)"
-                  class="sfx-clip absolute top-1 bottom-1 rounded-md bg-gradient-to-r from-amber-600/85 to-orange-600/85 border border-amber-300/70 px-0 box-border flex items-center justify-between text-[10px] font-bold text-white shadow z-20 cursor-grab active:cursor-grabbing group overflow-hidden min-w-[1px]"
-                  [title]="(sfx.name || sfx.title || 'SFX') + ' (' + getVisTimeFromRawTime(sfx.start).toFixed(1) + 'sn, ' + (sfx.duration || 1).toFixed(1) + 'sn) — Sürükleyerek taşı veya dinlemek için tıkla'">
-                  <div class="flex items-center gap-1 truncate px-1.5 w-full pointer-events-none">
-                    <span class="shrink-0">🔊</span>
-                    <span class="truncate">{{ sfx.name || sfx.title || 'SFX' }}</span>
+                  [ngClass]="[
+                    selectedSfxId() === sfx.id
+                      ? 'ring-2 ring-white shadow-[0_0_12px_rgba(255,255,255,0.95)] z-30 brightness-115 from-amber-500 to-orange-500 border-white'
+                      : 'from-amber-600/85 to-orange-600/85 border-amber-300/70 hover:brightness-110 z-20',
+                    (isDraggingSfx && selectedSfxId() === sfx.id) ? 'opacity-65 ring-2 ring-brand-cyan' : ''
+                  ]"
+                  class="sfx-clip absolute top-1 bottom-1 rounded-md bg-gradient-to-r border px-0 box-border flex items-center justify-between text-[10px] font-bold text-white shadow-lg cursor-grab active:cursor-grabbing group transition-all select-none overflow-hidden min-w-[1px]"
+                  [title]="'Ses Efekti: ' + (sfx.name || sfx.title || 'SFX') + ' (' + getVisTimeFromRawTime(sfx.start).toFixed(2) + 'sn, Süre: ' + (sfx.duration || 0.5).toFixed(2) + 'sn) — Düzenlemek için tıkla, taşımak için sürükle'">
+                  <!-- Sol Süre Boyutlandırma Tutamacı (Yalnızca Seçili İken Aktif) -->
+                  <div
+                    *ngIf="selectedSfxId() === sfx.id"
+                    (mousedown)="onSfxResizeStart($event, sfx, 'left')"
+                    (click)="$event.stopPropagation()"
+                    class="absolute left-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 rounded-l flex items-center justify-center z-30">
+                    <div class="w-0.5 h-3.5 bg-slate-950 rounded"></div>
                   </div>
-                  <button
-                    type="button"
-                    (click)="$event.stopPropagation(); removeSfxClip(sfx.id)"
-                    class="mr-1 text-[9px] text-amber-100 hover:text-rose-200 opacity-0 group-hover:opacity-100 cursor-pointer shrink-0">
-                    ✕
-                  </button>
+                  <!-- İçerik (T1..T5 Katman Öğeleri ile Birebir Aynı Responsive Düzen) -->
+                  <div class="truncate px-1.5 w-full pointer-events-none font-semibold flex items-center gap-1 drop-shadow-sm overflow-hidden">
+                    <span class="w-3.5 h-3.5 shrink-0 rounded text-[8px] font-black flex items-center justify-center bg-black/30 border border-white/20">🔊</span>
+                    <span class="truncate">{{ sfx.name || sfx.title || 'SFX' }}</span>
+                    <span class="text-[9px] font-mono opacity-80 font-normal ml-0.5 shrink-0">({{ (sfx.duration || 0.5).toFixed(2) }}s)</span>
+                  </div>
+                  <!-- Sağ Süre Boyutlandırma Tutamacı (Yalnızca Seçili İken Aktif) -->
+                  <div
+                    *ngIf="selectedSfxId() === sfx.id"
+                    (mousedown)="onSfxResizeStart($event, sfx, 'right')"
+                    (click)="$event.stopPropagation()"
+                    class="absolute right-0 top-0 bottom-0 w-2 cursor-ew-resize bg-brand-cyan/90 hover:bg-cyan-300 rounded-r flex items-center justify-center z-30">
+                    <div class="w-0.5 h-3.5 bg-slate-950 rounded"></div>
+                  </div>
                 </div>
               </div>
 
@@ -3100,6 +3260,31 @@ export interface ContextMenuState {
             (click)="removeOverlay(menu.targetOverlay!.id); closeContextMenu()"
             class="w-full px-3 py-2 text-left hover:bg-rose-500/20 hover:text-rose-400 flex items-center justify-between transition-colors cursor-pointer">
             <span class="flex items-center gap-2"><span>🗑</span> Katmanı Sil</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Del</kbd>
+          </button>
+        </ng-container>
+
+        <!-- Ses Efekti (SFX) Menüsü -->
+        <ng-container *ngIf="menu.type === 'sfx' && menu.targetSfx">
+          <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800 flex items-center justify-between">
+            <span>🔊 Ses Efekti (A2)</span>
+            <span class="font-mono text-[9px] text-amber-400">{{ menu.targetSfx.name || 'SFX' }}</span>
+          </div>
+          <button
+            (click)="selectSfx(menu.targetSfx!); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-amber-500/20 hover:text-amber-300 flex items-center gap-2 transition-colors cursor-pointer">
+            <span>🎛️</span> Özellikleri Düzenle & Dinle
+          </button>
+          <button
+            (click)="duplicateSfxClip(menu.targetSfx!); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center gap-2 transition-colors cursor-pointer">
+            <span>📋</span> Ses Efektini Çoğalt
+          </button>
+          <div class="h-px bg-slate-800 my-1"></div>
+          <button
+            (click)="removeSfxClip(menu.targetSfx!.id); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-rose-500/20 hover:text-rose-400 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>🗑</span> Ses Efektini Sil</span>
             <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Del</kbd>
           </button>
         </ng-container>
@@ -4181,7 +4366,24 @@ export class EditorComponent implements OnInit, OnDestroy {
     label: string;
   } | null>(null);
   readonly activeSnapLinePercent = signal<number | null>(null);
+  readonly selectedSfxId = signal<string | null>(null);
+  readonly selectedSfx = computed<EdlSfxClip | null>(() => {
+    const id = this.selectedSfxId();
+    if (!id) return null;
+    return (this.activeEdl()?.sfxClips || []).find(s => s.id === id) || null;
+  });
+  sfxInspectorData: {
+    id: string;
+    name: string;
+    presetId: string;
+    volumePercent: number;
+    start: number;
+    seqStart: number;
+    duration: number;
+  } = { id: '', name: '', presetId: 'pop-bubble', volumePercent: 85, start: 0, seqStart: 0, duration: 1.0 };
   isDraggingSfx = false;
+  isResizingSfx = false;
+  sfxResizeEdge: 'left' | 'right' | null = null;
   dragSfxClipId: string | null = null;
   dragSfxOriginalStart = 0;
   dragSfxOriginalDuration = 1.0;
@@ -4373,13 +4575,23 @@ export class EditorComponent implements OnInit, OnDestroy {
   readonly rippleAi = signal<boolean>(true);
   readonly rippleManual = signal<boolean>(true);
   readonly rippleRetake = signal<boolean>(true);
+  readonly rippleUncertainRetake = signal<boolean>(true);
 
   readonly retakeCount = computed(() => {
     const edl = this.activeEdl();
     if (!edl || !edl.cuts) return 0;
     return edl.cuts.filter(c => {
       const r = (c.reason || '').toLowerCase();
-      return r.includes('retake') || r.includes('tekrar');
+      return (r.includes('retake') || r.includes('tekrar')) && !r.includes('uncertain') && !r.includes('belirsiz');
+    }).length;
+  });
+
+  readonly uncertainRetakeCount = computed(() => {
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return 0;
+    return edl.cuts.filter(c => {
+      const r = (c.reason || '').toLowerCase();
+      return r.includes('uncertain_retake') || r.includes('uncertain') || r.includes('belirsiz');
     }).length;
   });
 
@@ -4703,7 +4915,8 @@ export class EditorComponent implements OnInit, OnDestroy {
     const rAi = this.rippleAi();
     const rMan = this.rippleManual();
     const rRet = this.rippleRetake();
-    const rippleActive = rAi || rMan || rRet;
+    const rUncertain = this.rippleUncertainRetake();
+    const rippleActive = rAi || rMan || rRet || rUncertain;
 
     // Yalnızca ana video aralığındaki klipleri al (dışarıdan eklenen videolar T1..Tn katmanındadır)
     const validCustomClips = (customVideoClips || []).filter(
@@ -4736,12 +4949,14 @@ export class EditorComponent implements OnInit, OnDestroy {
         const matchedCut = cuts.find(c => mid >= c.start && mid <= c.end);
         const isCut = Boolean(vc.isCut) || !!matchedCut;
         const reason = (matchedCut?.reason || vc.cutReason || '').toLowerCase();
-        const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
+        const isUncertain = isCut && (reason.includes('uncertain') || reason.includes('belirsiz'));
+        const isRetake = isCut && !isUncertain && (reason.includes('retake') || reason.includes('tekrar'));
         const isManual = isCut && (reason.includes('manuel') || reason.includes('manual') || reason.includes('kullanıcı'));
 
         let isVisibleClip = true;
         if (isCut) {
           if (isManual) isVisibleClip = !rMan;
+          else if (isUncertain) isVisibleClip = !rUncertain;
           else if (isRetake) isVisibleClip = !rRet;
           else isVisibleClip = !rAi;
         }
@@ -4802,12 +5017,14 @@ export class EditorComponent implements OnInit, OnDestroy {
         const cut = cuts.find(c => mid >= c.start && mid <= c.end);
         const isCut = !!cut;
         const reason = (cut?.reason || '').toLowerCase();
-        const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
+        const isUncertain = isCut && (reason.includes('uncertain') || reason.includes('belirsiz'));
+        const isRetake = isCut && !isUncertain && (reason.includes('retake') || reason.includes('tekrar'));
         const isManual = isCut && (reason.includes('manuel') || reason.includes('manual') || reason.includes('kullanıcı'));
 
         let isVisibleClip = true;
         if (isCut) {
           if (isManual) isVisibleClip = !rMan;
+          else if (isUncertain) isVisibleClip = !rUncertain;
           else if (isRetake) isVisibleClip = !rRet;
           else isVisibleClip = !rAi;
         }
@@ -4867,6 +5084,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     const rAi = this.rippleAi();
     const rMan = this.rippleManual();
     const rRet = this.rippleRetake();
+    const rUncertain = this.rippleUncertainRetake();
 
     const allPoints = new Set<number>([0, total]);
     for (const c of cuts) {
@@ -4886,12 +5104,14 @@ export class EditorComponent implements OnInit, OnDestroy {
       const cut = cuts.find(c => mid >= c.start && mid <= c.end);
       const isCut = !!cut;
       const reason = (cut?.reason || '').toLowerCase();
-      const isRetake = isCut && (reason.includes('retake') || reason.includes('tekrar'));
+      const isUncertain = isCut && (reason.includes('uncertain') || reason.includes('belirsiz'));
+      const isRetake = isCut && !isUncertain && (reason.includes('retake') || reason.includes('tekrar'));
       const isManual = isCut && (reason.includes('manuel') || reason.includes('manual') || reason.includes('kullanıcı'));
 
       let isVisible = true;
       if (isCut) {
         if (isManual) isVisible = !rMan;
+        else if (isUncertain) isVisible = !rUncertain;
         else if (isRetake) isVisible = !rRet;
         else isVisible = !rAi;
       }
@@ -5510,7 +5730,7 @@ export class EditorComponent implements OnInit, OnDestroy {
   });
 
   isAnyRippleActive(): boolean {
-    return this.rippleAi() || this.rippleManual() || this.rippleRetake();
+    return this.rippleAi() || this.rippleManual() || this.rippleRetake() || this.rippleUncertainRetake();
   }
 
   getClipLeft(clip: any): number {
@@ -5577,6 +5797,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.selectedSubtitleIndex.set(idx);
       this.selectedSubtitleId.set(this.getSubtitleId(segs[idx]));
       this.selectedOverlayId.set(null);
+      this.selectedSfxId.set(null);
       this.selectedClipIds.set([]);
       
       const s = segs[idx];
@@ -5952,8 +6173,15 @@ export class EditorComponent implements OnInit, OnDestroy {
     return result;
   }
 
+  isUncertainRetakeClip(clip: any): boolean {
+    if (!clip || !clip.isCut || !clip.cutObj) return false;
+    const r = (clip.cutObj.reason || '').toLowerCase();
+    return r.includes('uncertain_retake') || r.includes('uncertain') || r.includes('belirsiz');
+  }
+
   isRetakeClip(clip: any): boolean {
     if (!clip || !clip.isCut || !clip.cutObj) return false;
+    if (this.isUncertainRetakeClip(clip)) return false;
     const r = (clip.cutObj.reason || '').toLowerCase();
     return r.includes('retake') || r.includes('tekrar');
   }
@@ -5970,6 +6198,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!clip.isCut) {
       return `Klip (${startStr}s - ${endStr}s) - Kesmek için çift tıkla / Sağ tık`;
     }
+    if (this.isUncertainRetakeClip(clip)) {
+      const desc = clip.cutObj?.command || clip.cutObj?.reason || 'Belirsiz Tekrar (3-Tur Doğrulama Sonrası)';
+      return `🟠 Belirsiz Tekrar (Uncertain Retake) [${startStr}s - ${endStr}s]: ${desc} - İptal için çift tıkla`;
+    }
     if (this.isRetakeClip(clip)) {
       const desc = clip.cutObj?.command || clip.cutObj?.reason || 'Hatalı Tekrar';
       return `🔁 Hatalı Tekrar (Retake) [${startStr}s - ${endStr}s]: ${desc} - İptal için çift tıkla`;
@@ -5985,6 +6217,9 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (this.isManualClip(clip)) {
        return !this.rippleManual();
     }
+    if (this.isUncertainRetakeClip(clip)) {
+       return !this.rippleUncertainRetake();
+    }
     if (this.isRetakeClip(clip)) {
        return !this.rippleRetake();
     }
@@ -5997,7 +6232,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     const retakeCuts = edl.cuts.filter(c => {
       const r = (c.reason || '').toLowerCase();
-      return r.includes('retake') || r.includes('tekrar');
+      return (r.includes('retake') || r.includes('tekrar')) && !r.includes('uncertain') && !r.includes('belirsiz');
     });
 
     if (retakeCuts.length === 0) return;
@@ -6007,6 +6242,26 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.edlService.patchEdl(this.projectId, { cuts: patchPayload as any }).subscribe({
         next: () => this.loadEdl(),
         error: (err) => console.error('Retake kesimleri kaldırılamadı:', err)
+      });
+    }
+  }
+
+  deleteUncertainRetakeCuts(): void {
+    const edl = this.activeEdl();
+    if (!edl || !edl.cuts) return;
+
+    const uncertainCuts = edl.cuts.filter(c => {
+      const r = (c.reason || '').toLowerCase();
+      return r.includes('uncertain_retake') || r.includes('uncertain') || r.includes('belirsiz');
+    });
+
+    if (uncertainCuts.length === 0) return;
+
+    if (confirm(`3-Aşamalı doğrulama sonrasında belirsiz (koyu turuncu) olarak işaretlenen ${uncertainCuts.length} adet kesim iptal edilecek ve bu sahneler videoya geri eklenecektir. Onaylıyor musunuz?`)) {
+      const patchPayload = uncertainCuts.map(c => ({ id: c.id, start: 0, end: 0, action: 'remove' }));
+      this.edlService.patchEdl(this.projectId, { cuts: patchPayload as any }).subscribe({
+        next: () => this.loadEdl(),
+        error: (err) => console.error('Belirsiz retake kesimleri kaldırılamadı:', err)
       });
     }
   }
@@ -6699,6 +6954,11 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   deleteSelectedItems(): void {
+    if (this.selectedSfxId()) {
+      this.removeSfxClip(this.selectedSfxId()!);
+      this.selectedSfxId.set(null);
+      return;
+    }
     if (this.selectedOverlayId()) {
       this.removeOverlay(this.selectedOverlayId()!);
       this.selectedOverlayId.set(null);
@@ -6775,6 +7035,10 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (event.code === 'Escape') {
       if (this.contextMenu()) {
         this.closeContextMenu();
+        return;
+      }
+      if (this.selectedSfxId()) {
+        this.selectedSfxId.set(null);
         return;
       }
       if (this.selectedOverlayId()) {
@@ -7260,16 +7524,18 @@ export class EditorComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // 4. Canlı SFX Tetikleme (A2 SFX Kanalı — Yalnızca görünür/kesilmemiş kliplerde tetiklenir!)
+    // 4. Canlı SFX Tetikleme (A2 SFX Kanalı — Yalnızca görünür/kesilmemiş kliplerde ve kendi süresince tetiklenir!)
     if (!video.paused) {
       const sfxList = this.sfxClips();
       for (const sfx of sfxList) {
-        if (t >= sfx.start && t <= sfx.start + 0.18) {
+        const sfxDur = Math.max(0.15, Number(sfx.duration) || 0.5);
+        if (t >= sfx.start && t <= sfx.start + Math.min(0.18, sfxDur)) {
           if (!this.playedSfxIdsInPass.has(sfx.id)) {
             this.playedSfxIdsInPass.add(sfx.id);
-            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.22, sfx.sourceUrl);
+            const remainingDur = Math.max(0.1, (sfx.start + sfxDur) - t);
+            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.22, sfx.sourceUrl, remainingDur);
           }
-        } else if (t < sfx.start - 0.1 || t > sfx.start + (sfx.duration || 1.0)) {
+        } else if (t < sfx.start - 0.1 || t > sfx.start + sfxDur) {
           this.playedSfxIdsInPass.delete(sfx.id);
         }
       }
@@ -7515,15 +7781,17 @@ export class EditorComponent implements OnInit, OnDestroy {
       target.closest('input') || 
       target.closest('.timeline-clip') || 
       target.closest('.overlay-item') || 
+      target.closest('.sfx-clip') ||
       target.closest('.subtitle-segment') ||
       target.closest('#playhead')
     )) {
       return;
     }
 
-    // Boş timeline alanına tıklandığında seçili klip ve katmanları temizle
+    // Boş timeline alanına tıklandığında seçili klip, katman ve SFX'leri temizle
     this.selectedClipIds.set([]);
     this.selectedOverlayId.set(null);
+    this.selectedSfxId.set(null);
 
     const targetTime = this.getTimeAtClientX(event.clientX);
     console.log(`%c[SEEK:CLICK] clientX=${event.clientX} -> targetTime=${targetTime.toFixed(2)}s`, 'color: #ec4899; font-weight: bold;');
@@ -7538,6 +7806,7 @@ export class EditorComponent implements OnInit, OnDestroy {
     event.stopPropagation();
     this.clearSubtitleSelection();
     this.selectedOverlayId.set(null);
+    this.selectedSfxId.set(null);
     const current = this.selectedClipIds();
     
     if (event.ctrlKey || event.metaKey) {
@@ -8060,6 +8329,12 @@ export class EditorComponent implements OnInit, OnDestroy {
       color: '#FFFFFF',
       fontSize: 54,
       font: 'Inter',
+      fontWeight: '900',
+      boxStyle: 'none',
+      backgroundColor: 'transparent',
+      glowEnabled: false,
+      glowRadius: 0,
+      strokeWidth: 0,
       positionX: 50,
       positionY: 80,
       trackId: nextTrack,
@@ -8163,6 +8438,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   selectOverlay(id: string): void {
      this.clearSubtitleSelection();
+     this.selectedSfxId.set(null);
      this.selectedOverlayId.set(id);
      const ov = this.activeEdl()?.overlays?.find(o => o.id === id);
      if (ov) {
@@ -8868,7 +9144,8 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   previewSfxClip(sfx: EdlSfxClip): void {
-    this.studioEngine.playSynthesizedSfx(sfx.presetId || sfx.synthPreset || 'whoosh-fast', sfx.volume ?? 0.85, sfx.sourceUrl);
+    const sfxDur = Math.max(0.15, Number(sfx.duration) || 0.5);
+    this.studioEngine.playSynthesizedSfx(sfx.presetId || sfx.synthPreset || 'whoosh-fast', sfx.volume ?? 0.85, sfx.sourceUrl, sfxDur);
     if (this.videoRef?.nativeElement) {
       this.videoRef.nativeElement.currentTime = sfx.start;
       this.currentTime.set(sfx.start);
@@ -8900,8 +9177,106 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.edlService.patchEdl(this.projectId, patch).subscribe();
   }
 
+  selectSfx(sfx: EdlSfxClip, playPreview = true): void {
+    this.clearSubtitleSelection();
+    this.selectedOverlayId.set(null);
+    this.selectedClipIds.set([]);
+    this.selectedSfxId.set(sfx.id);
+    const rawStart = Number(sfx.start) || 0;
+    const seqStart = this.isAnyRippleActive() ? this.getVisTimeFromRawTime(rawStart) : rawStart;
+    this.sfxInspectorData = {
+      id: sfx.id,
+      name: sfx.name || sfx.title || 'SFX',
+      presetId: sfx.presetId || sfx.synthPreset || 'pop-bubble',
+      volumePercent: Math.round((sfx.volume ?? 0.85) * 100),
+      start: parseFloat(rawStart.toFixed(2)),
+      seqStart: parseFloat(seqStart.toFixed(2)),
+      duration: parseFloat((sfx.duration || 1.0).toFixed(2))
+    };
+    if (playPreview) {
+      this.previewSfxClip(sfx);
+    }
+  }
+
+  onSfxInspectorChange(): void {
+    const sfxId = this.selectedSfxId();
+    if (!sfxId) return;
+    const sfxList = this.activeEdl()?.sfxClips || [];
+    const sfx = sfxList.find(s => s.id === sfxId);
+    if (!sfx) return;
+
+    const seqStart = Math.max(0, Number(this.sfxInspectorData.seqStart) || 0);
+    const rawStart = this.isAnyRippleActive() ? this.getRawTimeFromVisTime(seqStart) : seqStart;
+    sfx.name = this.sfxInspectorData.name || 'SFX';
+    sfx.title = sfx.name;
+    sfx.presetId = this.sfxInspectorData.presetId;
+    sfx.synthPreset = this.sfxInspectorData.presetId;
+    sfx.volume = Math.max(0, Math.min(2.0, (Number(this.sfxInspectorData.volumePercent) || 0) / 100));
+    sfx.start = parseFloat(rawStart.toFixed(2));
+    sfx.duration = Math.max(0.2, parseFloat((Number(this.sfxInspectorData.duration) || 1.0).toFixed(2)));
+    this.sfxInspectorData.start = sfx.start;
+    this.edl.update(e => e ? { ...e, sfxClips: [...sfxList] } : null);
+  }
+
+  saveSfxInspector(): void {
+    const sfxId = this.selectedSfxId();
+    if (!sfxId) return;
+    const sfx = (this.activeEdl()?.sfxClips || []).find(s => s.id === sfxId);
+    if (!sfx) return;
+    this.edlService.patchEdl(this.projectId, {
+      sfxClips: [{ ...sfx, action: 'update' }]
+    }).subscribe();
+  }
+
+  onSfxPresetSelectChange(presetId: string): void {
+    const libItem = this.studio.sfxLibrary.find(i => i.id === presetId);
+    if (libItem) {
+      this.sfxInspectorData.name = libItem.name;
+      this.sfxInspectorData.duration = libItem.duration || this.sfxInspectorData.duration;
+      const sfx = (this.activeEdl()?.sfxClips || []).find(s => s.id === this.selectedSfxId());
+      if (sfx) {
+        sfx.sourceUrl = libItem.sourceUrl || `/assets/sfx/${libItem.id}.wav`;
+      }
+    }
+    this.onSfxInspectorChange();
+    this.saveSfxInspector();
+    const updated = this.selectedSfx();
+    if (updated) {
+      this.studioEngine.playSynthesizedSfx(updated.presetId || presetId, updated.volume ?? 0.85, updated.sourceUrl);
+    }
+  }
+
+  duplicateSfxClip(sfx: EdlSfxClip): void {
+    const newClip: EdlSfxClip = {
+      ...sfx,
+      id: `sfx_${Date.now()}`,
+      start: parseFloat(((sfx.start || 0) + Math.max(0.5, sfx.duration || 1.0) + 0.2).toFixed(2)),
+      action: 'add'
+    };
+    const patch: EdlPatchDto = { sfxClips: [newClip] };
+    this.applyOptimisticPatch(patch);
+    this.edlService.patchEdl(this.projectId, patch).subscribe();
+    this.selectSfx(newClip, false);
+  }
+
+  openSfxContextMenu(event: MouseEvent, sfx: EdlSfxClip): void {
+    event.preventDefault();
+    event.stopPropagation();
+    this.selectSfx(sfx, false);
+    this.contextMenu.set({
+      visible: true,
+      x: Math.min(window.innerWidth - 220, event.clientX),
+      y: Math.min(window.innerHeight - 220, event.clientY),
+      type: 'sfx',
+      targetSfx: sfx
+    });
+  }
+
   removeSfxClip(sfxId: string, event?: MouseEvent): void {
     event?.stopPropagation();
+    if (this.selectedSfxId() === sfxId) {
+      this.selectedSfxId.set(null);
+    }
     const patch: EdlPatchDto = {
       sfxClips: [{ id: sfxId, name: '', start: 0, duration: 0, action: 'remove' }]
     };
@@ -8911,9 +9286,9 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   getSfxClipStyle(sfx: EdlSfxClip): any {
     const totalDur = Math.max(0.5, this.totalDuration());
-    const start = sfx.start || 0;
-    const dur = Math.max(0.2, sfx.duration || 1.0);
-    if (!this.isAnyRippleActive() || this.activeCuts().length === 0) {
+    const start = Math.max(0, Number(sfx.start) || 0);
+    const dur = Math.max(0.15, Number(sfx.duration) || 0.5);
+    if (!this.isAnyRippleActive()) {
       return {
         left: `${(start / totalDur) * 100}%`,
         width: `${Math.max(0.02, (dur / totalDur) * 100)}%`
@@ -9754,12 +10129,28 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   onSfxDragStart(event: MouseEvent, sfx: EdlSfxClip): void {
+     if (event.button !== 0) return;
      event.stopPropagation();
+     this.selectSfx(sfx, false);
      this.isDraggingSfx = true;
+     this.isResizingSfx = false;
      this.dragSfxClipId = sfx.id;
      this.dragStartX = event.clientX;
      this.dragSfxOriginalStart = sfx.start || 0;
      this.dragSfxOriginalDuration = Math.max(0.3, sfx.duration || 1.0);
+  }
+
+  onSfxResizeStart(event: MouseEvent, sfx: EdlSfxClip, edge: 'left' | 'right'): void {
+     event.preventDefault();
+     event.stopPropagation();
+     this.selectSfx(sfx, false);
+     this.isResizingSfx = true;
+     this.isDraggingSfx = false;
+     this.sfxResizeEdge = edge;
+     this.dragSfxClipId = sfx.id;
+     this.dragStartX = event.clientX;
+     this.dragSfxOriginalStart = sfx.start || 0;
+     this.dragSfxOriginalDuration = Math.max(0.2, sfx.duration || 1.0);
   }
 
   onCanvasResizeStart(event: MouseEvent, overlayId: string): void {
@@ -9924,8 +10315,8 @@ export class EditorComponent implements OnInit, OnDestroy {
          return;
      }
 
-     // SFX Sürükleme & Hayalet Önizleme (A2 Ses Efektleri Katmanı)
-     if (this.isDraggingSfx && this.dragSfxClipId) {
+     // SFX Sürükleme, Boyutlandırma & Hayalet Önizleme (A2 Ses Efektleri Katmanı — Çakışma Önleyici & Sequence Time Uyumlu)
+     if ((this.isDraggingSfx || this.isResizingSfx) && this.dragSfxClipId) {
         const sfxList = this.activeEdl()?.sfxClips || [];
         const sfx = sfxList.find(s => s.id === this.dragSfxClipId);
         if (!sfx) return;
@@ -9933,38 +10324,104 @@ export class EditorComponent implements OnInit, OnDestroy {
         const track = this.timelineTrackRef?.nativeElement;
         if (!track) return;
         const rect = track.getBoundingClientRect();
-        const activeTimelineDur = Math.max(0.5, this.isAnyRippleActive() ? this.visibleDuration() : this.totalDuration());
+        const rippleActive = this.isAnyRippleActive();
+        const activeTimelineDur = Math.max(0.5, rippleActive ? this.visibleDuration() : this.totalDuration());
         const pixelsPerSec = rect.width / activeTimelineDur;
         const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
-        let newStart = Math.max(0, this.dragSfxOriginalStart + deltaSec);
-        if (this.isAnyRippleActive()) {
-           const origVis = this.getVisTimeFromRawTime(this.dragSfxOriginalStart);
-           newStart = this.getRawTimeFromVisTime(Math.max(0, origVis + deltaSec));
-        }
 
-        // Manyetik yakalama (Playhead veya diğer SFX uçları)
+        const toSeq = (rawT: number) => (rippleActive ? this.getVisTimeFromRawTime(rawT) : rawT);
+        const toRaw = (seqT: number) => (rippleActive ? this.getRawTimeFromVisTime(seqT) : seqT);
+
+        const origSeqStart = toSeq(this.dragSfxOriginalStart);
+        const origDur = Math.max(0.15, this.dragSfxOriginalDuration);
+        const otherSfxRanges = sfxList
+          .filter(other => other.id !== sfx.id)
+          .map(other => {
+            const s = toSeq(Number(other.start) || 0);
+            const d = Math.max(0.15, Number(other.duration) || 0.5);
+            return { id: other.id, start: s, end: s + d };
+          })
+          .sort((a, b) => a.start - b.start);
+
         let snapped = false;
         let snapTime: number | null = null;
-        if (Math.abs(newStart - this.currentTime()) <= 0.22) {
-           newStart = this.currentTime();
-           snapped = true;
-           snapTime = newStart;
-        }
-        for (const other of sfxList) {
-           if (other.id === sfx.id) continue;
-           const oEnd = (other.start || 0) + (other.duration || 1);
-           if (Math.abs(newStart - oEnd) <= 0.22) {
-              newStart = oEnd;
-              snapped = true;
-              snapTime = oEnd;
-              break;
+
+        if (this.isResizingSfx) {
+           if (this.sfxResizeEdge === 'left') {
+              const origSeqEnd = origSeqStart + origDur;
+              let newSeqStart = Math.max(0, Math.min(origSeqEnd - 0.15, origSeqStart + deltaSec));
+              for (const other of otherSfxRanges) {
+                 if (other.end <= origSeqEnd + 0.01 && newSeqStart < other.end) {
+                    newSeqStart = other.end;
+                 }
+              }
+              if (newSeqStart >= origSeqEnd - 0.15) {
+                 newSeqStart = origSeqEnd - 0.15;
+              }
+              const newDur = Math.max(0.15, origSeqEnd - newSeqStart);
+              sfx.start = parseFloat(toRaw(newSeqStart).toFixed(2));
+              sfx.duration = parseFloat(newDur.toFixed(2));
+           } else {
+              const curSeqStart = toSeq(Number(sfx.start) || 0);
+              let newSeqEnd = curSeqStart + Math.max(0.15, Math.min(15.0, origDur + deltaSec));
+              for (const other of otherSfxRanges) {
+                 if (other.start >= curSeqStart - 0.01 && newSeqEnd > other.start) {
+                    newSeqEnd = other.start;
+                 }
+              }
+              const newDur = Math.max(0.15, newSeqEnd - curSeqStart);
+              sfx.duration = parseFloat(newDur.toFixed(2));
            }
+        } else {
+           let candidateSeq = Math.max(0, Math.min(activeTimelineDur - 0.15, origSeqStart + deltaSec));
+           const playheadSeq = this.getPlayheadSeqTime();
+
+           // Manyetik yakalama (Playhead veya diğer SFX uçları)
+           if (Math.abs(candidateSeq - playheadSeq) <= 0.22) {
+              candidateSeq = playheadSeq;
+              snapped = true;
+              snapTime = toRaw(playheadSeq);
+           }
+           for (const other of otherSfxRanges) {
+              if (Math.abs(candidateSeq - other.end) <= 0.22) {
+                 candidateSeq = other.end;
+                 snapped = true;
+                 snapTime = toRaw(other.end);
+                 break;
+              }
+              if (Math.abs((candidateSeq + origDur) - other.start) <= 0.22) {
+                 candidateSeq = Math.max(0, other.start - origDur);
+                 snapped = true;
+                 snapTime = toRaw(other.start);
+                 break;
+              }
+           }
+
+           // Çakışma Önleyici (No-Overlap Guard on A2 Track)
+           for (const blocker of otherSfxRanges) {
+              if (candidateSeq < blocker.end - 0.01 && (candidateSeq + origDur) > blocker.start + 0.01) {
+                 const pushLeft = blocker.start - origDur;
+                 const pushRight = blocker.end;
+                 const distLeft = pushLeft >= 0 ? Math.abs(origSeqStart + deltaSec - pushLeft) : Infinity;
+                 const distRight = Math.abs(origSeqStart + deltaSec - pushRight);
+                 candidateSeq = (distLeft <= distRight && pushLeft >= 0) ? pushLeft : pushRight;
+                 snapped = true;
+                 snapTime = toRaw(candidateSeq);
+              }
+           }
+
+           sfx.start = parseFloat(toRaw(candidateSeq).toFixed(2));
         }
 
-        sfx.start = parseFloat(newStart.toFixed(2));
-        const dispStart = this.isAnyRippleActive() ? this.getVisTimeFromRawTime(sfx.start) : sfx.start;
-        const endSec = parseFloat((dispStart + this.dragSfxOriginalDuration).toFixed(2));
-        const span = this.getTimelineSpanStyleForRawRange(sfx.start, this.dragSfxOriginalDuration);
+        const dispStart = toSeq(sfx.start);
+        const curDur = Math.max(0.15, Number(sfx.duration) || origDur);
+        if (this.sfxInspectorData && this.sfxInspectorData.id === sfx.id) {
+           this.sfxInspectorData.start = sfx.start;
+           this.sfxInspectorData.seqStart = parseFloat(dispStart.toFixed(2));
+           this.sfxInspectorData.duration = curDur;
+        }
+        const endSec = parseFloat((dispStart + curDur).toFixed(2));
+        const span = this.getTimelineSpanStyleForSeqRange(dispStart, curDur);
         this.timelineGhostPreview.set({
            kind: 'sfx',
            trackId: -2,
@@ -10156,8 +10613,10 @@ export class EditorComponent implements OnInit, OnDestroy {
         this.isResizingTrack = false;
      }
 
-     if (this.isDraggingSfx) {
+     if (this.isDraggingSfx || this.isResizingSfx) {
         this.isDraggingSfx = false;
+        this.isResizingSfx = false;
+        this.sfxResizeEdge = null;
         const sfxId = this.dragSfxClipId;
         this.dragSfxClipId = null;
         if (sfxId) {

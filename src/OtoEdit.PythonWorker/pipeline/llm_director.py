@@ -91,41 +91,15 @@ class LlmDirector:
         generated_sfx: List[Dict[str, Any]] = []
         generated_transitions: List[Dict[str, Any]] = []
 
-        # Mevcut kesimler varsa kesim sınırlarına sola kaydırmalı geçiş (smoothleft) + capcut-swish-large SFX ekle
         normalized_cuts = self.analyzer._normalize_cuts(cuts or [])
-        for c_idx, (c_start, c_end) in enumerate(normalized_cuts[:8]):
-            tr_ts = round(c_start, 2)
-            sfx_ts = round(max(0.05, tr_ts - 0.15), 2)
-            generated_transitions.append({
-                "id": f"ad_tr_cut_{c_idx + 1}",
-                "timestamp": tr_ts,
-                "boundaryTime": round(c_end, 2),
-                "boundarySourceTime": round(c_end, 2),
-                "type": "smoothleft",
-                "transitionType": "smoothleft",
-                "duration": 0.45,
-            })
-            generated_sfx.append({
-                "id": f"ad_sfx_tr_cut_{c_idx + 1}",
-                "name": "Swish Whoosh (Large 794558)",
-                "presetId": "capcut-swish-large",
-                "synthPreset": "capcut-swish-large",
-                "type": "whoosh",
-                "category": "whoosh",
-                "sourceUrl": "sfx://capcut-swish-large",
-                "timestamp": sfx_ts,
-                "start": sfx_ts,
-                "duration": 0.81,
-                "volume": 0.22,
-                "subThemeRole": "TOPIC_TRANSITION",
-                "isTransitionSfx": True,
-            })
 
         # AŞAMA 3: Kelime-Senkronlu Kurgu Olaylarını Somutlaştır
+        # NOT: Sıradan nefes/retake kesimlerine (normalized_cuts[:8]) körlemesine geçiş efekti
+        # eklenmez; geçiş efektleri YALNIZCA anlamlı konu/bölüm (chapter) sınırlarında üretilir.
         for ch_idx, ch in enumerate(chapter_plans):
             if ch_idx > 0 and ch.start_sec > 3.5:
                 tr_ts = round(ch.start_sec, 2)
-                sfx_ts = round(max(0.05, tr_ts - 0.15), 2)
+                sfx_ts = tr_ts
                 generated_transitions.append({
                     "id": f"ad_tr_ch_{ch_idx}",
                     "timestamp": tr_ts,
@@ -525,6 +499,7 @@ class LlmDirector:
             theme_profile=theme_profile,
             video_duration=video_duration,
             subtitles_enabled=subtitles_enabled,
+            cuts=normalized_cuts,
         )
 
         # Yazıların arkasındaki yarı saydam siyah kutu (editör/render) — Pydantic varsayılanına

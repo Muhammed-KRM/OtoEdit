@@ -192,7 +192,7 @@ class VideoRenderer:
         if float(ov.get("outerStrokeWidth") or ov.get("outer_stroke_width") or 0.0) > 0:
             return True
 
-        if bool(ov.get("glowEnabled") or ov.get("glow_enabled")) or float(ov.get("glowRadius") or ov.get("glow_radius") or 0.0) > 0:
+        if bool(ov.get("glowEnabled") or ov.get("glow_enabled")):
             return True
 
         if any(
@@ -345,69 +345,87 @@ class VideoRenderer:
                     f.write(f"file '{os.path.abspath(seg_file).replace(chr(92), '/')}'\n")
             return segment_files, actual_durations, merge_concat_path
 
-        out_files: List[str] = [segment_files[0]]
-        out_durations: List[float] = [
-            actual_durations[0] if actual_durations else (keep_segments[0][1] - keep_segments[0][0])
+        orig_durations: List[float] = [
+            actual_durations[i]
+            if (actual_durations and i < len(actual_durations))
+            else ((keep_segments[i][1] - keep_segments[i][0]) if i < len(keep_segments) else 2.0)
+            for i in range(len(segment_files))
         ]
+        per_seg_effective_durations: List[float] = list(orig_durations)
+        head_trims: Dict[int, float] = {}
+        tail_trims: Dict[int, float] = {}
+        bridge_files_map: Dict[int, str] = {}
+        cleanup_files: List[str] = list(segment_files)
 
         for b_idx in range(len(segment_files) - 1):
-            next_file = segment_files[b_idx + 1]
-            next_dur = (
-                actual_durations[b_idx + 1]
-                if (b_idx + 1) < len(actual_durations)
-                else ((keep_segments[b_idx + 1][1] - keep_segments[b_idx + 1][0]) if (b_idx + 1) < len(keep_segments) else 2.0)
-            )
-
             tr = boundary_transitions.get(b_idx)
             if not tr:
-                out_files.append(next_file)
-                out_durations.append(next_dur)
                 continue
 
-            cur_file = out_files[-1]
-            cur_dur = out_durations[-1]
+            cur_file = segment_files[b_idx]
+            next_file = segment_files[b_idx + 1]
+            cur_dur = orig_durations[b_idx] - head_trims.get(b_idx, 0.0)
+            next_dur = orig_durations[b_idx + 1]
+
             raw_type = str(tr.get("type") or tr.get("transitionType") or "fade").lower().strip()
             xfade_name = XFADE_TRANSITION_MAP.get(raw_type, "fade")
             req_dur = float(tr.get("duration") or 0.5)
-            trans_dur = max(0.1, min(req_dur, cur_dur * 0.45, next_dur * 0.45))
-            offset = max(0.05, cur_dur - trans_dur)
+            trans_dur = max(0.1, min(req_dur, cur_dur * 0.35, next_dur * 0.35))
 
-            merged_seg = os.path.join(temp_dir, f"xfade_seg_{b_idx:04d}.mp4")
+            # Hızlı Mikro-Köprü (Micro-Bridge) Splicing:
+            # Tüm 10-20 dakikalık videoyu tekrar tekrar encode etmek yerine yalnızca geçiş sınırındaki
+            # 1.0 saniyelik kuyruk ve baş pencerelerini xfade ile birleştir (~0.25s/geçiş).
+            win_sec = min(1.0, max(trans_dur + 0.25, 0.75))
+            if cur_dur < (win_sec * 2.1) or next_dur < (win_sec * 2.1):
+                continue
+
+            tail_start = max(0.0, orig_durations[b_idx] - win_sec)
+            offset = max(0.05, win_sec - trans_dur)
+            bridge_seg = os.path.join(temp_dir, f"xfade_bridge_{b_idx:04d}.mp4")
+
             filter_complex = (
                 f"[0:v][1:v]xfade=transition={xfade_name}:duration={trans_dur:.3f}:offset={offset:.3f}[v];"
                 f"[0:a][1:a]acrossfade=d={trans_dur:.3f}[a]"
             )
             cmd = [
                 "ffmpeg", "-y",
-                "-i", cur_file,
-                "-i", next_file,
+                "-ss", f"{tail_start:.3f}", "-t", f"{win_sec:.3f}", "-i", cur_file,
+                "-ss", "0.000", "-t", f"{win_sec:.3f}", "-i", next_file,
                 "-filter_complex", filter_complex,
                 "-map", "[v]", "-map", "[a]",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-g", "15", "-pix_fmt", "yuv420p",
                 "-c:a", "aac", "-b:a", "192k",
-                merged_seg,
+                bridge_seg,
             ]
             try:
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
-                if res.returncode == 0 and os.path.isfile(merged_seg) and os.path.getsize(merged_seg) > 500:
-                    out_files[-1] = merged_seg
-                    out_durations[-1] = round(cur_dur + next_dur - trans_dur, 3)
-                    logger.info(f"✨ Sahne geçişi uygulandı ({xfade_name}, {trans_dur:.2f}s) -> {merged_seg}")
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if res.returncode == 0 and os.path.isfile(bridge_seg) and os.path.getsize(bridge_seg) > 500:
+                    tail_trims[b_idx] = win_sec
+                    head_trims[b_idx + 1] = win_sec
+                    bridge_files_map[b_idx] = bridge_seg
+                    cleanup_files.append(bridge_seg)
+                    per_seg_effective_durations[b_idx] = round(max(0.1, per_seg_effective_durations[b_idx] - trans_dur), 3)
+                    logger.info(f"✨ Sahne geçişi köprüsü üretildi ({xfade_name}, {trans_dur:.2f}s) -> {bridge_seg}")
                 else:
                     logger.warning(f"xfade geçişi başarısız oldu, düz birleştirmeye dönülüyor: {res.stderr[-200:] if res.stderr else ''}")
-                    out_files.append(next_file)
-                    out_durations.append(next_dur)
             except Exception as ex:
                 logger.warning(f"xfade yürütme hatası ({ex}), düz birleştirmeye dönülüyor.")
-                out_files.append(next_file)
-                out_durations.append(next_dur)
 
         with open(merge_concat_path, "w", encoding="utf-8") as f:
             f.write("ffconcat version 1.0\n")
-            for seg_file in out_files:
-                f.write(f"file '{os.path.abspath(seg_file).replace(chr(92), '/')}'\n")
+            for idx, seg_file in enumerate(segment_files):
+                clean_seg = os.path.abspath(seg_file).replace(chr(92), "/")
+                in_pt = head_trims.get(idx, 0.0)
+                out_pt = max(in_pt + 0.05, orig_durations[idx] - tail_trims.get(idx, 0.0))
+                f.write(f"file '{clean_seg}'\n")
+                if in_pt > 0.001 or idx in tail_trims:
+                    f.write(f"inpoint {in_pt:.3f}\n")
+                    f.write(f"outpoint {out_pt:.3f}\n")
+                if idx in bridge_files_map:
+                    clean_bridge = os.path.abspath(bridge_files_map[idx]).replace(chr(92), "/")
+                    f.write(f"file '{clean_bridge}'\n")
 
-        return out_files, out_durations, merge_concat_path
+        return cleanup_files, per_seg_effective_durations, merge_concat_path
 
     def render(self, edl_json: Dict[str, Any], video_path: str, output_path: str, temp_dir: str = "/app/temp") -> str:
         """EDL JSON'a göre video render eder ve çıktı dosya yolunu döner."""
@@ -543,20 +561,40 @@ class VideoRenderer:
         for ov in (mapped_text_overlays or []):
             if self.should_render_text_via_pillow(ov):
                 badge_png = os.path.join(temp_dir, f"badge_{ov.get('id', 'txt')}.png")
-                box_style = ov.get("boxStyle") or ov.get("box_style") or "none"
+                orig_box_style = str(ov.get("boxStyle") or ov.get("box_style") or "none").lower().strip()
+                box_style = orig_box_style
+                is_auto_director_text = str(ov.get("id") or "").startswith("ad_") or bool(ov.get("subThemeRole"))
+                if box_style not in ("", "none"):
+                    raw_bg = str(ov.get("boxBgColor") or ov.get("backgroundColor") or "rgba(0,0,0,0.75)").strip()
+                else:
+                    # boxStyle == 'none' iken pasif inspector varsayılanı olan boxBgColor ('#1E293B' / '#0F172A') okunmaz!
+                    explicit_bg = str(ov.get("backgroundColor") or ("#00000080" if is_auto_director_text else "")).strip()
+                    if explicit_bg and explicit_bg.lower() not in ("transparent", "none", "#00000000", "rgba(0,0,0,0)"):
+                        box_style = "rounded"
+                        raw_bg = explicit_bg
+                    else:
+                        box_style = "none"
+                        raw_bg = "transparent"
+                eff_border_radius = int(
+                    ov.get("borderRadius")
+                    if (ov.get("borderRadius") is not None and orig_box_style not in ("", "none"))
+                    else (8 if box_style == "rounded" else 24)
+                )
+                is_glow_on = bool(ov.get("glowEnabled") or ov.get("glow_enabled"))
                 try:
                     PillowGraphicsEngine.render_text_badge(
                         text=str(ov.get("content", "")),
                         output_path=badge_png,
                         font_name=ov.get("font") or ov.get("fontFamily") or "Montserrat",
                         font_size=int(ov.get("fontSize", 48)),
+                        font_weight=ov.get("fontWeight") or ov.get("font_weight") or 800,
                         text_color=ov.get("color", "#FFFFFF"),
                         stroke_color=ov.get("strokeColor") or "#000000",
                         stroke_width=int(float(ov.get("strokeWidth") if ov.get("strokeWidth") is not None else 2)),
                         box_style=str(box_style),
-                        box_bg_color=ov.get("boxBgColor") or ov.get("backgroundColor") or "rgba(0,0,0,0.75)",
+                        box_bg_color=raw_bg or "rgba(0,0,0,0.5)",
                         box_padding=int(ov.get("boxPadding", 16)),
-                        border_radius=int(ov.get("borderRadius", 24)),
+                        border_radius=eff_border_radius,
                         all_caps=bool(ov.get("allCaps", False)),
                         letter_spacing=int(float(ov.get("letterSpacing") or 0)),
                         fill_type=str(ov.get("fillType") or ov.get("fill_type") or "solid"),
@@ -565,9 +603,9 @@ class VideoRenderer:
                         gradient_angle=float(ov.get("gradientAngle") if ov.get("gradientAngle") is not None else 45.0),
                         outer_stroke_width=int(float(ov.get("outerStrokeWidth") or ov.get("outer_stroke_width") or 0)),
                         outer_stroke_color=ov.get("outerStrokeColor") or ov.get("outer_stroke_color") or "#000000",
-                        glow_enabled=bool(ov.get("glowEnabled") or ov.get("glow_enabled")),
+                        glow_enabled=is_glow_on,
                         glow_color=ov.get("glowColor") or ov.get("glow_color"),
-                        glow_radius=int(float(ov.get("glowRadius") or ov.get("glow_radius") or 0)),
+                        glow_radius=int(float(ov.get("glowRadius") or ov.get("glow_radius") or 0)) if is_glow_on else 0,
                         shadow=bool(ov.get("shadow", True)),
                         shadow_color=ov.get("shadowColor") or ov.get("shadow_color"),
                         shadow_blur=int(float(ov.get("shadowBlur") if ov.get("shadowBlur") is not None else 4)),
@@ -578,6 +616,7 @@ class VideoRenderer:
                         rotate_y=float(ov.get("rotateY") or ov.get("rotate_y") or 0.0),
                         skew_x=float(ov.get("skewX") or ov.get("skew_x") or 0.0),
                         skew_y=float(ov.get("skewY") or ov.get("skew_y") or 0.0),
+                        maxWidthCqi=int(ov.get("maxWidthCqi") or ov.get("max_width_cqi") or 30),
                     )
                     badge_img_ov = dict(ov)
                     badge_img_ov["type"] = "image"
@@ -776,13 +815,13 @@ class VideoRenderer:
                         logger.info("✅ Görsel kaplamalar eklendi (NVENC).")
                         os.remove(temp_no_images)
                     else:
-                        logger.warning("NVENC overlay başarısız oldu. CPU moduna geçiliyor.")
+                        logger.warning(f"NVENC overlay başarısız oldu ({res.stderr[-300:] if res.stderr else ''}). CPU moduna geçiliyor.")
                         res_cpu = subprocess.run(out_cmd_cpu, capture_output=True, text=True, timeout=7200)
                         if res_cpu.returncode == 0:
                             logger.info("✅ Görsel kaplamalar eklendi (CPU).")
                             os.remove(temp_no_images)
                         else:
-                            raise RuntimeError("CPU overlay pass başarısız oldu.")
+                            raise RuntimeError(f"CPU overlay pass başarısız oldu: {res_cpu.stderr[-400:] if res_cpu.stderr else ''}")
                 except Exception as e:
                     logger.error(f"Görsel overlay eklenirken hata: {e}")
                     if os.path.exists(temp_no_images):
@@ -922,7 +961,7 @@ class VideoRenderer:
             nvenc_cmd = (
                 base_args
                 + vf_arg
-                + ["-c:v", "h264_nvenc", "-preset", "p1", "-b:v", "8M", "-pix_fmt", "yuv420p"]
+                + ["-c:v", "h264_nvenc", "-preset", "p1", "-b:v", "8M", "-g", "15", "-pix_fmt", "yuv420p"]
                 + afade_arg
                 + ["-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
             )
@@ -933,7 +972,7 @@ class VideoRenderer:
             cpu_cmd = (
                 base_args
                 + vf_arg
-                + ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"]
+                + ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-g", "15", "-pix_fmt", "yuv420p"]
                 + afade_arg
                 + ["-c:a", "aac", "-b:a", "192k", "-fps_mode", "cfr", "-avoid_negative_ts", "make_zero", seg_out]
             )

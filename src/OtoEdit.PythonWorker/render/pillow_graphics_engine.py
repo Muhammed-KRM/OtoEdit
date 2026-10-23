@@ -275,10 +275,89 @@ class PillowGraphicsEngine:
         return None
 
     @classmethod
-    def get_font(cls, font_name: Optional[str] = "Inter", font_size: int = 48) -> ImageFont.FreeTypeFont:
+    def _resolve_target_weight(cls, font_name: str = "", font_weight: Any = 800) -> int:
+        lower_name = (font_name or "").lower()
+        if isinstance(font_weight, str):
+            fw_clean = font_weight.strip().lower()
+            if fw_clean in ("normal", "regular"):
+                target_w = 400
+            elif fw_clean in ("medium",):
+                target_w = 500
+            elif fw_clean in ("semibold",):
+                target_w = 600
+            elif fw_clean in ("bold",):
+                target_w = 700
+            elif fw_clean in ("extrabold", "heavy"):
+                target_w = 800
+            elif fw_clean in ("black",):
+                target_w = 900
+            else:
+                try:
+                    target_w = int(float(fw_clean))
+                except Exception:
+                    target_w = 800
+        else:
+            try:
+                target_w = int(float(font_weight or 800))
+            except Exception:
+                target_w = 800
+
+        if "regular" in lower_name and target_w >= 700:
+            target_w = 400
+        elif "black" in lower_name:
+            target_w = 900
+        elif "extrabold" in lower_name:
+            target_w = 800
+        elif "bold" in lower_name and target_w < 700:
+            target_w = 700
+        return max(100, min(900, target_w))
+
+    @classmethod
+    def _apply_variable_font_weight(
+        cls,
+        font: ImageFont.FreeTypeFont,
+        font_name: str = "",
+        font_weight: Any = 800,
+    ) -> ImageFont.FreeTypeFont:
+        """Variable TTF fontlarında (Montserrat, Outfit, Inter, Cinzel vb.) Thin(100) yerine hedef ağırlığı (Bold/ExtraBold=800) uygular."""
+        try:
+            axes = font.get_variation_axes()
+            if not axes:
+                return font
+            target_w = cls._resolve_target_weight(font_name, font_weight)
+            vals = []
+            for ax in axes:
+                raw_ax_name = ax.get("name") or b""
+                ax_name = (
+                    raw_ax_name.decode("utf-8", errors="ignore")
+                    if isinstance(raw_ax_name, bytes)
+                    else str(raw_ax_name)
+                ).lower()
+                mn = int(ax.get("minimum", 100))
+                mx = int(ax.get("maximum", 900))
+                df = int(ax.get("default", 400))
+                if "weight" in ax_name or "wght" in ax_name:
+                    vals.append(max(mn, min(mx, target_w)))
+                elif "optical" in ax_name or "opsz" in ax_name:
+                    vals.append(mx)
+                else:
+                    vals.append(df)
+            font.set_variation_by_axes(vals)
+        except Exception:
+            pass
+        return font
+
+    @classmethod
+    def get_font(
+        cls,
+        font_name: Optional[str] = "Inter",
+        font_size: int = 48,
+        font_weight: Any = 800,
+    ) -> ImageFont.FreeTypeFont:
         """Sistemdeki, yerel assets klasöründeki veya Google Fonts'tan indirilen TTF fontlarını yükler."""
         clean_name = (font_name or "Inter").split(",")[0].strip().replace("'", "").replace('"', "")
-        cache_key = (clean_name.lower(), int(font_size))
+        resolved_w = cls._resolve_target_weight(clean_name, font_weight)
+        cache_key = (clean_name.lower(), int(font_size), int(resolved_w))
         if cache_key in cls._FONT_CACHE:
             return cls._FONT_CACHE[cache_key]
 
@@ -306,7 +385,9 @@ class PillowGraphicsEngine:
         for path in candidates:
             if path and os.path.isfile(path):
                 try:
-                    loaded = ImageFont.truetype(path, font_size)
+                    loaded = cls._apply_variable_font_weight(
+                        ImageFont.truetype(path, font_size), clean_name, resolved_w
+                    )
                     cls._FONT_CACHE[cache_key] = loaded
                     return loaded
                 except Exception:
@@ -316,7 +397,9 @@ class PillowGraphicsEngine:
         downloaded_path = cls._ensure_google_font_ttf(clean_name)
         if downloaded_path and os.path.isfile(downloaded_path):
             try:
-                loaded = ImageFont.truetype(downloaded_path, font_size)
+                loaded = cls._apply_variable_font_weight(
+                    ImageFont.truetype(downloaded_path, font_size), clean_name, resolved_w
+                )
                 cls._FONT_CACHE[cache_key] = loaded
                 return loaded
             except Exception:
@@ -336,7 +419,9 @@ class PillowGraphicsEngine:
         for path in fallback_candidates:
             if path and os.path.isfile(path):
                 try:
-                    loaded = ImageFont.truetype(path, font_size)
+                    loaded = cls._apply_variable_font_weight(
+                        ImageFont.truetype(path, font_size), clean_name, resolved_w
+                    )
                     cls._FONT_CACHE[cache_key] = loaded
                     return loaded
                 except Exception:
@@ -671,11 +756,18 @@ class PillowGraphicsEngine:
         outer_stroke_width = int(float(kwargs.get("outerStrokeWidth") if kwargs.get("outerStrokeWidth") is not None else outer_stroke_width))
         outer_stroke_color = kwargs.get("outerStrokeColor") or outer_stroke_color or "#000000"
 
-        glow_enabled = bool(kwargs.get("glowEnabled") if kwargs.get("glowEnabled") is not None else glow_enabled)
+        raw_glow_enabled = kwargs.get("glowEnabled") if kwargs.get("glowEnabled") is not None else glow_enabled
+        glow_enabled = bool(raw_glow_enabled)
         glow_color = kwargs.get("glowColor") or glow_color or text_color
-        glow_radius = int(float(kwargs.get("glowRadius") if kwargs.get("glowRadius") is not None else (glow_radius or (12 if glow_enabled else 0))))
-        if glow_radius > 0:
-            glow_enabled = True
+        raw_glow_radius = kwargs.get("glowRadius") if kwargs.get("glowRadius") is not None else glow_radius
+        if glow_enabled:
+            glow_radius = int(float(raw_glow_radius if raw_glow_radius is not None else 12)) or 12
+        else:
+            glow_radius = 0
+
+        font_weight = kwargs.get("fontWeight") or kwargs.get("font_weight") or 800
+        if "shadow_enabled" in kwargs and kwargs.get("shadow_enabled") is not None:
+            shadow = bool(kwargs.get("shadow_enabled"))
 
         shadow_distance = float(kwargs.get("shadowDistance") if kwargs.get("shadowDistance") is not None else shadow_distance)
         shadow_angle = float(kwargs.get("shadowAngle") if kwargs.get("shadowAngle") is not None else shadow_angle)
@@ -690,8 +782,10 @@ class PillowGraphicsEngine:
 
         # 0. SHA-256 Content-Addressed Caching (Zero-Lag)
         cache_Signature = {
+            "engine_version": "v2.2_varfont_stroke_fix",
             "text": text,
             "font": effective_font,
+            "font_weight": str(font_weight),
             "font_size": int(font_size),
             "text_color": text_color,
             "stroke_color": stroke_color,
@@ -746,7 +840,12 @@ class PillowGraphicsEngine:
         # 2x süper-örnekleme (Pürüzsüz kenarlar için)
         ss = 2
         ss_font_size = max(16, int(font_size) * ss)
-        ss_stroke_width = max(0, int(stroke_width) * ss)
+        # CSS '-webkit-text-stroke: strokeWidth * 0.45px' (paint-order: stroke fill) ile birebir kalınlık uyumu
+        ss_stroke_width = (
+            max(1, int(round(float(stroke_width) * 0.5 * ss)))
+            if float(stroke_width or 0) > 0
+            else 0
+        )
         ss_outer_stroke_width = max(0, int(outer_stroke_width) * ss)
         ss_total_stroke = ss_stroke_width + ss_outer_stroke_width
         ss_box_padding = max(0, int(box_padding) * ss)
@@ -755,7 +854,7 @@ class PillowGraphicsEngine:
         ss_glow_radius = max(0, int(glow_radius) * ss)
         ss_shadow_blur = max(0, int(shadow_blur) * ss)
 
-        font = cls.get_font(effective_font, ss_font_size)
+        font = cls.get_font(effective_font, ss_font_size, font_weight=font_weight)
 
         display_text = text.upper() if all_caps else text
         max_w_cqi = int(kwargs.get("maxWidthCqi") or kwargs.get("max_width_cqi") or 30)

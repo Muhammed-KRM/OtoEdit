@@ -4,7 +4,11 @@ müziği otomatik kısan (sidechaincompress), çok kanallı SFX (ses efekti) mik
 ve -14 LUFS yayın standardı ses normalizasyonu (loudnorm) servisi.
 """
 import os
-from typing import Dict, Any, Optional, List, Callable
+import shutil
+import subprocess
+import wave
+from typing import Dict, Any, Optional, List, Callable, Tuple
+import numpy as np
 from utils.logger import get_logger
 
 logger = get_logger(__name__)
@@ -89,8 +93,8 @@ class AudioMixer:
             return speech_audio_stream
 
     SFX_PRESET_ALIASES: Dict[str, str] = {
-        "keyboard-type": "keyboard-typing",
-        "keyboard": "keyboard-typing",
+        "keyboard-type": "keyboard-type",
+        "keyboard": "keyboard-type",
         "ding": "ding-bright",
         "pop": "pop-bubble",
         "whoosh": "capcut-swish-large",
@@ -113,9 +117,11 @@ class AudioMixer:
         if not preset_id and raw_source.startswith("sfx://"):
             preset_id = raw_source.replace("sfx://", "").strip("/")
 
-        candidate_ids = [preset_id] if preset_id else []
+        candidate_ids: List[str] = []
         if preset_id in cls.SFX_PRESET_ALIASES:
             candidate_ids.append(cls.SFX_PRESET_ALIASES[preset_id])
+        if preset_id and preset_id not in candidate_ids:
+            candidate_ids.append(preset_id)
 
         for cid in candidate_ids:
             for ext in (".wav", ".ogg", ""):
@@ -139,6 +145,119 @@ class AudioMixer:
         return None
 
     @classmethod
+    def _decode_audio_to_pcm(cls, local_path: str, sample_rate: int = 44100) -> Optional[np.ndarray]:
+        """Ses dosyasını 44.1kHz stereo float32 (-1.0..1.0) numpy dizisine decode eder."""
+        try:
+            cmd = [
+                "ffmpeg", "-v", "error",
+                "-i", local_path,
+                "-f", "s16le", "-acodec", "pcm_s16le",
+                "-ac", "2", "-ar", str(sample_rate),
+                "-"
+            ]
+            res = subprocess.run(cmd, capture_output=True, timeout=30)
+            if res.returncode != 0 or not res.stdout:
+                return None
+            pcm_i16 = np.frombuffer(res.stdout, dtype=np.int16)
+            if pcm_i16.size < 2:
+                return None
+            if pcm_i16.size % 2 != 0:
+                pcm_i16 = pcm_i16[:-1]
+            return pcm_i16.reshape(-1, 2).astype(np.float32) / 32768.0
+        except Exception as ex:
+            logger.debug(f"PCM decode uyarısı ({local_path}): {ex}")
+            return None
+
+    @classmethod
+    def _premix_sfx_to_master_wav(
+        cls,
+        resolved_specs: List[Dict[str, Any]],
+        temp_dir: str,
+        sample_rate: int = 44100
+    ) -> Optional[str]:
+        """
+        Tüm SFX kliplerini tek bir master stereo WAV dosyasında birleştirir.
+        Böylece FFmpeg filtergraph'ta 140+ ayrı input ve duplicate FilterNode çakışması oluşmaz.
+        """
+        if not resolved_specs:
+            return None
+
+        pcm_cache: Dict[str, np.ndarray] = {}
+        prepared_clips: List[Tuple[int, np.ndarray]] = []
+        max_end_sample = 0
+
+        for spec in resolved_specs:
+            local_path = spec["local_path"]
+            if local_path not in pcm_cache:
+                decoded = cls._decode_audio_to_pcm(local_path, sample_rate=sample_rate)
+                if decoded is None:
+                    continue
+                pcm_cache[local_path] = decoded
+
+            base_pcm = pcm_cache[local_path]
+            total_frames = base_pcm.shape[0]
+            if total_frames == 0:
+                continue
+
+            trim_start = spec["trim_start"]
+            duration = spec["duration"]
+            volume = spec["volume"]
+            fade_in = spec["fade_in"]
+            fade_out = spec["fade_out"]
+            start_sec = spec["start_sec"]
+
+            s_frame = min(total_frames, max(0, int(round(trim_start * sample_rate))))
+            if duration > 0:
+                e_frame = min(total_frames, s_frame + int(round(duration * sample_rate)))
+            else:
+                e_frame = total_frames
+
+            if e_frame <= s_frame:
+                continue
+
+            clip_pcm = base_pcm[s_frame:e_frame].copy() * float(volume)
+            clip_len = clip_pcm.shape[0]
+
+            if fade_in > 0:
+                fi_samples = min(clip_len, int(round(fade_in * sample_rate)))
+                if fi_samples > 1:
+                    env_in = np.linspace(0.0, 1.0, fi_samples, dtype=np.float32)[:, None]
+                    clip_pcm[:fi_samples] *= env_in
+
+            if fade_out > 0:
+                fo_samples = min(clip_len, int(round(fade_out * sample_rate)))
+                if fo_samples > 1:
+                    env_out = np.linspace(1.0, 0.0, fo_samples, dtype=np.float32)[:, None]
+                    clip_pcm[-fo_samples:] *= env_out
+
+            dest_start = max(0, int(round(start_sec * sample_rate)))
+            dest_end = dest_start + clip_len
+            if dest_end > max_end_sample:
+                max_end_sample = dest_end
+            prepared_clips.append((dest_start, clip_pcm))
+
+        if not prepared_clips or max_end_sample <= 0:
+            return None
+
+        master_buf = np.zeros((max_end_sample, 2), dtype=np.float32)
+        for dest_start, clip_pcm in prepared_clips:
+            dest_end = dest_start + clip_pcm.shape[0]
+            master_buf[dest_start:dest_end] += clip_pcm
+
+        np.clip(master_buf, -1.0, 1.0, out=master_buf)
+        master_i16 = (master_buf * 32767.0).astype(np.int16)
+
+        os.makedirs(temp_dir, exist_ok=True)
+        master_wav_path = os.path.join(temp_dir, "sfx_master_premix.wav")
+        with wave.open(master_wav_path, "wb") as wf:
+            wf.setnchannels(2)
+            wf.setsampwidth(2)
+            wf.setframerate(sample_rate)
+            wf.writeframes(master_i16.tobytes())
+
+        return master_wav_path if os.path.isfile(master_wav_path) else None
+
+    @classmethod
     def mix_sfx_clips(
         cls,
         speech_audio_stream: Any,
@@ -148,13 +267,13 @@ class AudioMixer:
     ) -> Any:
         """
         Zaman çizgisindeki çoklu SFX (Whoosh, Pop, Ding vb.) ses kliplerini
-        adelay, volume ve afade filtreleriyle ana ses akışına miksler.
+        tek bir master WAV katmanında birleştirerek ana ses akışına miksler.
         """
         if not ffmpeg or not sfx_clips:
             return speech_audio_stream
 
         try:
-            valid_sfx_streams = []
+            resolved_specs: List[Dict[str, Any]] = []
             for clip in sfx_clips:
                 if not isinstance(clip, dict):
                     continue
@@ -204,7 +323,55 @@ class AudioMixer:
                     except Exception:
                         pass
 
-                sfx_a = ffmpeg.input(local_path).audio
+                resolved_specs.append({
+                    "local_path": local_path,
+                    "start_sec": start_sec,
+                    "duration": duration,
+                    "trim_start": trim_start,
+                    "volume": volume,
+                    "fade_in": fade_in,
+                    "fade_out": fade_out,
+                })
+
+            if not resolved_specs:
+                return speech_audio_stream
+
+            # Hızlı ve sıfır-çakışmalı NumPy Master WAV ön-miksajı
+            master_wav = cls._premix_sfx_to_master_wav(resolved_specs, temp_dir=temp_dir)
+            if master_wav and os.path.isfile(master_wav):
+                sfx_master_stream = ffmpeg.input(master_wav).audio
+                mixed = ffmpeg.filter(
+                    [speech_audio_stream, sfx_master_stream],
+                    "amix",
+                    inputs=2,
+                    duration="first",
+                    dropout_transition=0,
+                    normalize=0,
+                )
+                logger.info(f"🔊 AudioMixer: {len(resolved_specs)} SFX klibi tek master kanalda başarıyla mikslendi.")
+                return mixed
+
+            # Fallback: Her SFX klibi için benzersiz dosya yolu oluşturarak ffmpeg-python DAG çakışmasını önle
+            valid_sfx_streams = []
+            os.makedirs(temp_dir, exist_ok=True)
+            for idx, spec in enumerate(resolved_specs):
+                src_path = spec["local_path"]
+                ext = os.path.splitext(src_path)[1] or ".wav"
+                unique_path = os.path.join(temp_dir, f"_sfx_node_{idx:04d}{ext}")
+                if not os.path.exists(unique_path):
+                    try:
+                        os.symlink(os.path.abspath(src_path), unique_path)
+                    except Exception:
+                        shutil.copyfile(src_path, unique_path)
+
+                sfx_a = ffmpeg.input(unique_path).audio
+                trim_start = spec["trim_start"]
+                duration = spec["duration"]
+                volume = spec["volume"]
+                fade_in = spec["fade_in"]
+                fade_out = spec["fade_out"]
+                start_sec = spec["start_sec"]
+
                 if trim_start > 0 and duration > 0:
                     sfx_a = sfx_a.filter("atrim", start=trim_start, duration=duration).filter("asetpts", "PTS-STARTPTS")
                 elif trim_start > 0:
@@ -224,9 +391,6 @@ class AudioMixer:
                     sfx_a = sfx_a.filter("adelay", f"{delay_ms}|{delay_ms}")
 
                 valid_sfx_streams.append(sfx_a)
-
-            if not valid_sfx_streams:
-                return speech_audio_stream
 
             all_streams = [speech_audio_stream] + valid_sfx_streams
             mixed = ffmpeg.filter(

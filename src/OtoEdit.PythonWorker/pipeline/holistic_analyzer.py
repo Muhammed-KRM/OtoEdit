@@ -172,7 +172,9 @@ class SemanticTransitionBoundaryDetector:
 
             t_end = sa[-1].end
             t_start = sb[0].start
-            t_mid = round((t_end + t_start) / 2.0, 2)
+            # Kesim (Jump-Cut / Retake) boşluğunun ortasına düşmemesi için geçiş zamanını
+            # doğrudan yeni konunun başladığı korunan kelimenin başına (t_start) kilitle!
+            t_mid = round(t_start, 2) if (t_start - t_end) > 1.2 else round((t_end + t_start) / 2.0, 2)
             if t_mid < 5.0 or t_mid > video_duration - 8.0:
                 continue
             if lb.startswith(cls.ANTI_TRANSITION_START_PREFIXES):
@@ -1455,10 +1457,17 @@ class HolisticAnalyzer:
         3+ maddelik öbek dizilerini otomatik olarak yakalayıp kelime-senkronlu PROGRESSIVE_LIST'e dönüştürür.
         """
         n_tokens = len(word_stream)
+        salutation_and_discourse_Blacklist = {
+            "değerli", "izleyenler", "izleyiciler", "arkadaşlar", "dostlar", "sayın",
+            "merhaba", "hoş", "geldiniz", "evet", "şimdi", "öncelikle", "kısacası",
+            "dolayısıyla", "nitekim", "halbuki", "ancak", "fakat", "lakin", "örneğin",
+            "mesela", "hatta", "zaten", "aslında", "tabii", "elbette", "peki", "işte",
+            "burada", "bugün", "geçen", "bölümde", "dersimizde", "videomuzda",
+        }
         idx = 0
         while idx < n_tokens - 3:
             tok = word_stream[idx]
-            if tok.has_comma and len(tok.clean) >= 3:
+            if tok.has_comma and len(tok.clean) >= 3 and tok.lower not in salutation_and_discourse_Blacklist:
                 # 1. Öbeğin başlangıcını bul (virgülden önceki 1-3 kelime, eğer aynı cümle içindeyse)
                 first_phrase_tokens: List[WordToken] = [tok]
                 back = idx - 1
@@ -1466,7 +1475,7 @@ class HolisticAnalyzer:
                     prev_t = word_stream[back]
                     if prev_t.has_sentence_end or prev_t.has_comma or prev_t.lower in (
                         "ve", "ile", "ise", "ki", "çünkü", "ancak", "fakat", "örneğin", "mesela"
-                    ):
+                    ) or prev_t.lower in salutation_and_discourse_Blacklist:
                         break
                     # Fiil veya cümle zarfı değilse öbeğe dahil et
                     if prev_t.seg_idx == tok.seg_idx and len(prev_t.clean) >= 3:
@@ -1533,9 +1542,13 @@ class HolisticAnalyzer:
                     end_tok = self._find_sentence_end_word(
                         word_stream, last_tok, min(len(active_segments) - 1, last_tok.seg_idx + 1)
                     )
-                    shared_end = round(max(last_tok.end + 0.35, end_tok.end), 2)
                     first_start = phrase_chain[0][0].start
-                    if not is_range_busy(first_start, shared_end):
+                    # Uzun kesim boşlukları nedeniyle listenin ekranda 20-30sn asılı kalmasını önle
+                    if (last_tok.end - first_start) > 14.0:
+                        idx += 1
+                        continue
+                    shared_end = round(min(first_start + 9.5, last_tok.end + 2.2, max(last_tok.end + 0.35, end_tok.end)), 2)
+                    if not is_range_busy(max(0.0, first_start - 18.0), shared_end):
                         grp_id = f"grp_auto_list_{phrase_chain[0][0].idx}"
                         for slot_idx, p_toks in enumerate(phrase_chain):
                             label = to_turkish_upper(" ".join(t.clean for t in p_toks))
@@ -2163,8 +2176,37 @@ class HolisticAnalyzer:
     def _filter_active_segments(
         segments: List[Dict[str, Any]], cuts: List[Tuple[float, float]]
     ) -> List[Dict[str, Any]]:
+        """
+        Kelime düzeyinde kesim (Retake + Silence) filtrelemesi:
+        Bir segmentin yalnızca bir kısmı kesilmişse (örn. cümle ortası retake), kesilen kelimeleri
+        çıkarıp korunan kelimelerden temiz segment oluşturur. Böylece silinen hiçbir retake kelimesi
+        yazı/görsel/liste tetikleyicisi üretemez!
+        """
         active = []
         for s in segments:
+            seg_words = s.get("words") or []
+            if seg_words and cuts:
+                kept_w = []
+                for w in seg_words:
+                    ws = float(w.get("start", 0.0) if isinstance(w, dict) else getattr(w, "start", 0.0))
+                    we = float(w.get("end", ws) if isinstance(w, dict) else getattr(w, "end", ws))
+                    wt = str(w.get("word", "") if isinstance(w, dict) else getattr(w, "word", "")).strip()
+                    if not wt:
+                        continue
+                    w_mid = (ws + we) / 2.0
+                    if any(c_st - 0.02 <= w_mid <= c_en + 0.02 for c_st, c_en in cuts):
+                        continue
+                    kept_w.append({"word": wt, "start": ws, "end": we})
+                if not kept_w:
+                    continue
+                new_seg = dict(s)
+                new_seg["words"] = kept_w
+                new_seg["start"] = kept_w[0]["start"]
+                new_seg["end"] = kept_w[-1]["end"]
+                new_seg["text"] = " ".join(kw["word"] for kw in kept_w)
+                active.append(new_seg)
+                continue
+
             st = float(s.get("start", 0))
             en = float(s.get("end", st + 2.0))
             txt = str(s.get("text", "")).strip()
