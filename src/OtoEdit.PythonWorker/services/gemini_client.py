@@ -132,7 +132,7 @@ class GeminiClient:
         }
 
     def _call_openrouter_llm(self, prompt: str, json_mode: bool = False, model: str = None, api_key: str = None) -> Optional[str]:
-        """OpenRouter API uç noktasını çağırır (12s sert zaman aşımı ile kilitlenmeye karşı korunmuştur)."""
+        """OpenRouter API uç noktasını çağırır (14s sert zaman aşımı ile kilitlenmeye karşı korunmuştur)."""
         key = api_key or self.openrouter_api_key
         if not key:
             return None
@@ -140,9 +140,9 @@ class GeminiClient:
         pool = ThreadPoolExecutor(max_workers=1)
         try:
             fut = pool.submit(self._do_call_openrouter, prompt, json_mode, model, key)
-            return fut.result(timeout=12.0)
+            return fut.result(timeout=14.0)
         except TimeoutError:
-            logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) sert zaman aşımı (12s) aşıldı, güvenle atlanıyor.")
+            logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) sert zaman aşımı (14s) aşıldı, güvenle atlanıyor.")
             return None
         except Exception as ex:
             logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) çağrısı başarısız: {ex}")
@@ -160,26 +160,42 @@ class GeminiClient:
             "User-Agent": "OtoEdit/2.0",
             "Connection": "close"
         }
+        target_model = model or self.openrouter_model
         payload: Dict[str, Any] = {
-            "model": model or self.openrouter_model,
+            "model": target_model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
             "stream": False,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
+        # Düşünce/Reasoning modellerinin (ling, r1, thinking) dakikalarca iç ses üretip takılmasını önle
+        cur_model = (target_model or "").lower()
+        if any(rm in cur_model for rm in ("ling", "r1", "reason", "thinking", "qwq")):
+            payload["reasoning"] = {"max_tokens": 0}
         try:
             import requests
-            resp = requests.post(url, headers=headers, json=payload, timeout=(4, 8))
+            resp = requests.post(url, headers=headers, json=payload, timeout=(4, 10))
             if resp.status_code == 200:
                 data = resp.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                msg = data.get("choices", [{}])[0].get("message", {})
+                content = msg.get("content") or ""
+                # Eğer model içeriği boş bırakıp sadece reasoning ürettiyse kurtar
+                if not content and msg.get("reasoning"):
+                    reasoning_text = msg.get("reasoning", "").strip()
+                    if json_mode and "{" in reasoning_text:
+                        s_idx = reasoning_text.find("{")
+                        e_idx = reasoning_text.rfind("}")
+                        if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
+                            content = reasoning_text[s_idx:e_idx + 1]
+                    elif not json_mode:
+                        content = reasoning_text[-600:].strip()
                 if content:
                     return content
             else:
-                logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) HTTP {resp.status_code}: {resp.text[:150]}")
+                logger.warning(f"OpenRouter LLM ({target_model}) HTTP {resp.status_code}: {resp.text[:150]}")
         except Exception as ex:
-            logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) çağrısı başarısız: {ex}")
+            logger.warning(f"OpenRouter LLM ({target_model}) çağrısı başarısız: {ex}")
         return None
 
     def _execute_with_retry(self, prompt: str, max_retries: int = 2) -> Optional[str]:

@@ -353,6 +353,8 @@ TR_DANGLING_STOPWORDS = {
     "çevresinde", "kapsamında", "üzerinde", "içerisinde", "hakkında",
     "tarafından", "arasında", "sonucunda", "nedeniyle", "sebebiyle",
     "ilgili", "ilişkin", "itibariyle", "bakımından", "açısından",
+    "oldu", "etti", "yaptı", "çıktı", "geldi", "gitti", "kaldı", "aldı",
+    "şimdi", "böyle", "şöyle", "falan", "filan", "eti", "diye", "dedi",
 }
 
 TR_GENITIVE_SUFFIXES = (
@@ -451,7 +453,17 @@ def extract_turkish_semantic_title(text: str, max_chars: int = 34) -> str:
     while len(selected) > 1 and to_turkish_lower(selected[-1].strip(".,:;")) in TR_DANGLING_STOPWORDS:
         selected.pop()
 
-    return to_turkish_upper(" ".join(selected))
+    # Baştaki kelime tekrar kontrol: stopword ise çıkar
+    while len(selected) > 1 and to_turkish_lower(selected[0].strip(".,:;")) in TR_DANGLING_STOPWORDS:
+        selected.pop(0)
+
+    final_str = " ".join(selected).strip()
+    if len(final_str) < 5 or len(selected) == 0:
+        return ""
+    if len(selected) == 1 and to_turkish_lower(selected[0]) in TR_DANGLING_STOPWORDS:
+        return ""
+
+    return to_turkish_upper(final_str)
 
 
 def detect_theme_profile_heuristic(full_transcript: str) -> ThemeProfile:

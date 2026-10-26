@@ -96,31 +96,65 @@ class LlmDirector:
         # AŞAMA 3: Kelime-Senkronlu Kurgu Olaylarını Somutlaştır
         # NOT: Sıradan nefes/retake kesimlerine (normalized_cuts[:8]) körlemesine geçiş efekti
         # eklenmez; geçiş efektleri YALNIZCA anlamlı konu/bölüm (chapter) sınırlarında üretilir.
+        allowed_transitions = getattr(theme_profile, "allowed_transitions", None) or [
+            "zoomin", "wipeleft", "smoothleft", "dissolve", "slideright", "circleopen"
+        ]
+
         for ch_idx, ch in enumerate(chapter_plans):
             if ch_idx > 0 and ch.start_sec > 3.5:
                 tr_ts = round(ch.start_sec, 2)
                 sfx_ts = tr_ts
+
+                # Dinamik ve çeşitli geçiş seçimi (tek tip smoothleft yerine zengin geçiş ritmi)
+                tr_type = allowed_transitions[(ch_idx - 1) % len(allowed_transitions)]
+
+                # Geçiş türüne göre süre ve en uygun senkron SFX
+                if tr_type in ("zoomin", "zoomout"):
+                    tr_dur = 0.38
+                    sfx_preset = "whoosh-fast"
+                    sfx_name = "Fast Zoom Whoosh"
+                    sfx_dur = 0.45
+                    sfx_vol = 0.20
+                elif tr_type in ("dissolve", "fade", "fadeblack"):
+                    tr_dur = 0.50
+                    sfx_preset = "cinematic-swell"
+                    sfx_name = "Cinematic Ambient Swell"
+                    sfx_dur = 0.90
+                    sfx_vol = 0.18
+                elif tr_type in ("circleopen", "circleclose"):
+                    tr_dur = 0.42
+                    sfx_preset = "pop-bubble"
+                    sfx_name = "Circle Reveal Pop"
+                    sfx_dur = 0.35
+                    sfx_vol = 0.18
+                else:
+                    tr_dur = 0.45
+                    sfx_preset = "capcut-swish-large"
+                    sfx_name = "Swish Whoosh (Large 794558)"
+                    sfx_dur = 0.81
+                    sfx_vol = 0.22
+
                 generated_transitions.append({
                     "id": f"ad_tr_ch_{ch_idx}",
                     "timestamp": tr_ts,
                     "boundaryTime": tr_ts,
                     "boundarySourceTime": tr_ts,
-                    "type": "smoothleft",
-                    "transitionType": "smoothleft",
-                    "duration": 0.45,
+                    "type": tr_type,
+                    "transitionType": tr_type,
+                    "duration": tr_dur,
                 })
                 generated_sfx.append({
                     "id": f"ad_sfx_tr_ch_{ch_idx}",
-                    "name": "Swish Whoosh (Large 794558)",
-                    "presetId": "capcut-swish-large",
-                    "synthPreset": "capcut-swish-large",
+                    "name": sfx_name,
+                    "presetId": sfx_preset,
+                    "synthPreset": sfx_preset,
                     "type": "whoosh",
                     "category": "whoosh",
-                    "sourceUrl": "sfx://capcut-swish-large",
+                    "sourceUrl": f"sfx://{sfx_preset}",
                     "timestamp": sfx_ts,
                     "start": sfx_ts,
-                    "duration": 0.81,
-                    "volume": 0.22,
+                    "duration": sfx_dur,
+                    "volume": sfx_vol,
                     "subThemeRole": "TOPIC_TRANSITION",
                     "isTransitionSfx": True,
                 })
