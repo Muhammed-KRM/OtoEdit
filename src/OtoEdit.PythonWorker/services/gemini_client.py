@@ -132,10 +132,25 @@ class GeminiClient:
         }
 
     def _call_openrouter_llm(self, prompt: str, json_mode: bool = False, model: str = None, api_key: str = None) -> Optional[str]:
-        """OpenRouter API uç noktasını çağırır."""
+        """OpenRouter API uç noktasını çağırır (12s sert zaman aşımı ile kilitlenmeye karşı korunmuştur)."""
         key = api_key or self.openrouter_api_key
         if not key:
             return None
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError
+        pool = ThreadPoolExecutor(max_workers=1)
+        try:
+            fut = pool.submit(self._do_call_openrouter, prompt, json_mode, model, key)
+            return fut.result(timeout=12.0)
+        except TimeoutError:
+            logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) sert zaman aşımı (12s) aşıldı, güvenle atlanıyor.")
+            return None
+        except Exception as ex:
+            logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) çağrısı başarısız: {ex}")
+            return None
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
+
+    def _do_call_openrouter(self, prompt: str, json_mode: bool, model: Optional[str], key: str) -> Optional[str]:
         url = f"{self.openrouter_base_url}/chat/completions"
         headers = {
             "Content-Type": "application/json",
@@ -155,7 +170,7 @@ class GeminiClient:
             payload["response_format"] = {"type": "json_object"}
         try:
             import requests
-            resp = requests.post(url, headers=headers, json=payload, timeout=(5, 10))
+            resp = requests.post(url, headers=headers, json=payload, timeout=(4, 8))
             if resp.status_code == 200:
                 data = resp.json()
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
