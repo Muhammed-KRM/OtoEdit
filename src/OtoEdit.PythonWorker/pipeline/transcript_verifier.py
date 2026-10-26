@@ -450,8 +450,9 @@ class TranscriptVerifier:
 
         agent_findings: List[Dict[str, Any]] = []
         if self.gemini and self.gemini.is_available() and chunks:
-            max_workers = min(4, len(chunks))
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            max_workers = min(2, len(chunks))
+            pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="RetakeAgentPool")
+            try:
                 futures = {
                     pool.submit(
                         self._run_chunk_detector_agent,
@@ -462,13 +463,20 @@ class TranscriptVerifier:
                     ): c_idx
                     for c_idx, c_words in enumerate(chunks)
                 }
-                for fut in as_completed(futures):
-                    try:
-                        res = fut.result()
-                        if res:
-                            agent_findings.extend(res)
-                    except Exception as ex:
-                        logger.warning(f"Paralel parça ajanı hatası: {ex}")
+                try:
+                    for fut in as_completed(futures, timeout=25):
+                        try:
+                            res = fut.result(timeout=3)
+                            if res:
+                                agent_findings.extend(res)
+                        except Exception as ex:
+                            logger.warning(f"Paralel parça ajanı sonucu alınamadı: {ex}")
+                except (TimeoutError, concurrent.futures.TimeoutError):
+                    logger.warning("⏱️ Çok Ajanlı LLM Retake denetimi zaman aşımına uğradı (25s). TakeAligner sonuçları korunarak güvenle devam ediliyor.")
+                except Exception as loop_ex:
+                    logger.warning(f"LLM ajan döngüsü hatası: {loop_ex}")
+            finally:
+                pool.shutdown(wait=False, cancel_futures=True)
 
         groups: List[RetakeGroup] = list(aligner_groups or [])
         new_cuts: List[CutItem] = []

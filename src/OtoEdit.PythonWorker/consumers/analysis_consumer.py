@@ -372,16 +372,21 @@ class AnalysisConsumer:
                     logger.warning(f"B-Roll katmanı hatası (ihmal edildi): {ex}")
                     return []
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="AnalysisGroup2") as executor:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="AnalysisGroup2")
+            try:
                 f_cmd = executor.submit(_run_commands)
                 f_repurpose = executor.submit(_run_repurposing)
                 f_sugg = executor.submit(_run_suggestions)
                 f_broll = executor.submit(_run_broll)
 
-                commands = f_cmd.result()
-                repurposing_data = f_repurpose.result()
-                suggestions = f_sugg.result()
-                broll_overlays = f_broll.result()
+                commands = f_cmd.result(timeout=45) if f_cmd else []
+                repurposing_data = f_repurpose.result(timeout=45) if f_repurpose else []
+                suggestions = f_sugg.result(timeout=45) if f_sugg else []
+                broll_overlays = f_broll.result(timeout=45) if f_broll else []
+            except Exception as ex:
+                logger.warning(f"AnalysisGroup2 paralel işlem uyarısı: {ex}")
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
 
             from models.edl_model import RepurposingData
             if not isinstance(repurposing_data, RepurposingData):

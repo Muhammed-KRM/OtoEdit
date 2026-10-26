@@ -2,9 +2,13 @@ import os
 import json
 import re
 import time
+import socket
 from typing import List, Dict, Any, Optional
 from config import Config
 from utils.logger import get_logger
+
+# Asılı kalan dış API soketlerinin iş parçacıklarını sonsuza kadar bloke etmesini önle
+socket.setdefaulttimeout(25.0)
 
 logger = get_logger(__name__)
 
@@ -138,18 +142,20 @@ class GeminiClient:
             "Authorization": f"Bearer {key}",
             "HTTP-Referer": "https://otoedit.local",
             "X-Title": "OtoEdit",
-            "User-Agent": "OtoEdit/2.0"
+            "User-Agent": "OtoEdit/2.0",
+            "Connection": "close"
         }
         payload: Dict[str, Any] = {
             "model": model or self.openrouter_model,
             "messages": [{"role": "user", "content": prompt}],
             "temperature": 0.1,
+            "stream": False,
         }
         if json_mode:
             payload["response_format"] = {"type": "json_object"}
         try:
             import requests
-            resp = requests.post(url, headers=headers, json=payload, timeout=25)
+            resp = requests.post(url, headers=headers, json=payload, timeout=(5, 10))
             if resp.status_code == 200:
                 data = resp.json()
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
@@ -182,12 +188,13 @@ class GeminiClient:
             headers = {
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self.proxy_key}",
+                "Connection": "close",
             }
             try:
                 req = urllib.request.Request(
                     url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
                 )
-                with urllib.request.urlopen(req, timeout=8) as resp:
+                with urllib.request.urlopen(req, timeout=4) as resp:
                     data = json.loads(resp.read().decode("utf-8"))
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 if content:

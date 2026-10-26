@@ -1,7 +1,12 @@
 """OtoEdit Python Worker - Video & AI İşleme Motoru Giriş Noktası."""
 import sys
 import time
+import socket
 import threading
+
+# Global soket zaman aşımı: Hiçbir dış istek (LLM, HTTP, gRPC) süresiz kilitlenemez
+socket.setdefaulttimeout(30.0)
+
 from config import Config
 from utils.logger import setup_logging, get_logger
 
