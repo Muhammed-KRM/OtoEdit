@@ -53,6 +53,14 @@ public class GeminiChatProvider : IChatProvider
         _logger = logger;
     }
 
+    public Task<ChatResult> ProcessCommandAsync(
+        string userMessage,
+        string currentEdlJson,
+        string? transcriptText,
+        List<ChatHistoryItem> history,
+        CancellationToken cancellationToken)
+        => ProcessCommandAsync(userMessage, currentEdlJson, transcriptText, history, null, cancellationToken);
+
     public async Task<ChatResult> ProcessCommandAsync(
         string userMessage,
         string currentEdlJson,

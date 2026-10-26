@@ -41,6 +41,9 @@ public class ChatManager : IChatService
         _logger = logger;
     }
 
+    public Task<ChatResponseDto> SendMessageAsync(Guid projectId, string message, CancellationToken cancellationToken)
+        => SendMessageAsync(projectId, message, null, cancellationToken);
+
     public async Task<ChatResponseDto> SendMessageAsync(Guid projectId, string message, string? provider = null, CancellationToken cancellationToken = default)
     {
         var project = await _context.Projects.FindAsync(new object[] { projectId }, cancellationToken);
@@ -132,7 +135,9 @@ public class ChatManager : IChatService
         _context.ChatMessages.Add(userChatMessage);
 
         // 5. Gemini AI Provider ile komutu çözümle
-        var chatResult = await _chatProvider.ProcessCommandAsync(message, edlJson, transcriptText, historyItems, provider, cancellationToken);
+        var chatResult = provider != null
+            ? await _chatProvider.ProcessCommandAsync(message, edlJson, transcriptText, historyItems, provider, cancellationToken)
+            : await _chatProvider.ProcessCommandAsync(message, edlJson, transcriptText, historyItems, cancellationToken);
 
         // 6. Niyet sınıflandırmasına göre patch uygula veya beklemeye al (HitL)
         int? yeniVersiyon = null;
