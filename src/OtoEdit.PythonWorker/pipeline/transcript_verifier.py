@@ -14,7 +14,7 @@ Kullanıcının tasarladığı Çok Ajanlı 3-Tur Doğrulama Mimarisi:
   Sorun varsa 2. turda grup aday listesinden alternatif adayı dener veya yerel pencereyi yeniden tarar.
   3. tur sonunda hâlâ %100 emin olunamayan kesimleri 'uncertain_retake' (Editörde Koyu Turuncu) olarak işaretler.
 """
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError
 from typing import List, Dict, Any, Optional, Tuple, Set
 import difflib
 import re
@@ -471,7 +471,7 @@ class TranscriptVerifier:
                                 agent_findings.extend(res)
                         except Exception as ex:
                             logger.warning(f"Paralel parça ajanı sonucu alınamadı: {ex}")
-                except (TimeoutError, concurrent.futures.TimeoutError):
+                except TimeoutError:
                     logger.warning("⏱️ Çok Ajanlı LLM Retake denetimi zaman aşımına uğradı (25s). TakeAligner sonuçları korunarak güvenle devam ediliyor.")
                 except Exception as loop_ex:
                     logger.warning(f"LLM ajan döngüsü hatası: {loop_ex}")
