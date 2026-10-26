@@ -38,6 +38,10 @@ class Config:
     ANTIGRAVITY_PROXY_URL = os.getenv("ANTIGRAVITY_PROXY_URL", "http://host.docker.internal:8045/v1")
     ANTIGRAVITY_PROXY_KEY = os.getenv("ANTIGRAVITY_PROXY_KEY", "")
     ANTIGRAVITY_PROXY_MODEL = os.getenv("ANTIGRAVITY_PROXY_MODEL", "gemini-3.8-flash-tiered")
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
+    OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+    OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-3.8-flash")
+    AI_ACTIVE_PROVIDER = os.getenv("AI_ACTIVE_PROVIDER", "antigravity")
     PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 
     # STT Motor Zinciri ve Parçalama

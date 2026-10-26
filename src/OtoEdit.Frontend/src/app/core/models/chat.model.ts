@@ -25,6 +25,7 @@ export interface ChatMessageDto {
 
 export interface ChatSendMessageDto {
   mesaj: string;
+  provider?: string;
 }
 
 export interface ChatResponseDto {

@@ -12,6 +12,7 @@ import { AssetService } from '../../core/services/asset.service';
 import { SignalrService } from '../../core/services/signalr.service';
 import { ProjectDetailDto } from '../../core/models/project.model';
 import { DiagnosticsService } from '../../core/services/diagnostics.service';
+import { SettingsService } from '../../core/services/settings.service';
 import { VideoDetailDto } from '../../core/models/video.model';
 import { CutItem, EdlContent, EdlDto, EdlPatchDto, OverlayItem, OverlayKeyframe, EdlTransition, EdlSfxClip, VideoClipItem, SubtitleStyleConfig, BackgroundMusicConfig, ColorGradingConfig, SuggestionItem, TranscriptSegment, TranscriptWord } from '../../core/models/edl.model';
 import { ChatMessageDto, FormFieldDto } from '../../core/models/chat.model';
@@ -62,6 +63,25 @@ export interface ContextMenuState {
             <span class="text-xs font-bold text-white tracking-wide">Canlı EDL Simülasyonu</span>
             <span class="text-[10px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">Render Bekletmez</span>
           </div>
+          <div class="h-4 w-px bg-slate-800"></div>
+          <!-- AYARLAR & API MENÜSÜ BUTONU (SOL ÜST) -->
+          <button 
+            type="button" 
+            (click)="openSettingsModal('api')" 
+            class="px-2.5 py-1 rounded-lg bg-dark-800 hover:bg-slate-700 border text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm group"
+            [ngClass]="activeAiProvider() === 'openrouter' ? 'border-brand-cyan/50 text-brand-cyan bg-brand-cyan/10 hover:border-brand-cyan' : 'border-purple-500/40 text-purple-300 bg-purple-500/10 hover:border-purple-400'"
+            title="Yapay Zeka API Ayarları (Antigravity / OpenRouter)">
+            <span class="text-xs">⚙️</span>
+            <span class="text-[11px] font-semibold">Ayarlar</span>
+            <span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider flex items-center gap-1"
+              [ngClass]="activeAiProvider() === 'openrouter' ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'">
+              <span class="w-1.5 h-1.5 rounded-full" [ngClass]="activeAiProvider() === 'openrouter' ? 'bg-brand-cyan animate-pulse' : 'bg-purple-400'"></span>
+              API: {{ activeAiProvider() === 'openrouter' ? 'OpenRouter' : 'Antigravity' }}
+            </span>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-dark-900/80 border border-slate-700/60 text-slate-300 font-mono hidden sm:inline-block truncate max-w-[150px]" [title]="settingsService.activeModel()">
+              {{ settingsService.activeModelShortName() }}
+            </span>
+          </button>
         </div>
 
         <div class="flex items-center gap-2.5">
@@ -89,7 +109,9 @@ export interface ContextMenuState {
               </div>
               <div class="flex justify-between"><span class="text-slate-400">Oynat / Duraklat:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Space</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">İmleçten Böl:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">B</kbd></div>
-              <div class="flex justify-between"><span class="text-amber-300 font-semibold">Soldakini Kırp & Birleştir:</span> <kbd class="px-1 bg-dark-800 border border-amber-400/50 text-amber-300 rounded font-mono font-bold">V</kbd></div>
+              <div class="flex justify-between"><span class="text-amber-300 font-semibold">Soldakini Kırp & Birleştir:</span> <kbd class="px-1 bg-dark-800 border border-amber-400/50 text-amber-300 rounded font-mono font-bold">X</kbd></div>
+              <div class="flex justify-between"><span class="text-brand-cyan font-semibold">Öğeyi Kopyala:</span> <kbd class="px-1 bg-dark-800 border border-brand-cyan/50 text-brand-cyan rounded font-mono font-bold">Ctrl+C</kbd></div>
+              <div class="flex justify-between"><span class="text-emerald-300 font-semibold">İmlece Yapıştır:</span> <kbd class="px-1 bg-dark-800 border border-emerald-400/50 text-emerald-300 rounded font-mono font-bold">Ctrl+V</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">Sil (Klip / Katman):</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Del</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">Katmanı Çoğalt:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">Ctrl+D</kbd></div>
               <div class="flex justify-between"><span class="text-slate-400">Klipleri Birleştir:</span> <kbd class="px-1 bg-dark-800 border border-slate-700 rounded font-mono">M</kbd></div>
@@ -1811,6 +1833,9 @@ export interface ContextMenuState {
                 ✓ Katman Ayarlarını Kaydet
               </button>
               <div class="flex gap-2">
+                <button (click)="copySelectedItem()" class="flex-1 py-1.5 bg-dark-800 hover:bg-slate-700 text-brand-cyan border border-brand-cyan/40 rounded-lg text-xs font-semibold cursor-pointer flex items-center justify-center gap-1" title="Katmanı Kopyala (Ctrl+C)">
+                  <span>📋</span> Kopyala
+                </button>
                 <button (click)="duplicateOverlay(selectedOverlayId()!)" class="flex-1 py-1.5 bg-dark-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold cursor-pointer">
                   Çoğalt (Ctrl+D)
                 </button>
@@ -2217,19 +2242,28 @@ export interface ContextMenuState {
               </button>
             </div>
 
-            <!-- Hızlı Dinle ve Çoğalt -->
-            <div class="grid grid-cols-2 gap-2">
+            <!-- Hızlı Dinle, Kopyala ve Çoğalt -->
+            <div class="grid grid-cols-3 gap-1.5">
               <button
                 type="button"
                 (click)="previewSfxClip(sfx)"
-                class="py-2 px-3 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
-                <span>▶</span> Dinle / Önizle
+                class="py-2 px-2 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                title="Ses Efektini Dinle">
+                <span>▶</span> Dinle
+              </button>
+              <button
+                type="button"
+                (click)="copySelectedItem()"
+                class="py-2 px-2 rounded-lg bg-dark-800 hover:bg-slate-700 border border-brand-cyan/40 text-brand-cyan font-bold text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                title="Ses Efektini Kopyala (Ctrl+C)">
+                <span>📋</span> Kopyala
               </button>
               <button
                 type="button"
                 (click)="duplicateSfxClip(sfx)"
-                class="py-2 px-3 rounded-lg bg-dark-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer">
-                <span>📋</span> Çoğalt
+                class="py-2 px-2 rounded-lg bg-dark-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-bold text-xs flex items-center justify-center gap-1 transition-colors cursor-pointer"
+                title="Ses Efektini Çoğalt">
+                <span>📄</span> Çoğalt
               </button>
             </div>
 
@@ -2369,6 +2403,20 @@ export interface ContextMenuState {
             <button (click)="addSplitMarker()" class="px-2.5 py-1 rounded bg-dark-800 text-slate-300 hover:text-white hover:bg-slate-700 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" title="Bulunulan Yerden Böl (B)">
               <span class="text-rose-400 font-bold">✂</span>
               <span>Böl (B)</span>
+            </button>
+            <button (click)="rippleDeleteLeft()" class="px-2.5 py-1 rounded bg-dark-800 text-amber-300 hover:text-amber-200 hover:bg-slate-700 border border-amber-400/40 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer" title="Soldakini Kırp & Birleştir (X)">
+              <span>⏪</span>
+              <span>Kırp (X)</span>
+            </button>
+            <div class="h-4 w-px bg-slate-700 mx-0.5"></div>
+            <button (click)="copySelectedItem()" [disabled]="!canCopySelected()" [class.opacity-40]="!canCopySelected()" class="px-2.5 py-1 rounded bg-dark-800 text-slate-300 hover:text-brand-cyan hover:bg-slate-700 border border-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer disabled:cursor-not-allowed" title="Seçili Öğeyi Kopyala (Ctrl+C)">
+              <span class="text-brand-cyan">📋</span>
+              <span>Kopyala</span>
+            </button>
+            <button (click)="pasteCopiedItem()" [disabled]="!clipboardItem" [class.opacity-40]="!clipboardItem" class="px-2.5 py-1 rounded bg-dark-800 text-slate-300 hover:text-emerald-300 hover:bg-slate-700 border border-slate-700 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer disabled:cursor-not-allowed" title="Panodaki Öğeyi İmlece Yapıştır (Ctrl+V)">
+              <span class="text-emerald-400">📥</span>
+              <span>Yapıştır</span>
+              <span *ngIf="clipboardItem" class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
             </button>
             <button 
               *ngIf="selectedClipIds().length > 0 || selectedOverlayId() || selectedSfxId()"
@@ -3178,6 +3226,19 @@ export interface ContextMenuState {
             <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">B</kbd>
           </button>
           <button 
+            (click)="copyClip(menu.targetClip); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📋</span> Klibi Kopyala</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+C</kbd>
+          </button>
+          <button 
+            *ngIf="clipboardItem"
+            (click)="pasteCopiedItem(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-emerald-500/20 hover:text-emerald-300 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📥</span> İmlece Yapıştır</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+V</kbd>
+          </button>
+          <button 
             *ngIf="!menu.targetClip?.isCut"
             (click)="moveClipOrder(menu.targetClip?.id, -1); closeContextMenu()"
             class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
@@ -3196,7 +3257,7 @@ export interface ContextMenuState {
             (click)="rippleDeleteLeft(); closeContextMenu()"
             class="w-full px-3 py-2 text-left hover:bg-amber-500/20 hover:text-amber-400 flex items-center justify-between transition-colors cursor-pointer">
             <span class="flex items-center gap-2"><span>⏪</span> Soldakini Kırp & Birleştir</span>
-            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-amber-300 border border-amber-400/50 font-bold">V</kbd>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-amber-300 border border-amber-400/50 font-bold">X</kbd>
           </button>
           <button 
             *ngIf="!menu.targetClip?.isCut"
@@ -3233,9 +3294,22 @@ export interface ContextMenuState {
             <span>📝</span> Özellikleri Düzenle
           </button>
           <button 
+            (click)="copyOverlay(menu.targetOverlay!); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📋</span> Katmanı Kopyala</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+C</kbd>
+          </button>
+          <button 
+            *ngIf="clipboardItem"
+            (click)="pasteCopiedItem(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-emerald-500/20 hover:text-emerald-300 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📥</span> İmlece Yapıştır</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+V</kbd>
+          </button>
+          <button 
             (click)="duplicateOverlay(menu.targetOverlay!.id); closeContextMenu()"
             class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
-            <span class="flex items-center gap-2"><span>📋</span> Katmanı Çoğalt</span>
+            <span class="flex items-center gap-2"><span>📄</span> Katmanı Hemen Çoğalt</span>
             <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+D</kbd>
           </button>
           <button 
@@ -3275,10 +3349,23 @@ export interface ContextMenuState {
             class="w-full px-3 py-2 text-left hover:bg-amber-500/20 hover:text-amber-300 flex items-center gap-2 transition-colors cursor-pointer">
             <span>🎛️</span> Özellikleri Düzenle & Dinle
           </button>
+          <button 
+            (click)="copySfx(menu.targetSfx!); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📋</span> Ses Efektini Kopyala</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+C</kbd>
+          </button>
+          <button 
+            *ngIf="clipboardItem"
+            (click)="pasteCopiedItem(); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-emerald-500/20 hover:text-emerald-300 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📥</span> İmlece Yapıştır</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+V</kbd>
+          </button>
           <button
             (click)="duplicateSfxClip(menu.targetSfx!); closeContextMenu()"
             class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center gap-2 transition-colors cursor-pointer">
-            <span>📋</span> Ses Efektini Çoğalt
+            <span>📄</span> Ses Efektini Çoğalt
           </button>
           <div class="h-px bg-slate-800 my-1"></div>
           <button
@@ -3294,6 +3381,13 @@ export interface ContextMenuState {
           <div class="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400 border-b border-slate-800">
             ⏱ Zaman Çizgisi
           </div>
+          <button 
+            *ngIf="clipboardItem"
+            (click)="pasteCopiedItem(menu.seekTime); closeContextMenu()"
+            class="w-full px-3 py-2 text-left hover:bg-emerald-500/20 hover:text-emerald-300 flex items-center justify-between transition-colors cursor-pointer">
+            <span class="flex items-center gap-2"><span>📥</span> Kopyalananı Buraya Yapıştır</span>
+            <kbd class="px-1.5 py-0.5 rounded bg-dark-800 text-[10px] font-mono text-slate-400 border border-slate-700">Ctrl+V</kbd>
+          </button>
           <button 
             (click)="addSplitMarker(); closeContextMenu()"
             class="w-full px-3 py-2 text-left hover:bg-brand-cyan/20 hover:text-brand-cyan flex items-center justify-between transition-colors cursor-pointer">
@@ -4050,6 +4144,14 @@ export interface ContextMenuState {
           </div>
         </div>
       </div>
+
+      <!-- Kopyala / Yapıştır Bildirimi (Floating Toast Notification) -->
+      <div 
+        *ngIf="editorToast() as toast"
+        class="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-dark-900/95 text-slate-100 border border-brand-cyan/40 rounded-full shadow-2xl backdrop-blur-xl flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3 duration-200 pointer-events-none">
+        <span class="text-base">{{ toast.icon || '📋' }}</span>
+        <span>{{ toast.message }}</span>
+      </div>
     </main>
   `,
   styles: [`
@@ -4484,7 +4586,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     return rawList.filter(sfx => {
       const range = this.getVisibleRangeFromRawRange(Number(sfx.start) || 0, Number(sfx.duration) || 1.0);
-      return range.visible;
+      if (range.visible) return true;
+      // Kullanıcının manuel eklediği veya seqStart değeri olan SFX'lerin asla kaybolmamasını sağla (görünürlük garantisi)
+      if (sfx.id?.startsWith('sfx_') || typeof sfx.seqStart === 'number') {
+        return true;
+      }
+      return false;
     });
   });
 
@@ -4719,6 +4826,116 @@ export class EditorComponent implements OnInit, OnDestroy {
     return segs?.find((s: any) => this.getSubtitleId(s) === id) || null;
   });
   readonly editingSubtitleId = signal<string | null>(null);
+
+  // --- KOPYALA / YAPIŞTIR (CLIPBOARD) & TOAST BİLDİRİM STATE ---
+  clipboardItem: {
+    kind: 'overlay' | 'sfx' | 'subtitle' | 'clip';
+    data: any;
+    label?: string;
+  } | null = null;
+  readonly editorToast = signal<{ message: string; icon?: string } | null>(null);
+  private toastTimeout: any = null;
+
+  // --- AYARLAR & AI SAĞLAYICI (ANTIGRAVITY / OPENROUTER) STATE ---
+  readonly settingsService = inject(SettingsService);
+  readonly isSettingsModalOpen = signal<boolean>(false);
+  readonly activeSettingsTab = signal<'api'>('api');
+  readonly activeAiProvider = computed<'antigravity' | 'openrouter'>(() => this.settingsService.activeProvider());
+  readonly modalSelectedProvider = signal<'antigravity' | 'openrouter'>('antigravity');
+  modalOpenRouterApiKey = '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';
+  modalOpenRouterModel = 'google/gemini-3.8-flash';
+  readonly showApiKey = signal<boolean>(false);
+  readonly isTestingAiProvider = signal<boolean>(false);
+  readonly aiTestResult = signal<{ success: boolean; message: string; latencyMs?: number } | null>(null);
+  readonly isSavingAiSettings = signal<boolean>(false);
+
+  openSettingsModal(tab: 'api' = 'api'): void {
+    this.settingsService.openModal();
+  }
+
+  closeSettingsModal(): void {
+    this.isSettingsModalOpen.set(false);
+    this.aiTestResult.set(null);
+  }
+
+  selectAiProvider(provider: 'antigravity' | 'openrouter'): void {
+    this.modalSelectedProvider.set(provider);
+    this.aiTestResult.set(null);
+  }
+
+  testAiConnection(provider?: 'antigravity' | 'openrouter'): void {
+    const target = provider || this.modalSelectedProvider();
+    this.isTestingAiProvider.set(true);
+    this.aiTestResult.set(null);
+    this.settingsService.testAiProvider(target).subscribe({
+      next: (res) => {
+        this.isTestingAiProvider.set(false);
+        this.aiTestResult.set(res);
+      },
+      error: (err) => {
+        this.isTestingAiProvider.set(false);
+        this.aiTestResult.set({
+          success: false,
+          message: `Bağlantı hatası: ${err.message || 'Sunucuya ulaşılamadı'}`
+        });
+      }
+    });
+  }
+
+  saveAiProviderSettings(): void {
+    this.isSavingAiSettings.set(true);
+    const selected = this.modalSelectedProvider();
+    const payload = {
+      activeProvider: selected,
+      openRouterApiKey: this.modalOpenRouterApiKey,
+      openRouterModel: this.modalOpenRouterModel
+    };
+
+    this.settingsService.updateAiProviderSettings(payload).subscribe({
+      next: (updated) => {
+        this.isSavingAiSettings.set(false);
+        this.closeSettingsModal();
+        const providerName = selected === 'openrouter' ? 'OpenRouter API' : 'Antigravity Proxy';
+        this.showEditorToast(`Aktif AI Sağlayıcı: ${providerName} olarak güncellendi`, '🌐');
+      },
+      error: (err) => {
+        this.isSavingAiSettings.set(false);
+        this.closeSettingsModal();
+        const providerName = selected === 'openrouter' ? 'OpenRouter API' : 'Antigravity Proxy';
+        this.showEditorToast(`Aktif AI Sağlayıcı: ${providerName} olarak seçildi`, '🌐');
+      }
+    });
+  }
+
+  loadAiProviderSettings(): void {
+    try {
+      const localProv = localStorage.getItem('otoedit_ai_provider') as 'antigravity' | 'openrouter';
+      if (localProv === 'antigravity' || localProv === 'openrouter') {
+        this.modalSelectedProvider.set(localProv);
+      }
+      const localKey = localStorage.getItem('otoedit_openrouter_key');
+      if (localKey) this.modalOpenRouterApiKey = localKey;
+      const localModel = localStorage.getItem('otoedit_openrouter_model');
+      if (localModel) this.modalOpenRouterModel = localModel;
+    } catch { }
+
+    this.settingsService.getAiProviderSettings().subscribe({
+      next: (cfg) => {
+        if (cfg) {
+          if (cfg.activeProvider === 'antigravity' || cfg.activeProvider === 'openrouter') {
+            this.modalSelectedProvider.set(cfg.activeProvider);
+          }
+          if (cfg.openRouterApiKey) {
+            this.modalOpenRouterApiKey = cfg.openRouterApiKey;
+          }
+          if (cfg.openRouterModel) {
+            this.modalOpenRouterModel = cfg.openRouterModel;
+          }
+        }
+      },
+      error: (err) => console.warn('AI ayarları servisten alınamadı, yerel ayar kullanılıyor:', err)
+    });
+  }
 
   // Subtitle Inspector Data
   subtitleInspectorData: {
@@ -6475,6 +6692,7 @@ export class EditorComponent implements OnInit, OnDestroy {
       this.loadEdl();
       this.loadChatHistory();
       this.loadAssets();
+      this.loadAiProviderSettings();
       this.signalr.joinProjectGroup(this.projectId);
     }
   }
@@ -6918,6 +7136,274 @@ export class EditorComponent implements OnInit, OnDestroy {
     });
   }
 
+  // --- KOPYALA / YAPIŞTIR (CLIPBOARD) & TOAST FONKSİYONLARI ---
+  showEditorToast(message: string, icon = '💡'): void {
+    if (this.toastTimeout) {
+      clearTimeout(this.toastTimeout);
+    }
+    this.editorToast.set({ message, icon });
+    this.toastTimeout = setTimeout(() => {
+      this.editorToast.set(null);
+    }, 2400);
+  }
+
+  canCopySelected(): boolean {
+    return !!(
+      this.selectedOverlayId() ||
+      this.selectedSfxId() ||
+      (this.selectedClipIds().length > 0) ||
+      this.selectedSubtitle()
+    );
+  }
+
+  copySelectedItem(): void {
+    const ovId = this.selectedOverlayId();
+    if (ovId) {
+      const ov = this.allOverlaysSignal().find(o => o.id === ovId);
+      if (ov) {
+        this.copyOverlay(ov);
+        return;
+      }
+    }
+
+    const sfxId = this.selectedSfxId();
+    if (sfxId) {
+      const sfx = this.sfxClips().find(s => s.id === sfxId);
+      if (sfx) {
+        this.copySfx(sfx);
+        return;
+      }
+    }
+
+    const clipIds = this.selectedClipIds();
+    if (clipIds.length > 0) {
+      const clip = this.clips().find(c => clipIds.includes(c.id));
+      if (clip) {
+        this.copyClip(clip);
+        return;
+      }
+    }
+
+    const sub = this.selectedSubtitle();
+    if (sub) {
+      this.copySubtitle(sub);
+      return;
+    }
+
+    this.showEditorToast('Kopyalanacak bir öğe (metin, görsel, ses efekti veya klip) seçin', 'ℹ️');
+  }
+
+  copyOverlay(ov: OverlayItem): void {
+    if (!ov) return;
+    const cloned = JSON.parse(JSON.stringify(ov));
+    const label = ov.type === 'text' 
+      ? `Metin ("${(ov.content || '').slice(0, 18)}${(ov.content || '').length > 18 ? '...' : ''}")`
+      : `${ov.type.toUpperCase()} Katmanı`;
+    
+    this.clipboardItem = {
+      kind: 'overlay',
+      data: cloned,
+      label
+    };
+    this.showEditorToast(`${label} kopyalandı`, '📋');
+  }
+
+  copySfx(sfx: EdlSfxClip): void {
+    if (!sfx) return;
+    const cloned = JSON.parse(JSON.stringify(sfx));
+    const label = `Ses Efekti (${sfx.name || sfx.title || 'SFX'})`;
+    
+    this.clipboardItem = {
+      kind: 'sfx',
+      data: cloned,
+      label
+    };
+    this.showEditorToast(`${label} kopyalandı`, '🔊');
+  }
+
+  copyClip(clip: any): void {
+    if (!clip) return;
+    const cloned = JSON.parse(JSON.stringify(clip));
+    const label = `Klip (${clip.id || 'Video'})`;
+    this.clipboardItem = {
+      kind: 'clip',
+      data: cloned,
+      label
+    };
+    this.showEditorToast(`${label} kopyalandı`, '🎬');
+  }
+
+  copySubtitle(sub: any): void {
+    if (!sub) return;
+    const cloned = JSON.parse(JSON.stringify(sub));
+    const label = `Altyazı ("${(sub.text || '').slice(0, 18)}...")`;
+    this.clipboardItem = {
+      kind: 'subtitle',
+      data: cloned,
+      label
+    };
+    this.showEditorToast(`${label} kopyalandı`, '💬');
+  }
+
+  pasteCopiedItem(targetSeqTime?: number): void {
+    if (!this.clipboardItem) {
+      this.showEditorToast('Panoda kopyalanmış bir öğe bulunmuyor (Önce Ctrl+C yapın)', '⚠️');
+      return;
+    }
+
+    const playheadSeq = typeof targetSeqTime === 'number' ? targetSeqTime : this.getPlayheadSeqTime();
+    const rippleActive = this.isAnyRippleActive();
+
+    if (this.clipboardItem.kind === 'overlay') {
+      const data = this.clipboardItem.data;
+      const newOvId = `ov_${data.type || 'text'}_${Date.now()}`;
+      const duration = Math.max(0.2, Number(data.duration) || 3.0);
+      const trackId = Number(data.trackId) || 1;
+      
+      const desiredRawStart = rippleActive 
+        ? this.getRawTimeFromVisTime(playheadSeq, true) 
+        : playheadSeq;
+
+      const resolved = this.resolveOverlayPlacement(newOvId, desiredRawStart, duration, trackId, playheadSeq);
+
+      const pastedOverlay: OverlayItem = {
+        ...data,
+        id: newOvId,
+        timestamp: parseFloat(resolved.start.toFixed(2)),
+        seqTimestamp: parseFloat(resolved.seqStart.toFixed(2)),
+        trackId: resolved.trackId,
+        action: 'add'
+      };
+
+      this.applyOptimisticPatch({ overlays: [pastedOverlay] });
+      this.selectOverlay(newOvId);
+      this.edlService.patchEdl(this.projectId, {
+        overlays: [pastedOverlay]
+      }).subscribe({
+        error: (err) => console.error('Katman yapıştırılamadı:', err)
+      });
+
+      this.showEditorToast(`Katman yapıştırıldı: ${this.clipboardItem.label || 'Katman'}`, '📋');
+      return;
+    }
+
+    if (this.clipboardItem.kind === 'sfx') {
+      const data = this.clipboardItem.data;
+      const newSfxId = `sfx_${Date.now()}`;
+      const duration = parseFloat((Number(data.duration) || 0.8).toFixed(2));
+      
+      let rawStart = rippleActive
+        ? this.getRawTimeFromVisTime(playheadSeq, true)
+        : parseFloat(this.currentTime().toFixed(2));
+
+      if (rippleActive) {
+        const cuts = this.activeCuts();
+        const activeCut = cuts.find(c => rawStart >= c.start - 0.05 && rawStart < c.end);
+        if (activeCut) {
+          rawStart = activeCut.end;
+        } else {
+          const upcomingCut = cuts.find(c => c.start > rawStart && (c.start - rawStart) < Math.min(0.25, duration * 0.5));
+          if (upcomingCut) {
+            rawStart = upcomingCut.end;
+          }
+        }
+      }
+
+      const newClip: EdlSfxClip = {
+        ...data,
+        id: newSfxId,
+        start: parseFloat(rawStart.toFixed(2)),
+        seqStart: parseFloat(playheadSeq.toFixed(2)),
+        duration,
+        action: 'add'
+      };
+
+      const patch: EdlPatchDto = { sfxClips: [newClip] };
+      this.applyOptimisticPatch(patch);
+      this.edlService.patchEdl(this.projectId, patch).subscribe({
+        error: (err) => console.error('SFX yapıştırılamadı:', err)
+      });
+
+      this.selectSfx(newClip, false);
+      if (newClip.presetId || newClip.sourceUrl) {
+        this.studioEngine.playSynthesizedSfx(newClip.presetId || 'pop-bubble', newClip.volume || 0.85, newClip.sourceUrl, duration);
+      }
+      this.showEditorToast(`Ses efekti yapıştırıldı: ${this.clipboardItem.label || 'SFX'}`, '🔊');
+      return;
+    }
+
+    if (this.clipboardItem.kind === 'subtitle') {
+      const sub = this.clipboardItem.data;
+      const text = sub.text || '';
+      const dur = Math.max(1.5, parseFloat((Number(sub.end || 0) - Number(sub.start || 0)).toFixed(2)) || 2.5);
+      const newOvId = `ov_text_${Date.now()}`;
+      const desiredRawStart = rippleActive ? this.getRawTimeFromVisTime(playheadSeq, true) : playheadSeq;
+      const resolved = this.resolveOverlayPlacement(newOvId, desiredRawStart, dur, 1, playheadSeq);
+
+      const newOverlay: any = {
+        id: newOvId,
+        type: 'text',
+        content: text,
+        timestamp: parseFloat(resolved.start.toFixed(2)),
+        seqTimestamp: parseFloat(resolved.seqStart.toFixed(2)),
+        duration: dur,
+        trackId: resolved.trackId,
+        positionX: 50,
+        positionY: 82,
+        scale: 1,
+        fontSize: 34,
+        font: 'Inter, sans-serif',
+        fontWeight: 'bold',
+        color: '#FFFFFF',
+        strokeColor: '#000000',
+        strokeWidth: 3,
+        textAlign: 'center',
+        action: 'add'
+      };
+
+      this.applyOptimisticPatch({ overlays: [newOverlay] });
+      this.selectOverlay(newOvId);
+      this.edlService.patchEdl(this.projectId, { overlays: [newOverlay] }).subscribe({
+        error: (err) => console.error('Altyazı katmanı yapıştırılamadı:', err)
+      });
+      this.showEditorToast(`Altyazı metin katmanı olarak yapıştırıldı`, '💬');
+      return;
+    }
+
+    if (this.clipboardItem.kind === 'clip') {
+      const clip = this.clipboardItem.data;
+      const dur = Math.max(1.0, parseFloat((Number(clip.end || 0) - Number(clip.start || 0)).toFixed(2)) || 3.0);
+      const newOvId = `ov_video_${Date.now()}`;
+      const desiredRawStart = rippleActive ? this.getRawTimeFromVisTime(playheadSeq, true) : playheadSeq;
+      const resolved = this.resolveOverlayPlacement(newOvId, desiredRawStart, dur, 1, playheadSeq);
+
+      const newOverlay: any = {
+        id: newOvId,
+        type: 'video',
+        content: `B-Roll Kopya (${dur.toFixed(1)}s)`,
+        source: this.videoUrl() || '',
+        trimStart: parseFloat((clip.start || 0).toFixed(2)),
+        timestamp: parseFloat(resolved.start.toFixed(2)),
+        seqTimestamp: parseFloat(resolved.seqStart.toFixed(2)),
+        duration: dur,
+        trackId: resolved.trackId,
+        positionX: 50,
+        positionY: 50,
+        scale: 1,
+        volume: 100,
+        action: 'add'
+      };
+
+      this.applyOptimisticPatch({ overlays: [newOverlay] });
+      this.selectOverlay(newOvId);
+      this.edlService.patchEdl(this.projectId, { overlays: [newOverlay] }).subscribe({
+        error: (err) => console.error('Klip katmanı yapıştırılamadı:', err)
+      });
+      this.showEditorToast(`Klip B-Roll olarak yapıştırıldı`, '🎬');
+      return;
+    }
+  }
+
   splitOverlayAtPlayhead(ov: OverlayItem): void {
     const playheadSeq = this.getPlayheadSeqTime();
     const ovSeqStart = this.getOverlaySeqStart(ov);
@@ -7075,9 +7561,24 @@ export class EditorComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (event.code === 'KeyV' || event.key.toLowerCase() === 'v') {
+    // Soldakini Kırp & Birleştir: X Tuşu (Ctrl/Meta basılı değilken)
+    if ((event.code === 'KeyX' || event.key.toLowerCase() === 'x') && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
       this.rippleDeleteLeft();
+      return;
+    }
+
+    // Seçili Öğeyi Kopyala: Ctrl+C / Cmd+C
+    if ((event.ctrlKey || event.metaKey) && (event.code === 'KeyC' || event.key.toLowerCase() === 'c')) {
+      event.preventDefault();
+      this.copySelectedItem();
+      return;
+    }
+
+    // Panodaki Öğeyi İmlece Yapıştır: Ctrl+V / Cmd+V
+    if ((event.ctrlKey || event.metaKey) && (event.code === 'KeyV' || event.key.toLowerCase() === 'v')) {
+      event.preventDefault();
+      this.pasteCopiedItem();
       return;
     }
 
@@ -7103,7 +7604,8 @@ export class EditorComponent implements OnInit, OnDestroy {
       }
     }
 
-    if (event.code === 'KeyC') {
+    // Altyazı Aç/Kapat: C Tuşu (Ctrl/Meta basılı DEĞİLKEN)
+    if ((event.code === 'KeyC' || event.key.toLowerCase() === 'c') && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();
       this.toggleSubtitles();
       return;
@@ -7529,11 +8031,11 @@ export class EditorComponent implements OnInit, OnDestroy {
       const sfxList = this.sfxClips();
       for (const sfx of sfxList) {
         const sfxDur = Math.max(0.15, Number(sfx.duration) || 0.5);
-        if (t >= sfx.start && t <= sfx.start + Math.min(0.18, sfxDur)) {
+        if (t >= sfx.start - 0.05 && t <= sfx.start + Math.max(0.25, Math.min(0.35, sfxDur))) {
           if (!this.playedSfxIdsInPass.has(sfx.id)) {
             this.playedSfxIdsInPass.add(sfx.id);
             const remainingDur = Math.max(0.1, (sfx.start + sfxDur) - t);
-            this.studioEngine.playSynthesizedSfx(sfx.presetId || 'whoosh-fast', sfx.volume ?? 0.22, sfx.sourceUrl, remainingDur);
+            this.studioEngine.playSynthesizedSfx(sfx.presetId || sfx.synthPreset || 'whoosh-fast', sfx.volume ?? 0.85, sfx.sourceUrl, remainingDur);
           }
         } else if (t < sfx.start - 0.1 || t > sfx.start + sfxDur) {
           this.playedSfxIdsInPass.delete(sfx.id);
@@ -7568,12 +8070,16 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
   }
 
-  getRawTimeFromVisTime(visTime: number): number {
+  getRawTimeFromVisTime(visTime: number, preferNextClip = true): number {
     if (!this.isAnyRippleActive()) {
       return Math.max(0, Math.min(this.totalDuration(), visTime));
     }
     const visClips = this.visibleClipsSortedByStart();
     if (visClips.length === 0) return 0;
+
+    if (visTime <= visClips[0].visStart) return visClips[0].start;
+    const lastClip = visClips[visClips.length - 1];
+    if (visTime >= lastClip.visEnd) return lastClip.end;
 
     let lo = 0;
     let hi = visClips.length - 1;
@@ -7585,6 +8091,10 @@ export class EditorComponent implements OnInit, OnDestroy {
       } else if (visTime > c.visEnd) {
         lo = mid + 1;
       } else {
+        // Eğer visTime tam sınırda (visEnd) ise ve preferNextClip true ise sonraki klibin başına git
+        if (preferNextClip && Math.abs(visTime - c.visEnd) < 0.005 && mid + 1 < visClips.length) {
+          return visClips[mid + 1].start;
+        }
         return c.start + (visTime - c.visStart);
       }
     }
@@ -8710,7 +9220,7 @@ export class EditorComponent implements OnInit, OnDestroy {
 
     this.chatLoading.set(true);
 
-    this.chatService.sendMessage(this.projectId, msgText).subscribe({
+    this.chatService.sendMessage(this.projectId, msgText, this.activeAiProvider()).subscribe({
       next: (res) => {
         this.chatLoading.set(false);
         this.chatMessages.update(msgs => [
@@ -9153,8 +9663,32 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   addSfxToTimeline(sfx: SfxLibraryItem): void {
-    const start = parseFloat(this.currentTime().toFixed(2));
-    const sourceUrl = sfx.sourceUrl || this.studioEngine.generateSfxWavDataUri(sfx.id, sfx.duration);
+    const rippleActive = this.isAnyRippleActive();
+    const playheadSeq = this.getPlayheadSeqTime();
+    let rawStart = rippleActive
+      ? this.getRawTimeFromVisTime(playheadSeq, true)
+      : parseFloat(this.currentTime().toFixed(2));
+
+    // Kesim / Ripple Koruması:
+    // Eğer ham başlangıç noktası bir kesim bölgesinin içindeyse veya kesimin hemen sınırındaysa,
+    // görüntünün/sesin devam ettiği sonraki klibin başlangıç noktasına (activeCut.end) taşı!
+    if (rippleActive) {
+      const cuts = this.activeCuts();
+      const activeCut = cuts.find(c => rawStart >= c.start - 0.05 && rawStart < c.end);
+      if (activeCut) {
+        rawStart = activeCut.end;
+      } else {
+        // Kesim içinde değil ama hemen peşinden (0.25s içinde) bir kesim başlıyorsa
+        // ve ses efektinin büyük kısmı kesimde kaybolacaksa sonraki klibin başına taşı:
+        const upcomingCut = cuts.find(c => c.start > rawStart && (c.start - rawStart) < Math.min(0.25, (sfx.duration || 0.8) * 0.5));
+        if (upcomingCut) {
+          rawStart = upcomingCut.end;
+        }
+      }
+    }
+
+    const duration = parseFloat((sfx.duration || 0.8).toFixed(2));
+    const sourceUrl = sfx.sourceUrl || this.studioEngine.generateSfxWavDataUri(sfx.id, duration);
     const newClip: EdlSfxClip = {
       id: `sfx_${Date.now()}`,
       name: sfx.name,
@@ -9163,18 +9697,26 @@ export class EditorComponent implements OnInit, OnDestroy {
       presetId: sfx.id,
       synthPreset: sfx.synthPreset || sfx.id,
       sourceUrl,
-      start,
-      duration: sfx.duration,
+      start: parseFloat(rawStart.toFixed(2)),
+      seqStart: parseFloat(playheadSeq.toFixed(2)),
+      duration,
       volume: 0.85,
       action: 'add'
     };
 
-    // Anında sesli geri bildirim ver ve anında (0ms) yerel EDL'e ekle
-    this.activePreviewSfx.set(sfx);
-    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85, sfx.sourceUrl);
+    // 1. EDL'e ekle (Optimistik + Backend patch)
     const patch: EdlPatchDto = { sfxClips: [newClip] };
     this.applyOptimisticPatch(patch);
-    this.edlService.patchEdl(this.projectId, patch).subscribe();
+    this.edlService.patchEdl(this.projectId, patch).subscribe({
+      error: (err) => console.error('SFX patch hatası:', err)
+    });
+
+    // 2. Klibi hemen seç ve sağ denetçi panelini aç
+    this.selectSfx(newClip, false);
+
+    // 3. Anında sesli geri bildirim ver
+    this.activePreviewSfx.set(sfx);
+    this.studioEngine.playSynthesizedSfx(sfx.id, 0.85, sfx.sourceUrl, duration);
   }
 
   selectSfx(sfx: EdlSfxClip, playPreview = true): void {
@@ -9183,7 +9725,9 @@ export class EditorComponent implements OnInit, OnDestroy {
     this.selectedClipIds.set([]);
     this.selectedSfxId.set(sfx.id);
     const rawStart = Number(sfx.start) || 0;
-    const seqStart = this.isAnyRippleActive() ? this.getVisTimeFromRawTime(rawStart) : rawStart;
+    const seqStart = typeof sfx.seqStart === 'number'
+      ? sfx.seqStart
+      : (this.isAnyRippleActive() ? this.getVisTimeFromRawTime(rawStart) : rawStart);
     this.sfxInspectorData = {
       id: sfx.id,
       name: sfx.name || sfx.title || 'SFX',
@@ -9206,13 +9750,22 @@ export class EditorComponent implements OnInit, OnDestroy {
     if (!sfx) return;
 
     const seqStart = Math.max(0, Number(this.sfxInspectorData.seqStart) || 0);
-    const rawStart = this.isAnyRippleActive() ? this.getRawTimeFromVisTime(seqStart) : seqStart;
+    let rawStart = this.isAnyRippleActive() ? this.getRawTimeFromVisTime(seqStart, true) : seqStart;
+    if (this.isAnyRippleActive()) {
+      const cuts = this.activeCuts();
+      const activeCut = cuts.find(c => rawStart >= c.start - 0.05 && rawStart < c.end);
+      if (activeCut) {
+        rawStart = activeCut.end;
+      }
+    }
+
     sfx.name = this.sfxInspectorData.name || 'SFX';
     sfx.title = sfx.name;
     sfx.presetId = this.sfxInspectorData.presetId;
     sfx.synthPreset = this.sfxInspectorData.presetId;
     sfx.volume = Math.max(0, Math.min(2.0, (Number(this.sfxInspectorData.volumePercent) || 0) / 100));
     sfx.start = parseFloat(rawStart.toFixed(2));
+    sfx.seqStart = parseFloat(seqStart.toFixed(2));
     sfx.duration = Math.max(0.2, parseFloat((Number(this.sfxInspectorData.duration) || 1.0).toFixed(2)));
     this.sfxInspectorData.start = sfx.start;
     this.edl.update(e => e ? { ...e, sfxClips: [...sfxList] } : null);
@@ -9247,10 +9800,21 @@ export class EditorComponent implements OnInit, OnDestroy {
   }
 
   duplicateSfxClip(sfx: EdlSfxClip): void {
+    const origSeq = typeof sfx.seqStart === 'number'
+      ? sfx.seqStart
+      : (this.isAnyRippleActive() ? this.getVisTimeFromRawTime(sfx.start) : (sfx.start || 0));
+    const newSeq = origSeq + Math.max(0.5, sfx.duration || 1.0) + 0.2;
+    let newRaw = this.isAnyRippleActive() ? this.getRawTimeFromVisTime(newSeq, true) : newSeq;
+    if (this.isAnyRippleActive()) {
+      const cuts = this.activeCuts();
+      const activeCut = cuts.find(c => newRaw >= c.start - 0.05 && newRaw < c.end);
+      if (activeCut) newRaw = activeCut.end;
+    }
     const newClip: EdlSfxClip = {
       ...sfx,
       id: `sfx_${Date.now()}`,
-      start: parseFloat(((sfx.start || 0) + Math.max(0.5, sfx.duration || 1.0) + 0.2).toFixed(2)),
+      start: parseFloat(newRaw.toFixed(2)),
+      seqStart: parseFloat(newSeq.toFixed(2)),
       action: 'add'
     };
     const patch: EdlPatchDto = { sfxClips: [newClip] };
@@ -9296,10 +9860,12 @@ export class EditorComponent implements OnInit, OnDestroy {
     }
     const range = this.getVisibleRangeFromRawRange(start, dur);
     const visDur = Math.max(0.1, this.visibleDuration());
-    const leftPct = Math.max(0, Math.min(99.8, (range.seqStart / visDur) * 100));
+    const seqStart = range.visible ? range.seqStart : (typeof sfx.seqStart === 'number' ? sfx.seqStart : this.getVisTimeFromRawTime(start));
+    const seqDur = range.visible ? range.seqDuration : dur;
+    const leftPct = Math.max(0, Math.min(99.8, (seqStart / visDur) * 100));
     return {
       left: `${leftPct}%`,
-      width: `${Math.max(0.02, Math.min(100 - leftPct, (range.seqDuration / visDur) * 100))}%`
+      width: `${Math.max(0.02, Math.min(100 - leftPct, (seqDur / visDur) * 100))}%`
     };
   }
 
@@ -10330,7 +10896,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         const deltaSec = (event.clientX - this.dragStartX) / pixelsPerSec;
 
         const toSeq = (rawT: number) => (rippleActive ? this.getVisTimeFromRawTime(rawT) : rawT);
-        const toRaw = (seqT: number) => (rippleActive ? this.getRawTimeFromVisTime(seqT) : seqT);
+        const toRaw = (seqT: number) => (rippleActive ? this.getRawTimeFromVisTime(seqT, true) : seqT);
 
         const origSeqStart = toSeq(this.dragSfxOriginalStart);
         const origDur = Math.max(0.15, this.dragSfxOriginalDuration);
@@ -10359,7 +10925,14 @@ export class EditorComponent implements OnInit, OnDestroy {
                  newSeqStart = origSeqEnd - 0.15;
               }
               const newDur = Math.max(0.15, origSeqEnd - newSeqStart);
-              sfx.start = parseFloat(toRaw(newSeqStart).toFixed(2));
+              let rawStartCandidate = toRaw(newSeqStart);
+              if (rippleActive) {
+                 const cuts = this.activeCuts();
+                 const activeCut = cuts.find(c => rawStartCandidate >= c.start - 0.05 && rawStartCandidate < c.end);
+                 if (activeCut) rawStartCandidate = activeCut.end;
+              }
+              sfx.start = parseFloat(rawStartCandidate.toFixed(2));
+              sfx.seqStart = parseFloat(newSeqStart.toFixed(2));
               sfx.duration = parseFloat(newDur.toFixed(2));
            } else {
               const curSeqStart = toSeq(Number(sfx.start) || 0);
@@ -10410,7 +10983,14 @@ export class EditorComponent implements OnInit, OnDestroy {
               }
            }
 
-           sfx.start = parseFloat(toRaw(candidateSeq).toFixed(2));
+           let rawCandidate = toRaw(candidateSeq);
+           if (rippleActive) {
+              const cuts = this.activeCuts();
+              const activeCut = cuts.find(c => rawCandidate >= c.start - 0.05 && rawCandidate < c.end);
+              if (activeCut) rawCandidate = activeCut.end;
+           }
+           sfx.start = parseFloat(rawCandidate.toFixed(2));
+           sfx.seqStart = parseFloat(candidateSeq.toFixed(2));
         }
 
         const dispStart = toSeq(sfx.start);

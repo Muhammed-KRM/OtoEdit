@@ -4,6 +4,7 @@ import { Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { ProjectService } from '../../core/services/project.service';
 import { ProjectCreateDto, ProjectListDto, VideoFormati } from '../../core/models/project.model';
+import { SettingsService } from '../../core/services/settings.service';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
 import { StatusBadgeComponent } from '../../shared/components/status-badge/status-badge.component';
 
@@ -166,6 +167,25 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
               <span class="font-bold text-brand-cyan">✨ Birleştirilmiş Akıllı Kurgu Seçenekleri:</span>
               Videonuzu yüklerken <b>Direkt Editöre Geç (0sn)</b>, <b>Kesilmiş Videoyu Kurgula & Zenginleştir</b> veya <b>Tam Otonom Yönetmen</b> modlarından birini tek tıkla seçebilirsiniz.
             </div>
+
+            <!-- Aktif AI Sağlayıcı Rozeti -->
+            <div class="flex items-center justify-between p-3 rounded-xl bg-dark-800/80 border border-slate-700/60 text-xs">
+              <span class="text-slate-400 flex items-center gap-1.5">
+                <span>🤖</span> Yapay Zeka Motoru:
+              </span>
+              <div class="flex items-center gap-2">
+                <span class="font-mono font-semibold"
+                  [ngClass]="settingsService.activeProvider() === 'openrouter' ? 'text-brand-cyan' : 'text-purple-300'">
+                  {{ settingsService.activeProvider() === 'openrouter' ? 'OpenRouter API' : 'Antigravity AI' }} ({{ settingsService.activeModel() }})
+                </span>
+                <button 
+                  type="button" 
+                  (click)="settingsService.openModal()"
+                  class="text-[10px] text-brand-cyan hover:underline cursor-pointer font-bold">
+                  ⚙️ Değiştir
+                </button>
+              </div>
+            </div>
           </div>
 
           <div class="flex items-center justify-end gap-3 mt-8">
@@ -190,6 +210,7 @@ import { StatusBadgeComponent } from '../../shared/components/status-badge/statu
 export class ProjectListComponent implements OnInit {
   private projectService = inject(ProjectService);
   private router = inject(Router);
+  readonly settingsService = inject(SettingsService);
 
   readonly projects = signal<ProjectListDto[]>([]);
   readonly loading = signal<boolean>(true);

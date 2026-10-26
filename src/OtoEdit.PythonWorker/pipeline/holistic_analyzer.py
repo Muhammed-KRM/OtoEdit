@@ -582,8 +582,8 @@ class VerbatimTranscriptValidator:
             return events
 
         for evt in events:
-            # Kişi tanıtımlarında tam tarihsel unvan/isim korunur (ASR bozuk telaffuzlarını düzeltmek için)
-            if evt.action_type == "PERSON_INTRODUCTION":
+            # Kişi tanıtımlarında ve can alıcı cümle vurgularında tam metin korunur
+            if evt.action_type in ("PERSON_INTRODUCTION", "KEY_POINT", "HIGHLIGHT"):
                 continue
 
             window_tokens = [
@@ -854,8 +854,8 @@ class HolisticAnalyzer:
 
         # 3. Videoyu Söylem Analizi (SemanticTransitionBoundaryDetector) ile konu bitimi ve
         #    açıklama öncesi anlamsal bölümlere (Chapters) ayır
-        target_chapter_len = 135.0 if safe_duration >= 300.0 else max(25.0, safe_duration / 3.0)
-        num_chapters = max(1, min(18, int(round(safe_duration / target_chapter_len))))
+        target_chapter_len = 50.0 if safe_duration >= 200.0 else max(20.0, safe_duration / 3.0)
+        num_chapters = max(2, min(30, int(round(safe_duration / target_chapter_len))))
         chapter_boundaries = self._find_natural_chapter_boundaries(
             active_segments, safe_duration, num_chapters, word_stream=word_stream
         )
@@ -1463,6 +1463,10 @@ class HolisticAnalyzer:
             "dolayısıyla", "nitekim", "halbuki", "ancak", "fakat", "lakin", "örneğin",
             "mesela", "hatta", "zaten", "aslında", "tabii", "elbette", "peki", "işte",
             "burada", "bugün", "geçen", "bölümde", "dersimizde", "videomuzda",
+            "şey", "yani", "filan", "falan", "var", "yok", "adlarını", "isimlerini",
+            "bilmiyoruz", "saymıyoruz", "biliyoruz", "diyoruz", "ediyoruz", "yapıyoruz",
+            "geliyoruz", "görüyoruz", "bunun", "şunun", "onun", "bunu", "şunu", "buna",
+            "şuna", "ona", "öyle", "böyle", "şöyle", "kez", "defa", "zaman",
         }
         idx = 0
         while idx < n_tokens - 3:
@@ -1533,7 +1537,22 @@ class HolisticAnalyzer:
                         break
                     break
 
-                if len(phrase_chain) >= 3:
+                # Filtre: Liste öğeleri anlamsız ara kelimelerden veya fiillerden arındırılır
+                cleaned_phrases = []
+                for p in phrase_chain:
+                    p_txt = " ".join(t.clean for t in p).strip()
+                    p_low = p_txt.lower()
+                    if (
+                        len(p_txt) < 3
+                        or p_low in salutation_and_discourse_Blacklist
+                        or any(t.lower in salutation_and_discourse_Blacklist for t in p)
+                        or any(p_low.endswith(suf) for suf in ("mıyoruz", "miyoruz", "muyoruz", "müyoruz", "madık", "medik", "mayız", "meyiz"))
+                    ):
+                        continue
+                    cleaned_phrases.append(p)
+
+                if len(cleaned_phrases) >= 3:
+                    phrase_chain = cleaned_phrases
                     # Eğer tüm zincir 1'er kelimelikse ilk öbeği de 1 kelimeye indirge (tutarlılık için)
                     if all(len(p) == 1 for p in phrase_chain[1:]) and len(phrase_chain[0]) > 1:
                         phrase_chain[0] = [phrase_chain[0][-1]]
@@ -1826,17 +1845,16 @@ class HolisticAnalyzer:
         if not word_stream or not self.gemini:
             return
 
-        # Yalnızca deterministik kuralların yoğun olmadığı pencereler için (veya genel zenginleştirme için)
-        # kelime akışını 280 kelimelik pencerelere böl (en fazla 4 pencere çağrısı ile süreyi koru)
+        # Tüm video boyunca kelime akışını pencerelere böl (Videonun tamamını tara)
         chunk_size = 280
-        max_chunks = 4
+        max_chunks = max(25, int(video_duration / 30.0))
         chunks: List[List[WordToken]] = []
         for start_i in range(0, len(word_stream), chunk_size):
             sub = word_stream[start_i : start_i + chunk_size]
             if not sub:
                 continue
             w_start, w_end = sub[0].start, sub[-1].end
-            # Bu pencerede zaten yeterince (4+) olay yakalandıysa LLM çağrısına gerek yok
+            # Bu pencerede zaten deterministik kurallarla yeterince (3+) olay yakalandıysa LLM çağrısını atla
             existing_in_win = sum(1 for t in triggers if w_start <= t.start_sec <= w_end)
             if existing_in_win < 3:
                 chunks.append(sub)
@@ -1849,12 +1867,15 @@ class HolisticAnalyzer:
                 "Sen profesyonel bir kurgu yönetmenisin. Aşağıda bir videonun kelime indeksli transkript kesiti verilmiştir.\n"
                 "GÖREVİN: Bu kesitte konuşmacının vurguladığı önemli kavramları şu tiplerde JSON dizisi olarak çıkarmaktır:\n"
                 "- 'PERSON_INTRODUCTION': Sadece gerçek bir kişi/bilim insanı/düşünür tanıtılıyorsa.\n"
-                "- 'WORK_INTRODUCTION': Sadece somut bir kitap/eser/kanun/film tanıtılıyorsa (SADECE konuşulan eser adını yaz!).\n"
+                "- 'WORK_INTRODUCTION': Sadece somut bir kitap/eser/kanun/sure/eser adı tanıtılıyorsa (SADECE konuşulan eser adını yaz!).\n"
                 "- 'PROGRESSIVE_LIST': Ardışık 3+ madde sıralanıyorsa (items dizisiyle).\n"
                 "- 'PAIRED_TERMS': İki kavram birbirine paralel veya karşıt vurgulanıyorsa (items dizisiyle).\n"
-                "- 'DEFINITION_CALLOUT': Tekil bir anahtar terim veya ilke tanımlanıyorsa.\n\n"
-                "ALTIN KURAL: `text_primary` içinde YALNIZCA konuşmacının o kelimelerde AĞZINDAN ÇIKAN kelimeleri kullan! "
-                "Konuşmacının söylemediği hiçbir kelimeyi ekleme veya değiştirme!\n"
+                "- 'DEFINITION_CALLOUT': Tekil bir anahtar terim veya ilke tanımlanıyorsa.\n"
+                "- 'KEY_POINT': Konuşmacının can alıcı ana fikri, kilit tespiti veya özellikle dikkat çektiği önemli argüman/cümle.\n\n"
+                "KURALLAR:\n"
+                "1. `text_primary` konuşmacının o an söylediği kelimelerle doğrudan ilişkili ve net olmalıdır.\n"
+                "2. 'ŞEY', 'KEZ', 'VARDIR', 'BUNLAR', 'EVET' gibi anlamsız ara kelimeleri ASLA terim/vurgu olarak seçme!\n"
+                "3. `items` alanında doğrudan madde metinlerini liste olarak verebilirsin: [\"madde 1\", \"madde 2\"]\n\n"
                 "Sadece JSON dizisi döndür:\n"
                 '[{"action_type":"DEFINITION_CALLOUT","start_word_idx":12,"end_word_idx":13,"sentence_end_word_idx":18,"text_primary":"ÖRNEK KAVRAM"}]\n\n'
                 f"TRANSKRİPT:\n{indexed_text}"
@@ -1872,82 +1893,115 @@ class HolisticAnalyzer:
                     continue
 
                 for item in parsed:
-                    if not isinstance(item, dict):
-                        continue
-                    act = str(item.get("action_type", "")).strip()
-                    sent_end_idx = int(item.get("sentence_end_word_idx", -1) or -1)
-
-                    if act in ("PROGRESSIVE_LIST", "PAIRED_TERMS") and isinstance(item.get("items"), list):
-                        sub_items = item["items"]
-                        if len(sub_items) < 2:
+                    try:
+                        if not isinstance(item, dict):
                             continue
-                        valid_subs = []
-                        for si in sub_items:
-                            sw_idx = int(si.get("start_word_idx", -1) or -1)
-                            lbl = to_turkish_upper(str(si.get("text_primary", "")).strip())
-                            if 0 <= sw_idx < len(word_stream) and len(lbl) >= 2:
-                                valid_subs.append((word_stream[sw_idx], lbl))
-                        if len(valid_subs) >= 2:
-                            last_t = valid_subs[-1][0]
+                        act = str(item.get("action_type", "")).strip()
+                        sent_end_idx = int(item.get("sentence_end_word_idx", -1) or -1)
+
+                        if act in ("PROGRESSIVE_LIST", "PAIRED_TERMS") and isinstance(item.get("items"), list):
+                            sub_items = item["items"]
+                            if len(sub_items) < 2:
+                                continue
+                            valid_subs = []
+                            for si in sub_items:
+                                if isinstance(si, dict):
+                                    sw_idx = int(si.get("start_word_idx", -1) or -1)
+                                    lbl = to_turkish_upper(str(si.get("text_primary", "")).strip())
+                                else:
+                                    lbl = to_turkish_upper(str(si).strip())
+                                    sw_idx = -1
+                                    lbl_first = to_turkish_lower(lbl.split()[0]) if lbl else ""
+                                    parent_sw = int(item.get("start_word_idx", -1) or -1)
+                                    search_start = max(0, parent_sw) if parent_sw >= 0 else 0
+                                    for tok_cand in chunk:
+                                        if tok_cand.idx >= search_start and (tok_cand.lower == lbl_first or tok_cand.clean.lower() == lbl_first):
+                                            sw_idx = tok_cand.idx
+                                            search_start = tok_cand.idx + 1
+                                            break
+                                    if sw_idx < 0 and chunk:
+                                        sw_idx = parent_sw if (0 <= parent_sw < len(word_stream)) else chunk[0].idx
+                                if 0 <= sw_idx < len(word_stream) and len(lbl) >= 2:
+                                    valid_subs.append((word_stream[sw_idx], lbl))
+                            if len(valid_subs) >= 2:
+                                last_t = valid_subs[-1][0]
+                                end_t = (
+                                    word_stream[sent_end_idx]
+                                    if 0 <= sent_end_idx < len(word_stream) and sent_end_idx >= last_t.idx
+                                    else self._find_sentence_end_word(word_stream, last_t, last_t.seg_idx + 1)
+                                )
+                                shared_end = round(max(last_t.end + 0.35, end_t.end), 2)
+                                if not is_range_busy(valid_subs[0][0].start, shared_end):
+                                    grp_id = f"grp_llm_{valid_subs[0][0].idx}"
+                                    for slot_i, (st_tok, lbl) in enumerate(valid_subs):
+                                        triggers.append(
+                                            PlannedEditorialEvent(
+                                                event_id=f"{grp_id}_{slot_i + 1}",
+                                                chapter_id=0,
+                                                action_type=act,
+                                                start_sec=round(st_tok.start, 2),
+                                                end_sec=shared_end,
+                                                text_primary=lbl,
+                                                text_secondary="LLM Vurgusu",
+                                                semantic_priority=True,
+                                                group_id=grp_id,
+                                                stack_slot=slot_i,
+                                            )
+                                        )
+                                    occupied_ranges.append((valid_subs[0][0].start, shared_end))
+                        elif act in (
+                            "PERSON_INTRODUCTION",
+                            "WORK_INTRODUCTION",
+                            "DEFINITION_CALLOUT",
+                            "SINGLE_TERM",
+                            "KEY_POINT",
+                            "HIGHLIGHT",
+                            "KEY_TERM_CALLOUT",
+                        ):
+                            sw_idx = int(item.get("start_word_idx", -1) or -1)
+                            lbl = to_turkish_upper(str(item.get("text_primary", "")).strip())
+                            if not (0 <= sw_idx < len(word_stream)) and lbl:
+                                lbl_first = to_turkish_lower(lbl.split()[0])
+                                for tok_cand in chunk:
+                                    if tok_cand.lower == lbl_first or tok_cand.clean.lower() == lbl_first:
+                                        sw_idx = tok_cand.idx
+                                        break
+                            if not (0 <= sw_idx < len(word_stream)) or len(lbl) < 3:
+                                continue
+                            if lbl in {"ŞEY", "KEZ", "DEFÂ", "VARDIR", "YOKTUR", "BUNLAR", "ONLAR", "ŞUNLAR", "EVET", "HAYIR", "YANİ", "FİLAN", "FALAN"}:
+                                continue
+                            st_tok = word_stream[sw_idx]
                             end_t = (
                                 word_stream[sent_end_idx]
-                                if 0 <= sent_end_idx < len(word_stream) and sent_end_idx >= last_t.idx
-                                else self._find_sentence_end_word(word_stream, last_t, last_t.seg_idx + 1)
+                                if 0 <= sent_end_idx < len(word_stream) and sent_end_idx >= st_tok.idx
+                                else self._find_sentence_end_word(word_stream, st_tok, st_tok.seg_idx + 1)
                             )
-                            shared_end = round(max(last_t.end + 0.35, end_t.end), 2)
-                            if not is_range_busy(valid_subs[0][0].start, shared_end):
-                                grp_id = f"grp_llm_{valid_subs[0][0].idx}"
-                                for slot_i, (st_tok, lbl) in enumerate(valid_subs):
-                                    triggers.append(
-                                        PlannedEditorialEvent(
-                                            event_id=f"{grp_id}_{slot_i + 1}",
-                                            chapter_id=0,
-                                            action_type=act,
-                                            start_sec=round(st_tok.start, 2),
-                                            end_sec=shared_end,
-                                            text_primary=lbl,
-                                            text_secondary="LLM Vurgusu",
-                                            semantic_priority=True,
-                                            group_id=grp_id,
-                                            stack_slot=slot_i,
-                                        )
-                                    )
-                                occupied_ranges.append((valid_subs[0][0].start, shared_end))
-                    elif act in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION", "DEFINITION_CALLOUT", "SINGLE_TERM"):
-                        sw_idx = int(item.get("start_word_idx", -1) or -1)
-                        lbl = to_turkish_upper(str(item.get("text_primary", "")).strip())
-                        if not (0 <= sw_idx < len(word_stream)) or len(lbl) < 3:
-                            continue
-                        st_tok = word_stream[sw_idx]
-                        end_t = (
-                            word_stream[sent_end_idx]
-                            if 0 <= sent_end_idx < len(word_stream) and sent_end_idx >= st_tok.idx
-                            else self._find_sentence_end_word(word_stream, st_tok, st_tok.seg_idx + 1)
-                        )
-                        ev_st = round(st_tok.start, 2)
-                        ev_en = round(max(ev_st + 1.0, min(ev_st + 3.6, end_t.end)), 2)
-                        if is_range_busy(ev_st, ev_en) or ev_st - seen_terms.get(lbl, -999.0) < 90.0:
-                            continue
-                        seen_terms[lbl] = ev_st
-                        wiki_q = str(item.get("wiki_query_tr") or lbl).strip()
-                        triggers.append(
-                            PlannedEditorialEvent(
-                                event_id=f"trig_llm_{sw_idx}",
-                                chapter_id=0,
-                                action_type=act,
-                                start_sec=ev_st,
-                                end_sec=ev_en,
-                                text_primary=lbl,
-                                text_secondary="Kavram Vurgusu",
-                                primary_web_query_tr=wiki_q if act in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION") else "",
-                                person_wiki_tr=wiki_q if act in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION") else "",
-                                person_wiki_en=str(item.get("wiki_query_en") or wiki_q).strip()
-                                if act in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION")
-                                else "",
-                                semantic_priority=True,
+                            ev_st = round(st_tok.start, 2)
+                            ev_en = round(max(ev_st + 1.0, min(ev_st + 3.8, end_t.end)), 2)
+                            if is_range_busy(ev_st, ev_en) or ev_st - seen_terms.get(lbl, -999.0) < 60.0:
+                                continue
+                            seen_terms[lbl] = ev_st
+                            wiki_q = str(item.get("wiki_query_tr") or lbl).strip()
+                            triggers.append(
+                                PlannedEditorialEvent(
+                                    event_id=f"trig_llm_{sw_idx}",
+                                    chapter_id=0,
+                                    action_type=act,
+                                    start_sec=ev_st,
+                                    end_sec=ev_en,
+                                    text_primary=lbl,
+                                    text_secondary="Kavram Vurgusu" if act not in ("KEY_POINT", "HIGHLIGHT") else "Önemli Vurgu",
+                                    primary_web_query_tr=wiki_q if act in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION") else "",
+                                    person_wiki_tr=wiki_q if act in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION") else "",
+                                    person_wiki_en=str(item.get("wiki_query_en") or wiki_q).strip()
+                                    if act in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION")
+                                    else "",
+                                    semantic_priority=True,
+                                )
                             )
-                        )
-                        occupied_ranges.append((ev_st, ev_en))
+                            occupied_ranges.append((ev_st, ev_en))
+                    except Exception as item_err:
+                        logger.warning(f"[HolisticAnalyzer] LLM tekil öğe parse uyarısı: {item_err}")
             except Exception as ex:
                 logger.warning(f"[HolisticAnalyzer] LLM pencere çıkarımı atlandı: {ex}")
 
@@ -2128,8 +2182,15 @@ class HolisticAnalyzer:
                     break
                 seg = ch_segments[idx_s]
                 s_text = str(seg.get("text", "")).strip()
-                short_title = extract_turkish_semantic_title(s_text, max_chars=22)
+                short_title = extract_turkish_semantic_title(s_text, max_chars=26)
                 if short_title:
+                    low_st = short_title.lower()
+                    if (
+                        len(short_title) < 4
+                        or low_st in {"zararı yok", "farkı yok", "bir şey", "yani öyle", "evet", "hayır"}
+                        or any(low_st.endswith(suf) for suf in ("mıyoruz", "miyoruz", "yok", "yoktur", "vardır"))
+                    ):
+                        continue
                     seg_toks = [t for t in word_stream if t.seg_idx == idx_s]
                     st_sec = seg_toks[0].start if seg_toks else float(seg.get("start", ch_start))
                     en_sec = seg_toks[-1].end if seg_toks else min(ch_end, st_sec + 2.2)

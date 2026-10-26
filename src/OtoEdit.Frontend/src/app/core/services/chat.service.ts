@@ -9,8 +9,8 @@ import { ChatMessageDto, ChatResponseDto, ChatSendMessageDto } from '../models/c
 export class ChatService {
   private api = inject(ApiService);
 
-  sendMessage(projectId: string, mesaj: string): Observable<ChatResponseDto> {
-    const body: ChatSendMessageDto = { mesaj };
+  sendMessage(projectId: string, mesaj: string, provider?: string): Observable<ChatResponseDto> {
+    const body: ChatSendMessageDto = { mesaj, provider };
     return this.api.post<ChatResponseDto>(`/projects/${projectId}/chat`, body);
   }
 

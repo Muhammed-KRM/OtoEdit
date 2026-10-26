@@ -6,6 +6,7 @@ namespace OtoEdit.Business.DTOs.Chat;
 public record ChatMessageDto
 {
     public string Mesaj { get; init; } = string.Empty;
+    public string? Provider { get; init; }
 }
 
 public record ChatMessageHistoryDto

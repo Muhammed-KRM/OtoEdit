@@ -8,6 +8,7 @@ import { ProjectService } from '../../core/services/project.service';
 import { VideoService } from '../../core/services/video.service';
 import { TemplateService } from '../../core/services/template.service';
 import { SignalrService } from '../../core/services/signalr.service';
+import { SettingsService } from '../../core/services/settings.service';
 import { ProjectDetailDto, ProjectDurumu, VideoFormati } from '../../core/models/project.model';
 import { TemplateDto } from '../../core/models/template.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
@@ -94,6 +95,72 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
                   class="text-[11px] px-2.5 py-1 rounded-lg bg-brand-blue/15 hover:bg-brand-blue/25 text-brand-cyan border border-brand-blue/30 font-semibold transition-all">
                   🎬 Tümünü Seç
                 </button>
+              </div>
+            </div>
+
+            <!-- AI API MOTORU SEÇİCİ (ANA BAŞTAKİ OTO ÖZELLİKLER İÇİN) -->
+            <div class="p-3.5 rounded-xl bg-dark-900/90 border border-slate-700/80 mb-4 space-y-2.5">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm">🤖</span>
+                  <span class="text-xs font-bold text-white uppercase tracking-wider">Otomatik Kurgu & Analiz Yapay Zeka Motoru:</span>
+                </div>
+                <button 
+                  type="button" 
+                  (click)="settingsService.openModal()"
+                  class="text-[11px] text-brand-cyan hover:underline flex items-center gap-1 cursor-pointer font-medium">
+                  <span>⚙️</span> API Ayarlarını Yönet
+                </button>
+              </div>
+              <p class="text-[11px] text-slate-400">
+                Aşağıdaki otomatik kesim, hatalı tekrar temizleme (retake), kelime altyazısı ve otonom yönetmen adımlarında bu motor çalışacaktır:
+              </p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <!-- Antigravity Seçeneği -->
+                <div 
+                  (click)="settingsService.quickSwitchProvider('antigravity')"
+                  [ngClass]="settingsService.activeProvider() === 'antigravity' ? 'border-purple-500 bg-purple-950/30 ring-1 ring-purple-500/60' : 'border-slate-800 bg-dark-800/40 hover:border-slate-700'"
+                  class="p-2.5 rounded-lg border text-left flex items-center justify-between cursor-pointer transition-all">
+                  <div class="flex items-center gap-2.5">
+                    <span class="text-lg">🔮</span>
+                    <div>
+                      <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                        Antigravity AI
+                        <span class="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono">Gemini 3.8 Flash</span>
+                      </div>
+                      <div class="text-[10px] text-slate-400">Yerel Proxy (localhost:8045)</div>
+                    </div>
+                  </div>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                    [ngClass]="settingsService.activeProvider() === 'antigravity' ? 'bg-purple-500 text-white font-bold' : 'text-slate-500 border border-slate-700'">
+                    {{ settingsService.activeProvider() === 'antigravity' ? '● Aktif' : 'Seç' }}
+                  </span>
+                </div>
+
+                <!-- OpenRouter Seçeneği -->
+                <div 
+                  (click)="settingsService.quickSwitchProvider('openrouter')"
+                  [ngClass]="settingsService.activeProvider() === 'openrouter' ? 'border-brand-cyan bg-brand-cyan/10 ring-1 ring-brand-cyan/60' : 'border-slate-800 bg-dark-800/40 hover:border-slate-700'"
+                  class="p-2.5 rounded-lg border text-left flex items-center justify-between cursor-pointer transition-all">
+                  <div class="flex items-center gap-2.5">
+                    <span class="text-lg">🌐</span>
+                    <div>
+                      <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                        OpenRouter API
+                        <span class="text-[9px] px-1.5 py-0.2 rounded bg-brand-cyan/20 text-brand-cyan font-mono truncate max-w-[150px]" [title]="settingsService.activeModel()">
+                          {{ settingsService.activeModelShortName() }}
+                        </span>
+                      </div>
+                      <div class="text-[10px] text-slate-400 font-mono truncate max-w-[220px]" [title]="settingsService.activeModel()">
+                        {{ settingsService.activeModel() }}
+                      </div>
+                    </div>
+                  </div>
+                  <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                    [ngClass]="settingsService.activeProvider() === 'openrouter' ? 'bg-brand-cyan text-slate-950 font-bold' : 'text-slate-500 border border-slate-700'">
+                    {{ settingsService.activeProvider() === 'openrouter' ? '● Aktif' : 'Seç' }}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -423,6 +490,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private videoService = inject(VideoService);
   private templateService = inject(TemplateService);
   private signalr = inject(SignalrService);
+  readonly settingsService = inject(SettingsService);
 
   readonly project = signal<ProjectDetailDto | null>(null);
   readonly templates = signal<TemplateDto[]>([]);

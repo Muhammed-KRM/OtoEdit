@@ -19,6 +19,25 @@ class GeminiClient:
         self.proxy_url = getattr(Config, "ANTIGRAVITY_PROXY_URL", "http://host.docker.internal:8045/v1").rstrip("/")
         self.proxy_key = getattr(Config, "ANTIGRAVITY_PROXY_KEY", "")
         self.proxy_model = getattr(Config, "ANTIGRAVITY_PROXY_MODEL", "gemini-3.8-flash-tiered")
+        self.openrouter_api_key = getattr(Config, "OPENROUTER_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", "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")
+        self.openrouter_base_url = getattr(Config, "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+        self.openrouter_model = getattr(Config, "OPENROUTER_MODEL", "google/gemini-2.0-flash-001")
+        self.active_provider = getattr(Config, "AI_ACTIVE_PROVIDER", "antigravity")
+
+        self._redis = None
+        try:
+            import redis
+            self._redis = redis.Redis(
+                host=getattr(Config, "REDIS_HOST", "redis"),
+                port=int(getattr(Config, "REDIS_PORT", 6379)),
+                password=getattr(Config, "REDIS_PASSWORD", None) or None,
+                db=int(getattr(Config, "REDIS_DB", 0)),
+                decode_responses=True,
+                socket_timeout=1.5
+            )
+        except Exception:
+            pass
+
         self.api_key = Config.GEMINI_API_KEY
         self.api_keys: List[str] = list(getattr(Config, "GEMINI_API_KEYS", []) or ([] if not self.api_key else [self.api_key]))
         self._key_idx = 0
@@ -87,8 +106,73 @@ class GeminiClient:
                 logger.warning(f"Groq LLM ({model_name}) çağrısı başarısız: {ex}")
         return None
 
+    def _get_active_provider_config(self) -> Dict[str, Any]:
+        """Redis'ten veya Config'ten en güncel AI sağlayıcı ayarlarını alır."""
+        provider = self.active_provider
+        openrouter_key = self.openrouter_api_key
+        openrouter_model = self.openrouter_model
+        if self._redis:
+            try:
+                raw = self._redis.get("otoedit:settings:ai_provider")
+                if raw:
+                    data = json.loads(raw)
+                    provider = data.get("ActiveProvider") or data.get("activeProvider") or provider
+                    openrouter_key = data.get("OpenRouterApiKey") or data.get("openRouterApiKey") or openrouter_key
+                    openrouter_model = data.get("OpenRouterModel") or data.get("openRouterModel") or openrouter_model
+            except Exception:
+                pass
+        return {
+            "provider": (provider or "antigravity").lower(),
+            "openrouter_key": openrouter_key,
+            "openrouter_model": openrouter_model
+        }
+
+    def _call_openrouter_llm(self, prompt: str, json_mode: bool = False, model: str = None, api_key: str = None) -> Optional[str]:
+        """OpenRouter API uç noktasını çağırır."""
+        key = api_key or self.openrouter_api_key
+        if not key:
+            return None
+        url = f"{self.openrouter_base_url}/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+            "HTTP-Referer": "https://otoedit.local",
+            "X-Title": "OtoEdit",
+            "User-Agent": "OtoEdit/2.0"
+        }
+        payload: Dict[str, Any] = {
+            "model": model or self.openrouter_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,
+        }
+        if json_mode:
+            payload["response_format"] = {"type": "json_object"}
+        try:
+            import requests
+            resp = requests.post(url, headers=headers, json=payload, timeout=25)
+            if resp.status_code == 200:
+                data = resp.json()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    return content
+            else:
+                logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) HTTP {resp.status_code}: {resp.text[:150]}")
+        except Exception as ex:
+            logger.warning(f"OpenRouter LLM ({model or self.openrouter_model}) çağrısı başarısız: {ex}")
+        return None
+
     def _execute_with_retry(self, prompt: str, max_retries: int = 2) -> Optional[str]:
-        """Önce Antigravity Proxy (aktifse), hata durumunda Groq LLM ve Gemini API havuzu ile çalıştırır."""
+        """Aktif sağlayıcıya (OpenRouter / Antigravity Proxy) göre LLM çağrısını gerçekleştirir."""
+        cfg = self._get_active_provider_config()
+        active_provider = cfg["provider"]
+
+        # 1. Eğer OpenRouter aktifse öncelikle OpenRouter'a gönder
+        if active_provider == "openrouter":
+            res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
+            if res:
+                return res
+
+        # 2. Antigravity Proxy (aktifse veya OpenRouter fallback olarak)
         if getattr(self, "use_proxy", False) and not self._proxy_dead:
             url = f"{self.proxy_url}/chat/completions"
             payload = {
@@ -109,10 +193,16 @@ class GeminiClient:
                 if content:
                     return content
             except Exception as ex:
-                logger.warning(f"Antigravity Proxy erişilemez ({ex}); devre kesici aktif, Groq/Gemini yedeğine geçiliyor.")
+                logger.warning(f"Antigravity Proxy erişilemez ({ex}); devre kesici aktif, yedek sağlayıcıya geçiliyor.")
                 self._proxy_dead = True
 
-        # 2. Hızlı Groq Cloud LLM Yedeği
+        # 2.1. Eğer Antigravity aktifken başarısız olduysa ve OpenRouter tanımlıysa OpenRouter dene
+        if active_provider != "openrouter" and cfg["openrouter_key"]:
+            res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
+            if res:
+                return res
+
+        # 3. Hızlı Groq Cloud LLM Yedeği
         if self.groq_api_key:
             groq_res = self._call_groq_llm(prompt)
             if groq_res:
@@ -143,8 +233,10 @@ class GeminiClient:
         return None
 
     def is_available(self) -> bool:
-        """Gemini API, Groq LLM veya Antigravity Proxy aktif mi kontrol eder."""
-        return bool(self.model or self.groq_api_key or (getattr(self, "use_proxy", False) and not self._proxy_dead))
+        """Gemini API, Groq LLM, OpenRouter veya Antigravity Proxy aktif mi kontrol eder."""
+        cfg = self._get_active_provider_config()
+        has_openrouter = bool(cfg.get("openrouter_key"))
+        return bool(self.model or self.groq_api_key or has_openrouter or (getattr(self, "use_proxy", False) and not self._proxy_dead))
 
     def generate_text(self, prompt: str, max_retries: int = 2) -> Optional[str]:
         """Genel metin/prompt üretimi için aktif LLM sağlayıcısını çağırır."""

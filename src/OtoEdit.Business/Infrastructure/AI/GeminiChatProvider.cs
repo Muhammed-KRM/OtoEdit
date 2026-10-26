@@ -17,6 +17,7 @@ namespace OtoEdit.Business.Infrastructure.AI;
 public class GeminiChatProvider : IChatProvider
 {
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly IAiProviderSettingsService _settingsService;
     private readonly string? _geminiApiKey;
     private readonly string? _groqApiKey;
     private readonly string? _proxyUrl;
@@ -29,9 +30,11 @@ public class GeminiChatProvider : IChatProvider
     public GeminiChatProvider(
         IConfiguration config,
         IHttpClientFactory httpClientFactory,
+        IAiProviderSettingsService settingsService,
         ILogger<GeminiChatProvider> logger)
     {
         _httpClientFactory = httpClientFactory;
+        _settingsService = settingsService;
         _geminiApiKey = config["Gemini:ApiKey"] ?? config["GEMINI_API_KEY"];
         _groqApiKey = config["Groq:ApiKey"] ?? config["GROQ_API_KEY"];
         
@@ -55,6 +58,7 @@ public class GeminiChatProvider : IChatProvider
         string currentEdlJson,
         string? transcriptText,
         List<ChatHistoryItem> history,
+        string? overrideProvider = null,
         CancellationToken cancellationToken = default)
     {
         var systemPrompt = """
@@ -133,25 +137,88 @@ public class GeminiChatProvider : IChatProvider
 Kullanıcı: {userMessage}";
 
         string? rawResponse = null;
+        var aiSettings = await _settingsService.GetSettingsAsync(cancellationToken);
+        var activeProvider = !string.IsNullOrWhiteSpace(overrideProvider) 
+            ? overrideProvider.ToLowerInvariant() 
+            : (aiSettings.ActiveProvider?.ToLowerInvariant() ?? "antigravity");
 
-        // 1. Antigravity Proxy (OpenAI uyumlu yerel proxy)
-        if (!string.IsNullOrWhiteSpace(_proxyUrl) && !string.IsNullOrWhiteSpace(_proxyKey))
+        // 1. Eğer OpenRouter aktifse öncelikli olarak OpenRouter çağrılır
+        if (activeProvider == "openrouter" && !string.IsNullOrWhiteSpace(aiSettings.OpenRouterApiKey))
         {
             try
             {
-                _logger.LogInformation("Antigravity Proxy ({Url}) deneniyor...", _proxyUrl);
+                _logger.LogInformation("OpenRouter API ({Model}) deneniyor...", aiSettings.OpenRouterModel);
                 rawResponse = await CallOpenAiCompatibleAsync(
-                    _proxyUrl,
-                    _proxyKey,
-                    _proxyModel,
+                    aiSettings.OpenRouterBaseUrl,
+                    aiSettings.OpenRouterApiKey,
+                    aiSettings.OpenRouterModel,
                     systemPrompt,
                     userPrompt,
-                    timeoutSeconds: 8,
-                    cancellationToken);
+                    timeoutSeconds: 25,
+                    cancellationToken,
+                    extraHeaders: new Dictionary<string, string>
+                    {
+                        ["HTTP-Referer"] = "https://otoedit.local",
+                        ["X-Title"] = "OtoEdit"
+                    });
             }
             catch (Exception ex)
             {
-                _logger.LogWarning("Antigravity Proxy çağrısı başarısız oldu: {Message}", ex.Message);
+                _logger.LogWarning("OpenRouter API çağrısı başarısız oldu: {Message}", ex.Message);
+            }
+        }
+
+        // 2. Antigravity Proxy (OpenAI uyumlu yerel proxy)
+        if (string.IsNullOrWhiteSpace(rawResponse))
+        {
+            var proxyUrl = !string.IsNullOrWhiteSpace(aiSettings.AntigravityProxyUrl) ? aiSettings.AntigravityProxyUrl : _proxyUrl;
+            var proxyKey = !string.IsNullOrWhiteSpace(aiSettings.AntigravityProxyKey) ? aiSettings.AntigravityProxyKey : _proxyKey;
+            var proxyModel = !string.IsNullOrWhiteSpace(aiSettings.AntigravityProxyModel) ? aiSettings.AntigravityProxyModel : _proxyModel;
+
+            if (!string.IsNullOrWhiteSpace(proxyUrl) && !string.IsNullOrWhiteSpace(proxyKey))
+            {
+                try
+                {
+                    _logger.LogInformation("Antigravity Proxy ({Url}) deneniyor...", proxyUrl);
+                    rawResponse = await CallOpenAiCompatibleAsync(
+                        proxyUrl,
+                        proxyKey,
+                        proxyModel,
+                        systemPrompt,
+                        userPrompt,
+                        timeoutSeconds: 8,
+                        cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning("Antigravity Proxy çağrısı başarısız oldu: {Message}", ex.Message);
+                }
+            }
+        }
+
+        // 2.1. Eğer Antigravity seçiliyken başarısız olduysa ve OpenRouter tanımlıysa OpenRouter'ı yedek olarak dene
+        if (string.IsNullOrWhiteSpace(rawResponse) && activeProvider != "openrouter" && !string.IsNullOrWhiteSpace(aiSettings.OpenRouterApiKey))
+        {
+            try
+            {
+                _logger.LogInformation("Yedek olarak OpenRouter API ({Model}) deneniyor...", aiSettings.OpenRouterModel);
+                rawResponse = await CallOpenAiCompatibleAsync(
+                    aiSettings.OpenRouterBaseUrl,
+                    aiSettings.OpenRouterApiKey,
+                    aiSettings.OpenRouterModel,
+                    systemPrompt,
+                    userPrompt,
+                    timeoutSeconds: 20,
+                    cancellationToken,
+                    extraHeaders: new Dictionary<string, string>
+                    {
+                        ["HTTP-Referer"] = "https://otoedit.local",
+                        ["X-Title"] = "OtoEdit"
+                    });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning("Yedek OpenRouter API çağrısı başarısız oldu: {Message}", ex.Message);
             }
         }
 
@@ -255,7 +322,8 @@ Kullanıcı: {userMessage}";
         string systemPrompt,
         string userPrompt,
         int timeoutSeconds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IDictionary<string, string>? extraHeaders = null)
     {
         var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
@@ -263,7 +331,15 @@ Kullanıcı: {userMessage}";
         var requestUrl = $"{baseUrl.TrimEnd('/')}/chat/completions";
         using var request = new HttpRequestMessage(HttpMethod.Post, requestUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
-        request.Headers.Add("User-Agent", "OtoEdit/1.0");
+        request.Headers.Add("User-Agent", "OtoEdit/2.0");
+
+        if (extraHeaders != null)
+        {
+            foreach (var kvp in extraHeaders)
+            {
+                request.Headers.TryAddWithoutValidation(kvp.Key, kvp.Value);
+            }
+        }
 
         var payload = new
         {

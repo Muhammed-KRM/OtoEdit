@@ -2,11 +2,13 @@ import { Component, Input, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { SignalrService } from '../../../core/services/signalr.service';
+import { SettingsService } from '../../../core/services/settings.service';
+import { SettingsModalComponent } from '../settings-modal/settings-modal.component';
 
 @Component({
   selector: 'app-navbar',
   standalone: true,
-  imports: [CommonModule, RouterLink],
+  imports: [CommonModule, RouterLink, SettingsModalComponent],
   template: `
     <header class="sticky top-0 z-50 glass-panel border-b border-slate-800/80 px-6 py-3.5">
       <div class="max-w-7xl mx-auto flex items-center justify-between">
@@ -30,7 +32,26 @@ import { SignalrService } from '../../../core/services/signalr.service';
         </div>
 
         <!-- Connection Status & Actions -->
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3">
+          <!-- AYARLAR & API MENÜSÜ BUTONU (GLOBAL ANA MENÜ & HER YERDE) -->
+          <button 
+            type="button" 
+            (click)="settingsService.openModal()" 
+            class="px-2.5 py-1.5 rounded-lg bg-dark-800 hover:bg-slate-700 border text-xs flex items-center gap-1.5 transition-all cursor-pointer shadow-sm group"
+            [ngClass]="settingsService.activeProvider() === 'openrouter' ? 'border-brand-cyan/50 text-brand-cyan bg-brand-cyan/10 hover:border-brand-cyan' : 'border-purple-500/40 text-purple-300 bg-purple-500/10 hover:border-purple-400'"
+            title="Yapay Zeka API Ayarları (Antigravity / OpenRouter)">
+            <span class="text-xs">⚙️</span>
+            <span class="text-xs font-semibold">Ayarlar</span>
+            <span class="text-[10px] px-1.5 py-0.5 rounded font-mono font-bold uppercase tracking-wider flex items-center gap-1"
+              [ngClass]="settingsService.activeProvider() === 'openrouter' ? 'bg-brand-cyan/20 text-brand-cyan border border-brand-cyan/30' : 'bg-purple-500/20 text-purple-300 border border-purple-500/30'">
+              <span class="w-1.5 h-1.5 rounded-full" [ngClass]="settingsService.activeProvider() === 'openrouter' ? 'bg-brand-cyan animate-pulse' : 'bg-purple-400'"></span>
+              API: {{ settingsService.activeProvider() === 'openrouter' ? 'OpenRouter' : 'Antigravity' }}
+            </span>
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-dark-900/80 border border-slate-700/60 text-slate-300 font-mono hidden sm:inline-block truncate max-w-[150px]" [title]="settingsService.activeModel()">
+              {{ settingsService.activeModelShortName() }}
+            </span>
+          </button>
+
           <!-- SignalR Status Indicator -->
           <div class="flex items-center gap-2 text-xs" [title]="signalr.isConnected() ? 'SignalR Bağlı' : 'Bağlantı Kuruluyor...'">
             <span class="w-2 h-2 rounded-full" [ngClass]="signalr.isConnected() ? 'bg-emerald-400 shadow-glow-sm' : 'bg-amber-400 animate-ping'"></span>
@@ -43,9 +64,13 @@ import { SignalrService } from '../../../core/services/signalr.service';
         </div>
       </div>
     </header>
+
+    <!-- Global Ayarlar Modalı -->
+    <app-settings-modal></app-settings-modal>
   `
 })
 export class NavbarComponent {
   @Input() projectTitle?: string;
   readonly signalr = inject(SignalrService);
+  readonly settingsService = inject(SettingsService);
 }

@@ -47,7 +47,8 @@ public static class DependencyInjection
         services.AddSingleton<IConnectionMultiplexer>(ConnectionMultiplexer.Connect(redisOptions));
         services.AddSingleton<ICacheService, RedisCacheService>();
 
-        // 4. AI Chat Provider (Gemini)
+        // 4. AI Chat Provider & Settings
+        services.AddSingleton<IAiProviderSettingsService, AiProviderSettingsService>();
         services.AddScoped<IChatProvider, GeminiChatProvider>();
 
         // 5. Business Services

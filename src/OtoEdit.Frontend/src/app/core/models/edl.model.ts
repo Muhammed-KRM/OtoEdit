@@ -58,6 +58,7 @@ export interface EdlSfxClip {
   sourceUrl?: string;
   synthPreset?: string;
   start: number;
+  seqStart?: number;
   duration: number;
   volume?: number;
   fadeIn?: number;

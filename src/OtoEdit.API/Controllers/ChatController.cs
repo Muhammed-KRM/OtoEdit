@@ -29,7 +29,7 @@ public class ChatController : ControllerBase
             return BadRequest("Mesaj boş olamaz.");
         }
 
-        var response = await _chatService.SendMessageAsync(projectId, dto.Mesaj, cancellationToken);
+        var response = await _chatService.SendMessageAsync(projectId, dto.Mesaj, dto.Provider, cancellationToken);
         return Ok(response);
     }
 
