@@ -40,7 +40,7 @@ class LlmDirector:
         self.enable_web_crawl = enable_web_crawl
         self.analyzer = HolisticAnalyzer(gemini_client=self.gemini, enable_llm_planning=True)
         self.crawler = WebImageCrawler(work_dir=self.work_dir, pexels_client=self.pexels)
-        self.verifier = VLMAssetVerifier(gemini_client=self.gemini)
+        self.verifier = VLMAssetVerifier(gemini_client=self.gemini, enable_vlm=True)
         self.validator = MasterPlanValidator()
 
     def compose_intelligent_plan(
@@ -95,44 +95,19 @@ class LlmDirector:
 
         # AŞAMA 3: Kelime-Senkronlu Kurgu Olaylarını Somutlaştır
         # NOT: Sıradan nefes/retake kesimlerine (normalized_cuts[:8]) körlemesine geçiş efekti
-        # eklenmez; geçiş efektleri YALNIZCA anlamlı konu/bölüm (chapter) sınırlarında üretilir.
-        allowed_transitions = getattr(theme_profile, "allowed_transitions", None) or [
-            "zoomin", "wipeleft", "smoothleft", "dissolve", "slideright", "circleopen"
-        ]
-
+        # eklenmez; geçiş efektleri YALNIZCA anlamlı konu/bölüm (chapter) sınırlarında üretilir
+        # ve yalnızca hızlı sola kayma (slideleft) + temiz swish-whoosh sesi kullanılır.
         for ch_idx, ch in enumerate(chapter_plans):
             if ch_idx > 0 and ch.start_sec > 3.5:
                 tr_ts = round(ch.start_sec, 2)
                 sfx_ts = tr_ts
 
-                # Dinamik ve çeşitli geçiş seçimi (tek tip smoothleft yerine zengin geçiş ritmi)
-                tr_type = allowed_transitions[(ch_idx - 1) % len(allowed_transitions)]
-
-                # Geçiş türüne göre süre ve en uygun senkron SFX
-                if tr_type in ("zoomin", "zoomout"):
-                    tr_dur = 0.38
-                    sfx_preset = "whoosh-fast"
-                    sfx_name = "Fast Zoom Whoosh"
-                    sfx_dur = 0.45
-                    sfx_vol = 0.20
-                elif tr_type in ("dissolve", "fade", "fadeblack"):
-                    tr_dur = 0.50
-                    sfx_preset = "cinematic-swell"
-                    sfx_name = "Cinematic Ambient Swell"
-                    sfx_dur = 0.90
-                    sfx_vol = 0.18
-                elif tr_type in ("circleopen", "circleclose"):
-                    tr_dur = 0.42
-                    sfx_preset = "pop-bubble"
-                    sfx_name = "Circle Reveal Pop"
-                    sfx_dur = 0.35
-                    sfx_vol = 0.18
-                else:
-                    tr_dur = 0.45
-                    sfx_preset = "capcut-swish-large"
-                    sfx_name = "Swish Whoosh (Large 794558)"
-                    sfx_dur = 0.81
-                    sfx_vol = 0.22
+                tr_type = "slideleft"
+                tr_dur = 0.40
+                sfx_preset = "capcut-swish-large"
+                sfx_name = "Swish Whoosh (Large 794558)"
+                sfx_dur = 0.81
+                sfx_vol = 0.22
 
                 generated_transitions.append({
                     "id": f"ad_tr_ch_{ch_idx}",
@@ -202,12 +177,13 @@ class LlmDirector:
                             wiki_title_tr=wiki_tr,
                             wiki_title_en=wiki_en,
                             max_candidates=3,
+                            is_work=(action_type == "WORK_INTRODUCTION"),
                         )
-                        if not cand_portraits and action_type == "CONCEPT_IMAGE_CARD":
+                        if not cand_portraits:
                             cand_portraits = self.crawler.gather_verified_candidates(
                                 query_tr=wiki_tr,
                                 query_en=wiki_en,
-                                fallback_en=evt.fallback_minimal_query_en,
+                                fallback_en=evt.fallback_minimal_query_en or wiki_en or wiki_tr,
                                 max_candidates=3,
                             )
                         portrait_asset = self.verifier.select_best_candidate(
@@ -263,6 +239,7 @@ class LlmDirector:
                         "track_id": 2,
                         "semanticPriority": True,
                         "pairedGroupId": pair_group_id,
+                        "groupId": pair_group_id,
                     })
 
                     # Sağ üste (X=82%, Y=28%) Doğrulanmış Wikipedia Portresi / Eser Görseli
@@ -270,6 +247,9 @@ class LlmDirector:
                         chosen_url = str(portrait_asset["url"])
                         self.crawler.used_links.add(chosen_url)
                         styling = portrait_asset.get("styling", {})
+                        img_x, img_y = spatial_solver.register_external_box(
+                            evt.start_sec, evt.end_sec, 82.0, 28.0, 26.0, 28.0
+                        )
                         generated_overlays.append({
                             "id": f"ad_img_{evt.event_id}",
                             "type": "image",
@@ -281,8 +261,8 @@ class LlmDirector:
                             "end": evt.end_sec,
                             "duration": dur,
                             "position": ["right", "top"],
-                            "positionX": 82.0,
-                            "positionY": 28.0,
+                            "positionX": img_x,
+                            "positionY": img_y,
                             "scale": 0.90,
                             "opacity": 98.0,
                             "animation": sub_theme.entry_animation,
@@ -300,6 +280,7 @@ class LlmDirector:
                             "track_id": 3,
                             "semanticPriority": True,
                             "pairedGroupId": pair_group_id,
+                            "groupId": pair_group_id,
                         })
 
                     generated_sfx.append({
@@ -387,6 +368,7 @@ class LlmDirector:
                         "track_id": stack_track_id,
                         "semanticPriority": True,
                         "pairedGroupId": evt.group_id or f"stack_{evt.event_id}",
+                        "groupId": evt.group_id or f"stack_{evt.event_id}",
                         "stackSlot": slot,
                     })
 

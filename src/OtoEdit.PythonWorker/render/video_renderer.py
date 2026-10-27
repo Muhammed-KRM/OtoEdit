@@ -321,16 +321,19 @@ class VideoRenderer:
                     else tr.get("timestamp")
                 )
             )
+            has_raw_source_ts = (tr.get("boundaryTime") is not None) or (tr.get("boundarySourceTime") is not None)
             if raw_ts is not None:
                 ts = float(raw_ts)
                 best_idx = None
                 best_dist = 1.5  # Sınır eşleşme toleransı (saniye)
                 for b_idx in range(len(segment_files) - 1):
-                    candidates = [boundary_timeline_times[b_idx]]
+                    candidates = []
                     if b_idx < len(keep_segments):
                         candidates.append(keep_segments[b_idx][1])
                     if b_idx + 1 < len(keep_segments):
                         candidates.append(keep_segments[b_idx + 1][0])
+                    if not has_raw_source_ts or not candidates:
+                        candidates.append(boundary_timeline_times[b_idx])
                     dist = min(abs(ts - c) for c in candidates)
                     if dist <= best_dist:
                         best_dist = dist
@@ -366,6 +369,9 @@ class VideoRenderer:
             next_file = segment_files[b_idx + 1]
             cur_dur = orig_durations[b_idx] - head_trims.get(b_idx, 0.0)
             next_dur = orig_durations[b_idx + 1]
+            min_seg_dur = min(cur_dur, next_dur)
+            if min_seg_dur < 0.55:
+                continue
 
             raw_type = str(tr.get("type") or tr.get("transitionType") or "fade").lower().strip()
             xfade_name = XFADE_TRANSITION_MAP.get(raw_type, "fade")
@@ -373,10 +379,10 @@ class VideoRenderer:
             trans_dur = max(0.1, min(req_dur, cur_dur * 0.35, next_dur * 0.35))
 
             # Hızlı Mikro-Köprü (Micro-Bridge) Splicing:
-            # Tüm 10-20 dakikalık videoyu tekrar tekrar encode etmek yerine yalnızca geçiş sınırındaki
-            # 1.0 saniyelik kuyruk ve baş pencerelerini xfade ile birleştir (~0.25s/geçiş).
-            win_sec = min(1.0, max(trans_dur + 0.25, 0.75))
-            if cur_dur < (win_sec * 2.1) or next_dur < (win_sec * 2.1):
+            # Adaptif win_sec (PROB-6.5): Kısa kliplerde (0.55s - 1.5s) pencereyi klip süresine göre
+            # ölçekleyerek geçişin sessizce düşürülmesini engelle.
+            win_sec = min(1.0, max(trans_dur + 0.12, min(0.75, min_seg_dur * 0.44)))
+            if cur_dur < (win_sec * 1.15) or next_dur < (win_sec * 1.15):
                 continue
 
             tail_start = max(0.0, orig_durations[b_idx] - win_sec)

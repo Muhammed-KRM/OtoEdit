@@ -5,7 +5,9 @@ try:
     pyd = importlib.import_module("pydantic")
     BaseModel = pyd.BaseModel
     Field = pyd.Field
+    ConfigDict = getattr(pyd, "ConfigDict", None)
 except Exception:
+    ConfigDict = None
     class BaseModel:
         def __init__(self, **kwargs):
             for cls_base in reversed(self.__class__.__mro__):
@@ -126,13 +128,19 @@ class OverlayItem(BaseModel):
     flipV: Optional[bool] = False
     dropShadow: Optional[bool] = False
     # Otonom Yönetmen (LlmDirector) tipografi & kurgu meta alanları — Pydantic'in bunları
-    # sessizce atmaması için açıkça tanımlanır (yan sütun genişliği, satır aralığı, mini-tema rolü)
+    # sessizce atmaması için açıkça tanımlanır (yan sütun genişliği, satır aralığı, mini-tema rolü, grup ve yığın yuvası - PROB-2.6)
     maxWidthCqi: Optional[float] = None
     lineHeight: Optional[float] = None
     stackCount: Optional[int] = None
+    stackSlot: Optional[int] = None
+    pairedGroupId: Optional[str] = None
+    groupId: Optional[str] = None
     subThemeRole: Optional[str] = None
     actionType: Optional[str] = None
     semanticPriority: Optional[bool] = None
+
+    if ConfigDict is not None:
+        model_config = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class SuggestionItem(BaseModel):

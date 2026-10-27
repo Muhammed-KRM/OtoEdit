@@ -69,11 +69,61 @@ class MasterPlanValidator:
 
         edited_duration = max(5.0, raw_to_seq(safe_duration))
 
+        def clamp_or_drop_overlay_against_cuts(
+            r_start: float, r_end: float, is_group_member: bool = False, is_sem: bool = False
+        ) -> Optional[Tuple[float, float]]:
+            """
+            Kesim (Retake / Silence) sınırlarına göre katman zamanlamasını onarır (PROB-3.4):
+            1. Katman kesim içinde başlıyorsa kesim sonuna (+0.04s) öteler.
+            2. Katman bir kesimden hemen önce (< 0.35s "kırmızı bölge") başlıyorsa, yarım saniyelik
+               milisaniye parlamasını (flash) önlemek için başlangıcı kesim sonrasına öteler.
+            3. Tekil katman kesim sınırına taşıyorsa ve kesim öncesi >= 1.35s görünür süresi varsa
+               bitişi kesim başına (-0.04s) kırpar.
+            4. Kurgulanmış görünür sekans süresi (`seq_dur`) tekil katmanda >= 1.35s (kelime-kilitli
+               semantik terimlerde >= 1.15s), grup öğesinde >= 0.65s olacak şekilde garanti altına alınır.
+            """
+            st = max(0.2, min(safe_duration - 0.6, r_start))
+            en = min(safe_duration - 0.1, max(st + 0.45, r_end))
+
+            if merged_cuts and is_inside_cut(st, en):
+                return None
+
+            for cs, ce in merged_cuts:
+                # Başlangıç tam kesim içindeyse kesim çıkışına taşı
+                if cs - 0.02 <= st <= ce + 0.02:
+                    st = round(ce + 0.04, 2)
+                # Kesimden hemen önce (< 0.35s) başlayan katmanı kesim sonrasına taşı (0.2s flash önleme!)
+                elif 0.0 < (cs - st) < 0.35:
+                    shift_delta = (ce + 0.04) - st
+                    st = round(ce + 0.04, 2)
+                    if not is_group_member:
+                        en = round(min(safe_duration - 0.1, en + shift_delta), 2)
+
+            if not is_group_member:
+                for cs, ce in merged_cuts:
+                    if st < cs < en:
+                        if (cs - st) >= 1.35:
+                            en = round(cs - 0.04, 2)
+                            break
+
+            min_seq_dur = 0.65 if is_group_member else (1.15 if is_sem else 1.35)
+            seq_st = raw_to_seq(st)
+            seq_en = raw_to_seq(en)
+            if (seq_en - seq_st) < min_seq_dur:
+                needed = 1.35 - (seq_en - seq_st)
+                en = round(min(safe_duration - 0.1, en + max(needed + 0.15, 0.85)), 2)
+                seq_en = raw_to_seq(en)
+                if (seq_en - seq_st) < 0.55:
+                    return None
+
+            return round(st, 2), round(en, 2)
+
         # Kronolojik sırala (hem 'start' hem 'timestamp' destekli)
         sorted_ovs = sorted(
             overlays,
             key=lambda o: (
                 float(o.get("start") if o.get("start") is not None else o.get("timestamp", 0.0)),
+                int(o.get("stackSlot")) if o.get("stackSlot") is not None else -1,
                 0 if str(o.get("type", "text")) == "text" else 1,
             ),
         )
@@ -84,6 +134,8 @@ class MasterPlanValidator:
             max(2.5, (safe_duration - 2.0) / 4.5),
         )
 
+        seen_accepted_groups: Set[str] = set()
+
         for idx, raw_ov in enumerate(sorted_ovs):
             ov = dict(raw_ov)
             ov_type = str(ov.get("type", "text"))
@@ -91,29 +143,28 @@ class MasterPlanValidator:
             raw_dur = float(ov.get("duration", 3.5))
             raw_end = float(ov.get("end") if ov.get("end") is not None else (raw_start + raw_dur))
 
-            is_sem = bool(ov.get("semanticPriority")) or (ov.get("stackSlot") is not None)
-            min_allowed_dur = 0.45 if is_sem else 1.2
-            start = max(0.2, min(safe_duration - 0.6, raw_start))
-            end = min(safe_duration - 0.1, raw_end)
-            if end - start < min_allowed_dur:
-                end = min(safe_duration - 0.1, start + (1.4 if is_sem else 3.0))
-            dur = round(max(min_allowed_dur, end - start), 2)
+            paired_group = str(ov.get("pairedGroupId") or ov.get("groupId") or "")
+            is_group_member = bool(ov.get("stackSlot") is not None or paired_group)
+            is_sem = bool(ov.get("semanticPriority")) or is_group_member
 
-            # Kesim (Retake / Silence) aralığı içine düşen katmanları ele ki kesim sınırında üst üste yığılmasınlar
-            if merged_cuts and is_inside_cut(start, end):
+            clamped = clamp_or_drop_overlay_against_cuts(raw_start, raw_end, is_group_member=is_group_member, is_sem=is_sem)
+            if clamped is None:
                 continue
+            start, end = clamped
+            min_allowed_dur = 0.65 if is_group_member else (1.15 if is_sem else 1.35)
+            if end - start < min_allowed_dur:
+                end = min(safe_duration - 0.1, start + min_allowed_dur)
+            dur = round(max(min_allowed_dur, end - start), 2)
 
             # Kural 1: Tema Saflığı (Akademik/Kurumsal/Belgesel temalarda GIF/Sticker YASAK)
             if ov_type in ("sticker", "gif") and not theme_profile.allow_gifs:
                 logger.info(f"[Validator] Tema '{theme_profile.id}' gereği sticker elendi: t={start}s")
                 continue
 
-            # Kural 2: Minimum Zaman Boşluğu (hem ham zaman hem kurgulanmış sekans zamanı üzerinde)
-            # - Aynı pairedGroupId'ye sahip Kümülatif Liste (Fizik, Kimya, Biyoloji...), İkili Kavram (Tabiat, Fıtrat)
-            #   ve Kişi+Portre çiftleri birlikte ekranda yer alır.
-            # - Kelime-senkronlu (semanticPriority=True) olaylar önceki olay biter bitmez başlayabilir.
-            paired_group = str(ov.get("pairedGroupId") or "")
-            is_same_pair = bool(paired_group and paired_group == last_paired_group)
+            # Kural 2: Minimum Zaman Boşluğu & Atomik Grup Bütünlüğü (PROB-2.5)
+            # - Daha önce kabul edilmiş bir grubun (`seen_accepted_groups`) tüm devam öğeleri (stackSlot 1, 2, 3...)
+            #   veya Kişi+Portre eşleşmeleri (`pairedGroupId`) ASLA yarıda kesilmez!
+            is_same_pair = bool(paired_group and (paired_group == last_paired_group or paired_group in seen_accepted_groups))
             req_gap = 0.35 if is_sem else effective_min_gap
             seq_start = raw_to_seq(start)
 
@@ -187,15 +238,59 @@ class MasterPlanValidator:
                 ov["trackId"] = int(ov.get("trackId") or ov.get("track_id") or 3)
                 ov["track_id"] = ov["trackId"]
 
+            if paired_group:
+                ov["pairedGroupId"] = paired_group
+                ov["groupId"] = paired_group
+                seen_accepted_groups.add(paired_group)
+
             repaired_overlays.append(ov)
             last_overlay_start = start
             last_overlay_seq_start = seq_start
             last_paired_group = paired_group
 
-        # Kural 5: Geçiş (Transitions) Denetimi ve Kesim Sınırına Mıknatıslama (Clip-Boundary Snapping)
-        # Editör ('clipTransitionBoundaries' ve 60fps geçiş motoru) her geçişin 'boundaryTime' değerini
-        # ardışık iki tutulan klip arasındaki kesim bitişiyle (next_clip.start) < 0.45s toleransla eşleştirir.
-        # Bu nedenle geçiş zamanlarını doğrudan en yakın tutulan klip başlangıcına (next_clip.start) mıknatıslıyoruz!
+        # Kural 4.5: Kümülatif Liste / İkili Grup Sıkıştırması (Contiguous Slot Compaction) ve
+        # Grup Ortak Bitiş Senkronizasyonu (PROB-2.5, PROB-3.3)
+        grouped_stack_map: Dict[str, List[Dict[str, Any]]] = {}
+        for ov_item in repaired_overlays:
+            p_grp = str(ov_item.get("pairedGroupId") or ov_item.get("groupId") or "")
+            if p_grp and ov_item.get("stackSlot") is not None:
+                grouped_stack_map.setdefault(p_grp, []).append(ov_item)
+
+        for p_grp, grp_items in grouped_stack_map.items():
+            grp_items.sort(key=lambda x: (float(x.get("start", 0.0)), int(x.get("stackSlot", 0))))
+            st_cnt = len(grp_items)
+            # Grubun ortak bitişini, gruptan sonra gelen ilk yabancı katmanın başlangıcına (-0.08s) göre senkronla
+            grp_max_start = max(float(x.get("start", 0.0)) for x in grp_items)
+            grp_shared_end = max(float(x.get("end", grp_max_start + 1.2)) for x in grp_items)
+            for other_ov in repaired_overlays:
+                other_grp = str(other_ov.get("pairedGroupId") or other_ov.get("groupId") or "")
+                other_st = float(other_ov.get("start", 0.0))
+                if other_grp != p_grp and other_st > grp_max_start + 0.45:
+                    if grp_shared_end > other_st - 0.08:
+                        grp_shared_end = round(max(grp_max_start + 0.65, other_st - 0.08), 2)
+                    break
+
+            for new_slot, member_ov in enumerate(grp_items):
+                member_ov["stackSlot"] = new_slot
+                member_ov["stackCount"] = st_cnt
+                member_ov["trackId"] = 1 + (new_slot % 5)
+                member_ov["track_id"] = member_ov["trackId"]
+                row = new_slot if new_slot < 4 else (new_slot - 4) % 4
+                side_prefix = "LEFT_STACK" if new_slot < 4 else "RIGHT_STACK"
+                if st_cnt == 2:
+                    new_y = round(20.0 + row * 13.0, 1)
+                else:
+                    new_y = round(16.0 + row * 11.0, 1)
+                member_ov["positionY"] = new_y
+                member_ov["anchorSlot"] = f"{side_prefix}_{row + 1}"
+                m_st = float(member_ov.get("start", 0.0))
+                m_en = round(max(m_st + 0.65, grp_shared_end), 2)
+                member_ov["end"] = m_en
+                member_ov["duration"] = round(m_en - m_st, 2)
+
+        # Kural 5: Geçiş (Transitions) Denetimi ve Kesim Sınırına Mikro-Mıknatıslama (PROB-6.4)
+        # Eski 3.5s jump-cut mıknatısı cümle sonundaki geçişleri cümle ortası nefes kesimlerine çekiyordu;
+        # artık yalnızca 0.25s mikro-toleransla kesim sınırına hizalanır ve aktif liste gruplarının ortasına düşmez!
         keep_clips: List[Tuple[float, float]] = []
         cursor_t = 0.0
         for cs, ce in merged_cuts:
@@ -210,28 +305,33 @@ class MasterPlanValidator:
             for i in range(1, len(keep_clips))
         ]
 
+        active_group_spans: List[Tuple[float, float]] = [
+            (
+                min(float(x.get("start", 0.0)) for x in g_list),
+                max(float(x.get("end", 0.0)) for x in g_list),
+            )
+            for g_list in grouped_stack_map.values()
+            if g_list
+        ]
+
         def snap_to_clip_boundary(raw_t: float) -> float:
+            target_t = raw_t
+            # Aktif bir sıralama/ikili kavram grubunun tam ortasına geçiş düşmesini engelle
+            for g_st, g_en in active_group_spans:
+                if (g_st - 0.30) <= target_t <= (g_en + 0.30):
+                    target_t = round(min(safe_duration - 1.5, g_en + 0.25), 2)
             if not clip_boundaries:
-                return raw_t
-            # 1. Geçiş zamanı doğrudan bir kesim aralığının [prev_end, next_start] içindeyse veya hemen kenarındaysa,
-            # kurgulanmış videoda o kesim tamamen atlandığı için geçiş tam next_start noktasındadır!
+                return target_t
+            # 1. Geçiş zamanı doğrudan bir kesim aralığının [prev_end, next_start] içindeyse veya 0.25s mikro komşuluğundaysa next_start'a hizala
             for prev_end, next_start in clip_boundaries:
-                if (prev_end - 0.45) <= raw_t <= (next_start + 0.45):
+                if (prev_end - 0.25) <= target_t <= (next_start + 0.25):
                     return next_start
-            # 2. Kesim aralığının hemen dışında (<= 3.5s) ise en yakın kesim sınırının next_start noktasına mıknatısla
-            best_next_start: Optional[float] = None
-            best_dist = 9999.0
-            for prev_end, next_start in clip_boundaries:
-                dist = min(abs(raw_t - next_start), abs(raw_t - prev_end))
-                if dist <= 3.5 and dist < best_dist:
-                    best_dist = dist
-                    best_next_start = next_start
-            return best_next_start if best_next_start is not None else raw_t
+            return target_t
 
         # Uzun videolarda ilk 20 saniyede gereksiz jump-cut geçişi çıkmasını önle,
         # ancak 20s sonrasındaki tüm gerçek semantik konu/bölüm geçişlerini koru!
         min_tr_edge_seq = 20.0 if edited_duration >= 90.0 else min(5.0, max(1.5, edited_duration * 0.08))
-        min_tr_gap_seq = 11.0 if edited_duration >= 150.0 else min(8.0, max(4.0, edited_duration * 0.15))
+        min_tr_gap_seq = 18.0 if edited_duration >= 150.0 else min(8.0, max(4.0, edited_duration * 0.15))
         repaired_transitions: List[Dict[str, Any]] = []
         last_tr_seq_ts = -999.0
         for idx, tr in enumerate(sorted(transitions, key=lambda t: float(t.get("timestamp", 0.0)))):
@@ -246,9 +346,9 @@ class MasterPlanValidator:
                 continue
             if (seq_ts - last_tr_seq_ts < min_tr_gap_seq) and repaired_transitions:
                 continue
-            tr_type = str(tr.get("type") or "smoothleft")
-            if tr_type not in theme_profile.allowed_transitions:
-                tr_type = theme_profile.allowed_transitions[0]
+            tr_type = str(tr.get("type") or "slideleft")
+            if tr_type not in ("slideleft", "smoothleft"):
+                tr_type = "slideleft"
             snapped_val = round(ts, 2)
             repaired_transitions.append({
                 "id": tr.get("id") or f"ad_transition_{idx + 1}",
@@ -257,19 +357,32 @@ class MasterPlanValidator:
                 "boundarySourceTime": snapped_val,
                 "type": tr_type,
                 "transitionType": tr_type,
-                "duration": round(float(tr.get("duration", theme_profile.transition_duration_sec)), 2),
+                "duration": round(float(tr.get("duration", 0.40)), 2),
             })
             last_tr_seq_ts = seq_ts
 
-        # Kural 6: 1-e-1 Görsel-İşitsel Senkrezis (Audio-Visual Synchresis)
-        # "Ya ikisinde de gelmeli ya hiç gelmemeli ve ikisinde de aynı ses gelmeli":
-        # - 24s kör SFX makası kaldırıldı!
-        # - Onaylanan HER metin katmanına kendi Mini-Tema SFX'i (ding-bright, keyboard-type, pop-bubble)
-        #   ve onaylanan HER sahne geçişine (t - 0.15s) 'capcut-swish-large' (Swish Whoosh Large 794558) SFX'i %100 deterministik bağlanır.
+        # Kural 5.5: Sahne Geçişi ve İlk Yazı Katmanı Arasında +0.45s Lead-In Stagger (PROB-6.4)
+        # Sahne geçişi (transition) ile aynı saniyede başlayan yazıların geçiş animasyonuyla çarpışmasını önler
+        for tr in repaired_transitions:
+            tr_ts = float(tr.get("timestamp") or 0.0)
+            for ov_item in repaired_overlays:
+                ov_st = float(ov_item.get("start") or 0.0)
+                if (tr_ts - 0.10) <= ov_st <= (tr_ts + 0.35):
+                    new_st = round(tr_ts + 0.45, 2)
+                    ov_en = float(ov_item.get("end") or (new_st + 1.5))
+                    if ov_en - new_st < 0.85:
+                        ov_en = round(min(safe_duration - 0.1, new_st + 1.35), 2)
+                    ov_item["start"] = new_st
+                    ov_item["timestamp"] = new_st
+                    ov_item["end"] = ov_en
+                    ov_item["duration"] = round(ov_en - new_st, 2)
+
+        # Kural 6: 1-e-1 Görsel-İşitsel Senkrezis & Geçiş Ses Çeşitliliği Korunumu (PROB-6.5)
         sfx_preset_map = {
             "capcut-swish-large": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
             "whoosh": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
             "whoosh-fast": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
+            "cinematic-swell": ("capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, "whoosh"),
             "pop": ("pop-bubble", "Pop Baloncuk (Kavram)", 0.25, "pop"),
             "pop-bubble": ("pop-bubble", "Pop Baloncuk (Kavram)", 0.25, "pop"),
             "ding": ("ding-bright", "Ding Parlak Çan (Tın)", 0.90, "ui"),
@@ -342,28 +455,44 @@ class MasterPlanValidator:
                 user_sfx.setdefault("presetId", str(user_sfx.get("synthPreset") or "pop-bubble"))
                 repaired_sfx.append(user_sfx)
 
-        # Onaylanan her sahne geçişine tam yeni klibin başladığı sınırda (tr_ts = next_clip.start)
-        # 'capcut-swish-large' (Swish Whoosh Large 794558) kaydırma sesi bağla (kesim içine düşmemesi için tr_ts - 0.15 yapılmaz!)
+        # Onaylanan her sahne geçişine geçiş türüne uygun SFX bağla (PROB-6.5: LlmDirector çeşitliliğini koru!)
         for tr_idx, tr in enumerate(repaired_transitions):
             tr_ts = float(tr.get("timestamp") or tr.get("boundaryTime") or 0.0)
+            tr_type = str(tr.get("type") or "smoothleft")
             sfx_ts = round(max(0.05, tr_ts), 2)
+            if tr_type in ("zoomin", "zoomout"):
+                tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
+                    "whoosh-fast", "Fast Zoom Whoosh", 0.45, 0.20, "whoosh"
+                )
+            elif tr_type in ("dissolve", "fade", "fadeblack"):
+                tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
+                    "cinematic-swell", "Cinematic Ambient Swell", 0.90, 0.18, "whoosh"
+                )
+            elif tr_type in ("circleopen", "circleclose"):
+                tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
+                    "pop-bubble", "Circle Reveal Pop", 0.35, 0.18, "pop"
+                )
+            else:
+                tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
+                    "capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, 0.22, "whoosh"
+                )
             if not any(
-                abs(float(s.get("start", 0.0)) - sfx_ts) < 0.22 and s.get("presetId") in ("capcut-swish-large", "whoosh-fast")
+                abs(float(s.get("start", 0.0)) - sfx_ts) < 0.22 and s.get("isTransitionSfx")
                 for s in repaired_sfx
             ):
                 repaired_sfx.append({
                     "id": f"ad_sfx_tr_{tr_idx + 1}",
-                    "name": "Swish Whoosh (Large 794558)",
-                    "title": "Swish Whoosh (Large 794558)",
-                    "presetId": "capcut-swish-large",
-                    "synthPreset": "capcut-swish-large",
-                    "type": "whoosh",
-                    "category": "whoosh",
-                    "sourceUrl": "sfx://capcut-swish-large",
+                    "name": tr_sfx_name,
+                    "title": tr_sfx_name,
+                    "presetId": tr_sfx_preset,
+                    "synthPreset": tr_sfx_preset,
+                    "type": tr_sfx_cat,
+                    "category": tr_sfx_cat,
+                    "sourceUrl": f"sfx://{tr_sfx_preset}",
                     "timestamp": sfx_ts,
                     "start": sfx_ts,
-                    "duration": 0.81,
-                    "volume": 0.22,
+                    "duration": tr_sfx_dur,
+                    "volume": tr_sfx_vol,
                     "subThemeRole": "TOPIC_TRANSITION",
                     "isTransitionSfx": True,
                 })

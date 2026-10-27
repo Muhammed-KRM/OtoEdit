@@ -5422,7 +5422,11 @@ export class EditorComponent implements OnInit, OnDestroy {
       const visBoundaryTime = prev.visEnd;
       const leftPercent = prev.leftPercent + prev.widthPercent;
       const existing = transitions.find(tr => {
+        const hasSourceBt = tr.boundaryTime !== undefined || tr.boundarySourceTime !== undefined;
         const bt = (tr.boundaryTime ?? tr.boundarySourceTime ?? (tr as any).timestamp) || 0;
+        if (hasSourceBt) {
+          return Math.abs(bt - boundaryTime) < 0.45 || Math.abs(bt - prevEnd) < 0.45;
+        }
         return (
           Math.abs(bt - boundaryTime) < 0.45 ||
           Math.abs(bt - prevEnd) < 0.45 ||
@@ -7886,12 +7890,16 @@ export class EditorComponent implements OnInit, OnDestroy {
 
   isSkippingCut = false;
   private playedSfxIdsInPass = new Set<string>();
+  private lastContinuousCheckTime = 0;
 
   onVideoSeeked(): void {
     this.isSkippingCut = false;
     this.playedSfxIdsInPass.clear();
     const bgm = this.bgmAudioRef?.nativeElement;
     const video = this.videoRef?.nativeElement;
+    if (video) {
+      this.lastContinuousCheckTime = video.currentTime;
+    }
     if (bgm && video && this.bgmUrl()) {
       bgm.currentTime = video.currentTime % Math.max(1, bgm.duration || 60);
     }
@@ -7965,7 +7973,8 @@ export class EditorComponent implements OnInit, OnDestroy {
       for (const tr of this.transitions()) {
         const bTime = tr.boundaryTime ?? tr.boundarySourceTime ?? 0;
         const trKey = `${tr.id || bTime.toFixed(2)}`;
-        if (Math.abs(t - bTime) <= 0.08 && (this.lastTriggeredTransitionKey !== trKey || nowMs - this.lastTriggeredTransitionAtMs > 1200)) {
+        const crossedBoundary = this.lastContinuousCheckTime < bTime && t >= bTime && (t - bTime) <= 0.35;
+        if ((crossedBoundary || Math.abs(t - bTime) <= 0.12) && (this.lastTriggeredTransitionKey !== trKey || nowMs - this.lastTriggeredTransitionAtMs > 1200)) {
           this.lastTriggeredTransitionKey = trKey;
           this.lastTriggeredTransitionAtMs = nowMs;
           this.captureTransitionSnapshot();
@@ -7974,6 +7983,7 @@ export class EditorComponent implements OnInit, OnDestroy {
         }
       }
     }
+    this.lastContinuousCheckTime = t;
 
     // 3. Klip Hızı (0.5x - 2.0x) ve Kesilmiş Klipleri Atlama + Çift Katmanlı (A->B) Geçiş Efekti Oynatma
     const allClips = this.clips();

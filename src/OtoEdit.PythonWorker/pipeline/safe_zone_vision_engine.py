@@ -481,6 +481,8 @@ class SafeZoneSpatialSolver:
                 min(98.0, pos_x + max_cqi / 2.0),
                 min(98.0, pos_y + box_h / 2.0),
             )
+            # Stack öğesini uzamsal çözücü hafızasına kaydet (tekil/görsel çakışmasını önler - PROB-4.3)
+            self.placed_events.append((start_sec, end_sec, rect))
             return DynamicTypographySpec(
                 font_size_1080p=font_sz,
                 max_width_cqi=max_cqi,
@@ -494,6 +496,11 @@ class SafeZoneSpatialSolver:
             )
 
         # Tekil kavram veya Kişi/Eser tanıtımı
+        active_boxes = [
+            box
+            for (s, e, box) in self.placed_events
+            if not (end_sec + 0.4 < s or start_sec - 0.4 > e)
+        ]
         if action_type in ("PERSON_INTRODUCTION", "WORK_INTRODUCTION"):
             corridor_w = left_corridor_w
             pos_x = round((2.0 + (head_bbox.x1 - 1.5)) / 2.0, 1)
@@ -501,6 +508,9 @@ class SafeZoneSpatialSolver:
             slot_id = "TOP_LEFT_CARD"
             sc = 1.0
             rect = BBoxPct(2.5, 16.0, max(30.0, head_bbox.x1 - 1.5), 32.0)
+            if any(rect.overlaps(ab, margin_pct=1.5) for ab in active_boxes):
+                pos_y = 38.0
+                rect = BBoxPct(2.5, 30.0, max(30.0, head_bbox.x1 - 1.5), 46.0)
             self.placed_events.append((start_sec, end_sec, rect))
         else:
             slot_id, raw_x, raw_y, sc, rect = self.solve_placement(
@@ -515,8 +525,21 @@ class SafeZoneSpatialSolver:
                 if is_left
                 else round(((head_bbox.x2 + 1.5) + 98.0) / 2.0, 1)
             )
-            # Tekil kavramları omuz üstü boşluğun tam ortasına (Y=22.0%) sabitle (gövdeye %0 temas!)
-            pos_y = 22.0 if raw_y > 26.0 else raw_y
+            # Y=22.0% tercih edilir ancak o konumda başka aktif kutu varsa çözücünün seçtiği raw_y korunur (PROB-4.3)
+            cand_y = 22.0 if raw_y > 26.0 else raw_y
+            cand_rect = BBoxPct(
+                max(2.0, pos_x - corridor_w / 2.0),
+                max(2.0, cand_y - 6.5),
+                min(98.0, pos_x + corridor_w / 2.0),
+                min(98.0, cand_y + 6.5),
+            )
+            if any(cand_rect.overlaps(ab, margin_pct=1.5) for ab in active_boxes):
+                pos_y = raw_y
+            else:
+                pos_y = cand_y
+                rect = cand_rect
+            if self.placed_events:
+                self.placed_events[-1] = (start_sec, end_sec, rect)
 
         font_sz, max_cqi, line_h, est_lines = DynamicTypographySizer.compute(
             text=text,
@@ -536,3 +559,40 @@ class SafeZoneSpatialSolver:
             anchor_slot=slot_id,
             placed_bbox=rect,
         )
+
+    def register_external_box(
+        self,
+        start_sec: float,
+        end_sec: float,
+        center_x: float,
+        center_y: float,
+        width_pct: float = 26.0,
+        height_pct: float = 28.0,
+    ) -> Tuple[float, float]:
+        """
+        Görsel kartı (`ad_img_`) gibi harici katmanları `placed_events` içine kaydeder ve
+        varsa aktif katmanlarla çakışmayan (center_x, center_y) koordinatını döndürür (PROB-4.3).
+        """
+        active_boxes = [
+            box
+            for (s, e, box) in self.placed_events
+            if not (end_sec + 0.4 < s or start_sec - 0.4 > e)
+        ]
+        for cand_y in (center_y, 26.0, 38.0, 18.0):
+            rect = BBoxPct(
+                max(2.0, center_x - width_pct / 2.0),
+                max(2.0, cand_y - height_pct / 2.0),
+                min(98.0, center_x + width_pct / 2.0),
+                min(98.0, cand_y + height_pct / 2.0),
+            )
+            if not any(rect.overlaps(ab, margin_pct=1.5) for ab in active_boxes):
+                self.placed_events.append((start_sec, end_sec, rect))
+                return round(center_x, 1), round(cand_y, 1)
+        fallback_rect = BBoxPct(
+            max(2.0, center_x - width_pct / 2.0),
+            max(2.0, center_y - height_pct / 2.0),
+            min(98.0, center_x + width_pct / 2.0),
+            min(98.0, center_y + height_pct / 2.0),
+        )
+        self.placed_events.append((start_sec, end_sec, fallback_rect))
+        return round(center_x, 1), round(center_y, 1)

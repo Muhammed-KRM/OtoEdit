@@ -160,8 +160,8 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=False,
         min_gap_between_overlays_sec=14.0,
         max_overlays_per_minute=4.5,
-        allowed_transitions=["smoothleft", "slideleft", "wipeleft", "fade", "dissolve"],
-        transition_duration_sec=0.45,
+        allowed_transitions=["slideleft", "smoothleft"],
+        transition_duration_sec=0.40,
         allowed_sfx_map={
             "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.22},
             "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.22},
@@ -205,8 +205,8 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=False,
         min_gap_between_overlays_sec=18.0,
         max_overlays_per_minute=3.0,
-        allowed_transitions=["smoothleft", "slideleft", "wipeleft", "fade"],
-        transition_duration_sec=0.45,
+        allowed_transitions=["slideleft", "smoothleft"],
+        transition_duration_sec=0.40,
         allowed_sfx_map={
             "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.22},
             "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.22},
@@ -244,8 +244,8 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=True,
         min_gap_between_overlays_sec=14.0,
         max_overlays_per_minute=3.8,
-        allowed_transitions=["smoothleft", "slideleft", "wipeleft", "circleopen"],
-        transition_duration_sec=0.42,
+        allowed_transitions=["slideleft", "smoothleft"],
+        transition_duration_sec=0.40,
         allowed_sfx_map={
             "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.22},
             "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.22},
@@ -283,8 +283,8 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=False,
         min_gap_between_overlays_sec=22.0,
         max_overlays_per_minute=2.5,
-        allowed_transitions=["smoothleft", "slideleft", "dissolve", "fade", "fadeblack"],
-        transition_duration_sec=0.50,
+        allowed_transitions=["slideleft", "smoothleft"],
+        transition_duration_sec=0.40,
         allowed_sfx_map={
             "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.20},
             "CHAPTER_TITLE_CARD": {"type": "whoosh", "presetId": "capcut-swish-large", "volume": 0.20},
@@ -322,7 +322,7 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
         allow_emojis=True,
         min_gap_between_overlays_sec=9.0,
         max_overlays_per_minute=5.5,
-        allowed_transitions=["smoothleft", "wipeleft", "slidedown", "circleopen", "fade"],
+        allowed_transitions=["slideleft", "smoothleft"],
         transition_duration_sec=0.40,
         allowed_sfx_map={
             "TOPIC_TRANSITION": {"type": "whoosh", "presetId": "whoosh-fast", "volume": 0.22},
@@ -339,22 +339,52 @@ THEME_PROFILE_REGISTRY: Dict[str, ThemeProfile] = {
 }
 
 
-# Türkçe başlık sonuna asla gelemeyecek bağlaç, edat, zarf, yarım fiil ve tamlayan ekleri
+# Türkçe başlık sonuna veya tek başına asla gelemeyecek bağlaç, edat, zarf ve yarım fiil kelimeleri
 TR_DANGLING_STOPWORDS = {
     "ve", "veya", "ile", "için", "gibi", "kadar", "göre", "karşı",
     "ama", "fakat", "ancak", "lakin", "çünkü", "dolayısıyla", "örneğin",
     "mesela", "yani", "ise", "de", "da", "ki", "bu", "şu", "o", "bir",
     "her", "en", "çok", "daha", "hiç", "hem", "ya", "ne", "nasıl", "neden",
-    "olarak", "olan", "olup", "olduğu", "olduğunu", "olur", "olmaz",
+    "olarak", "olup", "olduğu", "olmadığı", "olduğunu", "olmadığını", "olur",
     "vardır", "yoktur", "değildir", "demektir", "denir", "diyebiliriz",
     "düşü", "düşünün", "düşünelim", "bakalım", "görüyoruz", "biliyoruz",
-    "eden", "edilen", "yapan", "yapılan", "gelen", "geçen", "bulunan",
-    "intikal", "uğrardı", "şekilde", "anlamda", "noktada", "konuda",
+    "intikal", "uğrardı", "şekilde", "anlamda", "noktada", "konuda", "konusu",
     "çevresinde", "kapsamında", "üzerinde", "içerisinde", "hakkında",
     "tarafından", "arasında", "sonucunda", "nedeniyle", "sebebiyle",
     "ilgili", "ilişkin", "itibariyle", "bakımından", "açısından",
     "oldu", "etti", "yaptı", "çıktı", "geldi", "gitti", "kaldı", "aldı",
-    "şimdi", "böyle", "şöyle", "falan", "filan", "eti", "diye", "dedi",
+    "şimdi", "böyle", "şöyle", "falan", "filan", "eti", "diye", "dedi", "diyor",
+    "oraya", "buraya", "şuraya", "orada", "burada", "şurada", "bunun", "şunun", "onun",
+    "ihtimal", "durumu", "üretiyor", "gerekiyor", "yapıyor", "ediyor", "oluyor", "geliyor",
+    "mı", "mi", "mu", "mü", "eğer", "kendi", "size", "bize", "bana", "sana",
+    "günkü", "acaba", "boşa", "zararım", "başıma", "başına", "olmadı", "olmazsa",
+    "geliştirilerek", "profesyonelleştirerek", "yapılarak", "edilerek", "alınarak",
+    "verilerek", "kurularak", "dayanarak", "başlayarak", "atarak", "diyerek",
+}
+
+# Sıfat-fiiller: Başlık ortasında veya 2-3 kelimelik bileşik sıfat/isim öbeklerinde ("KABUL EDİLEN", "EZEN VE EZİLEN") korunur;
+# yalnızca tek başına veya uzun cümlenin sonunda nitelediği isim kesilmişse budanır.
+TR_PARTICIPLES = {
+    "eden", "edilen", "olan", "olmayan", "yapan", "yapılan",
+    "gelen", "geçen", "bulunan", "verilen", "alınan", "kurulan", "sayılan",
+}
+
+# Sonu doğal '-n' ile biten ve tamlayan eki (-ın/-in/-un/-ün) aldığında yalnızca 2 harf kesilmesi gereken kökler
+TR_N_ENDING_ROOTS = {
+    "kanun", "sorun", "oyun", "boyun", "koyun", "beyin", "yayın", "yığın",
+    "fırın", "tütün", "bütün", "düğün", "hüzün", "üstün", "aydın", "kadın",
+    "yakın", "akın", "altın", "yangın", "baskın", "salgın", "sürgün", "vurgun",
+    "uygun", "olgun", "uzun", "karın", "burun", "torun", "sütun", "mezun",
+    "mümin", "zemin", "yemin", "temin", "tayin", "hain", "metin", "rehin",
+    "zihin", "şahin", "vatan", "insan", "kur'an", "kuran", "vicdan", "zaman",
+    "mekan", "imkan", "oran", "plan", "ilan", "divan", "düzen", "özen",
+    "güven", "tören", "evren", "ergin", "kesin", "derin", "serin", "gelin",
+}
+
+TR_ROMAN_NUMERALS = {"I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"}
+TR_CLAUSE_CLASSIFIERS = {
+    "bendi", "bendinde", "şıkkı", "fıkrası", "maddesi", "grubu",
+    "kategorisi", "tipi", "vitamini", "sınıfı", "bölümü", "kısmı",
 }
 
 TR_GENITIVE_SUFFIXES = (
@@ -373,60 +403,108 @@ def to_turkish_upper(text: str) -> str:
     return text.replace("i", "İ").replace("ı", "I").upper()
 
 
-def extract_turkish_semantic_title(text: str, max_chars: int = 34) -> str:
+def strip_turkish_genitive_safe(word: str) -> str:
+    """
+    Türkçe F5 morfotaktik kurallarına göre tamlayan ekini (-nın/-nin/-nun/-nün veya -ın/-in/-un/-ün)
+    kelime kökünü ('kanun', 'sorun', 'oyun' vb.) ASLA bozmadan soyar.
+    """
+    w_clean = word.strip(".,:;")
+    w_lower = to_turkish_lower(w_clean)
+
+    if w_lower in ("bunun", "şunun", "onun"):
+        return w_clean
+
+    apostrophe_match = re.match(r"^(.+?)'(?:nın|nin|nun|nün|ın|in|un|ün)$", w_clean, flags=re.IGNORECASE)
+    if apostrophe_match and len(apostrophe_match.group(1)) >= 3:
+        return apostrophe_match.group(1)
+
+    if len(w_lower) < 6:
+        return word
+
+    for double_suf in ("unun", "ünün", "ının", "inin"):
+        if w_lower.endswith(double_suf):
+            cand_2 = w_lower[:-2]
+            cand_4 = w_lower[:-4]
+            if cand_2 in TR_N_ENDING_ROOTS:
+                return w_clean[:-2]
+            if cand_4 in TR_N_ENDING_ROOTS:
+                return w_clean[:-3]
+            if len(w_lower) >= 8:
+                return w_clean[:-3]
+
+    for vowel_gen in ("nın", "nin", "nun", "nün"):
+        if w_lower.endswith(vowel_gen):
+            cand_2 = w_lower[:-2]
+            if cand_2 in TR_N_ENDING_ROOTS:
+                return w_clean[:-2]
+            stem_3 = w_lower[:-3]
+            if len(stem_3) >= 3 and stem_3[-1] in "aeıioöuüâîû":
+                return w_clean[:-3]
+            if len(cand_2) >= 5 and cand_2[-2] in "aeıioöuüâîû":
+                return w_clean[:-2]
+
+    return word
+
+
+def extract_turkish_semantic_title(text: str, max_chars: int = 34, max_words: int = 7) -> str:
     """
     Cümleden ASLA kelime veya isim tamlaması ortasından kesilmeyen,
     maksimum `max_chars` uzunluğunda tam ve anlamlı bir Türkçe başlık çıkarır.
-    Örn:
-      - "Hukuk Muhakemeleri Kanununun çevresinde şekillenen dava şartları..."
-        -> "HUKUK MUHAKEMELERİ KANUNU"
-      - "1. TENZİLİ (TEŞRİ) ŞERİAT" (zaten yapılandırılmış başlık)
-        -> "1. TENZİLİ (TEŞRİ) ŞERİAT"
+    3-4 harfli temel Türkçe kavramları ("FAİZ", "EZEN", "HAK", "SUÇ", "TIP", "ÖRF")
+    ve '-n' ile biten kökleri ("KANUNUN" -> "KANUN") korur.
     """
     if not text or not text.strip():
         return ""
 
     raw_stripped = re.sub(r"\s+", " ", text.strip())
 
-    # Eğer girdi zaten yapılandırılmış temiz bir başlık ise (örn. "1. ...", "PROF. ...", "KAVRAM: ...")
-    # kelime içi tireleri (-), numaraları (1.) ve parantezleri koruyarak doğrudan büyük harfe çevir!
+    # Eğer girdi zaten yapılandırılmış temiz bir başlık ise doğrudan büyük harfe çevir
     if len(raw_stripped) <= max_chars + 4 and (
-        re.match(r"^(\d+\.|PROF\.|DR\.|HZ\.|İMAM\b|MD\.)", to_turkish_upper(raw_stripped))
+        re.match(r"^(\d+[\.\)\-]|[IVX]{1,5}[\.\)\-]|PROF\.|DR\.|HZ\.|İMAM\b|MD\.)", to_turkish_upper(raw_stripped))
         or (":" in raw_stripped and len(raw_stripped.split()) <= 6)
         or ("&" in raw_stripped and len(raw_stripped.split()) <= 6)
         or ("(" in raw_stripped and ")" in raw_stripped and len(raw_stripped.split()) <= 6)
     ):
         return to_turkish_upper(raw_stripped[:max_chars + 4].strip())
 
-    # Kelime içi tireleri (Kur'an-ı, Sünnet-i, Bürhan-ı) ve kısaltma noktalarını (1., Prof., Dr., Hz.)
-    # bozmadan yalnızca cümle sonu noktalama işaretlerinden ayır
     clauses = re.split(
-        r"[!?;:—–]+|(?<!\d)(?<!Prof)(?<!Dr)(?<!Hz)(?<!Md)\.(?!\w)",
+        r"[!?;:—–]+|(?<!\d)(?<!\b[IVX])(?<!\b[IVX]{2})(?<!\b[IVX]{3})(?<!\b[IVX]{4})(?<!Prof)(?<!Dr)(?<!Hz)(?<!Md)\.(?!\w)",
         raw_stripped,
         flags=re.IGNORECASE,
     )
-    clause = next((c.strip() for c in clauses if len(c.strip()) >= 6), raw_stripped)
+    clause = next((c.strip() for c in clauses if len(c.strip()) >= 2), raw_stripped)
 
-    # Kelime içi tire (-), kesme işareti ('), parantez ve iki noktayı koru
-    cleaned = re.sub(r"[^\w\sğüşıöçĞÜŞİÖÇ0-9/'():&\-]", " ", clause)
-    words = [w for w in cleaned.split() if len(w) > 1 or w.isdigit()]
+    cleaned = re.sub(r"[^\w\sğüşıöçĞÜŞİÖÇâîûÂÎÛ0-9/'():&\-\.]", " ", clause)
+    raw_tokens = cleaned.split()
+    words: List[str] = []
+    for idx_t, w in enumerate(raw_tokens):
+        w_str = w.strip(",")
+        if not w_str:
+            continue
+        w_no_dot = w_str.strip(".")
+        nxt_low = to_turkish_lower(raw_tokens[idx_t + 1].strip(".,:;")) if idx_t + 1 < len(raw_tokens) else ""
+        is_roman_or_clause = (
+            to_turkish_upper(w_no_dot) in TR_ROMAN_NUMERALS
+            or nxt_low in TR_CLAUSE_CLASSIFIERS
+        )
+        if len(w_no_dot) > 1 or w_no_dot.isdigit() or is_roman_or_clause:
+            words.append(w_str if is_roman_or_clause or w_no_dot.isdigit() else w_no_dot)
+
     if not words:
         return ""
 
-    # Baştaki dolgu kelimelerini temizle ("Arkadaşlar", "Şimdi", "Bakın", "Dolayısıyla", "Ve" vb.)
     filler_prefixes = {
-        "arkadaşlar", "şimdi", "bakın", "tabii", "elbette", "burada",
+        "arkadaşlar", "şimdi", "bakın", "tabii", "elbette", "burada", "oraya", "buraya",
         "dolayısıyla", "öncelikle", "mesela", "örneğin", "aslında", "peki",
         "evet", "bugün", "bugünkü", "dersimizde", "ve", "ama", "fakat",
         "ancak", "çünkü", "yani", "işte", "hatta", "bir", "bu", "şu",
-        "ayrıntılı", "özellikle",
+        "ayrıntılı", "özellikle", "söz",
     }
-    while len(words) > 2 and to_turkish_lower(words[0].strip(".,:;")) in filler_prefixes:
+    while len(words) > 1 and to_turkish_lower(words[0].strip(".,:;")) in filler_prefixes:
         words.pop(0)
 
-    # Maksimum 5 kelime ve max_chars sınırı içinde kalacak şekilde tam kelimeleri birleştir
     selected: List[str] = []
-    for w in words[:5]:
+    for w in words[: max(1, int(max_words or 7))]:
         candidate = " ".join(selected + [w])
         if len(candidate) <= max_chars:
             selected.append(w)
@@ -440,27 +518,28 @@ def extract_turkish_semantic_title(text: str, max_chars: int = 34) -> str:
     while len(selected) > 1 and to_turkish_lower(selected[-1].strip(".,:;")) in TR_DANGLING_STOPWORDS:
         selected.pop()
 
-    # Eğer son kelime tamlayan ekiyle ("Kanununun", "Mahkemenin", "Varlığın") bitiyorsa yalın hale indirge
-    last_lower = to_turkish_lower(selected[-1])
-    if last_lower.endswith(("nun", "nün", "nın", "nin")) and len(last_lower) >= 6:
-        for suf in ("unun", "ünün", "ının", "inin", "nun", "nün", "nın", "nin"):
-            if last_lower.endswith(suf) and len(selected[-1]) - len(suf) >= 3:
-                stem_len = len(selected[-1]) - (3 if suf.startswith(("u", "ü", "ı", "i")) else len(suf))
-                selected[-1] = selected[-1][:stem_len]
-                break
+    # Uzun (4+ kelimeli) cümle kırıntılarının sonunda asılı kalmış sıfat-fiili buda (ancak 2-3 kelimeli "KABUL EDİLEN", "EZEN VE EZİLEN" korunur)
+    while len(selected) >= 4 and to_turkish_lower(selected[-1].strip(".,:;")) in TR_PARTICIPLES:
+        selected.pop()
 
-    # Tekrar kontrol: son kelime hala stopword ise çıkar
+    # Son kelime tamlayan ekiyle ("Kanunun", "Mahkemenin") bitiyorsa F5 morfotaktik kuralıyla yalın hale indirge
+    if selected:
+        selected[-1] = strip_turkish_genitive_safe(selected[-1])
+
     while len(selected) > 1 and to_turkish_lower(selected[-1].strip(".,:;")) in TR_DANGLING_STOPWORDS:
         selected.pop()
 
-    # Baştaki kelime tekrar kontrol: stopword ise çıkar
     while len(selected) > 1 and to_turkish_lower(selected[0].strip(".,:;")) in TR_DANGLING_STOPWORDS:
         selected.pop(0)
 
     final_str = " ".join(selected).strip()
-    if len(final_str) < 5 or len(selected) == 0:
+    if len(final_str) < 3 or len(selected) == 0:
         return ""
-    if len(selected) == 1 and to_turkish_lower(selected[0]) in TR_DANGLING_STOPWORDS:
+    if len(selected) == 1:
+        single_low = to_turkish_lower(selected[0].strip(".,:;"))
+        if single_low in TR_DANGLING_STOPWORDS or single_low in TR_PARTICIPLES:
+            return ""
+    if to_turkish_lower(final_str) in ("oraya aylık para", "aylık para", "konusu olmadığı", "söz konusu"):
         return ""
 
     return to_turkish_upper(final_str)

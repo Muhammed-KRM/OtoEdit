@@ -29,7 +29,7 @@ class VLMAssetVerifier:
 
     ACCEPTANCE_THRESHOLD = 75.0
 
-    def __init__(self, gemini_client: Any = None, enable_vlm: bool = False):
+    def __init__(self, gemini_client: Any = None, enable_vlm: bool = True):
         self.gemini = gemini_client
         self.enable_vlm = enable_vlm
 
@@ -60,7 +60,9 @@ class VLMAssetVerifier:
                 img = cv2.imread(local_path)
                 if img is not None:
                     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                    has_anom, anom_reason = WebImageCrawler._detect_barcode_or_blank_cover_anomaly(img, gray)
+                    has_anom, anom_reason = WebImageCrawler._detect_barcode_or_blank_cover_anomaly(
+                        img, gray, is_work_or_manuscript=bool(cand.get("is_work", False))
+                    )
                     if has_anom:
                         logger.info(f"[VLMAssetVerifier] Barkod/Boş kapak anomalisi veto edildi ({local_path}): {anom_reason}")
                         continue
@@ -84,15 +86,16 @@ class VLMAssetVerifier:
             metrics = cand.get("cv_metrics", {})
             src = str(cand.get("source", ""))
             is_lead = bool(cand.get("is_lead_summary", False))
+            is_work = bool(cand.get("is_work", False))
             if src in ("wikipedia_portrait", "wikipedia_concept"):
                 base_score = 96.0 if is_lead else 88.0
             elif src == "pexels_photo":
                 base_score = 84.0
-            elif src == "wikimedia":
-                base_score = 80.0
+            elif src in ("wikimedia", "bing_web"):
+                base_score = 82.0
             else:
-                base_score = 68.0
-            text_pen_mult = 15.0 if is_lead else 80.0
+                base_score = 76.0
+            text_pen_mult = 10.0 if (is_lead or is_work) else 60.0
             base_score -= float(metrics.get("text_density", 0.0)) * text_pen_mult
             sharpness = float(metrics.get("sharpness", 80.0))
             if sharpness < 25.0:
