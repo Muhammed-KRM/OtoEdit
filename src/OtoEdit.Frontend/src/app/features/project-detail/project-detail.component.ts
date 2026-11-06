@@ -69,6 +69,35 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
         </app-progress-bar>
       </div>
 
+      <!-- Analysis Error Banner -->
+      <div *ngIf="!isAnalyzing() && (analysisError() || project()?.durum === ProjectDurumu.Hata)" class="mb-8 p-5 rounded-2xl bg-rose-950/40 border border-rose-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
+        <div class="flex items-start gap-3">
+          <span class="text-xl leading-none mt-0.5">⚠️</span>
+          <div>
+            <h3 class="text-sm font-bold text-rose-300">Analiz Sırasında Bir Sorun Oluştu</h3>
+            <p class="text-xs text-rose-200/80 mt-1">
+              {{ analysisError() || 'Video analizi tamamlanırken bağlantı veya işlem hatası meydana geldi. Videonuz sistemde yüklüdür; yeniden kurgulayabilir veya doğrudan editöre geçebilirsiniz.' }}
+            </p>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <button
+            *ngIf="project()?.hasVideo && !isDirectEditorMode()"
+            type="button"
+            (click)="triggerReanalyzeWithSelectedFlags()"
+            class="text-xs px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold transition-all">
+            🔄 Seçili Tiklerle Yeniden Dene
+          </button>
+          <button
+            *ngIf="canGoToEditor()"
+            type="button"
+            (click)="goToEditor()"
+            class="text-xs px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold transition-all">
+            Editöre Geç →
+          </button>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <!-- Sol Panel: Hızlı Modlar, Pipeline Tikleri & Video Yükleme Alanı -->
         <div class="lg:col-span-2 space-y-6">
@@ -499,7 +528,9 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   readonly analysisPercentage = signal<number>(0);
   readonly analysisStageMessage = signal<string>('Analiz başlıyor...');
   readonly isAnalyzing = signal<boolean>(false);
+  readonly analysisError = signal<string | null>(null);
   readonly VideoFormati = VideoFormati;
+  readonly ProjectDurumu = ProjectDurumu;
 
   // Birleştirilmiş 7 Akıllı Yönetmen Tercihi
   autoJumpcut = true;
@@ -585,9 +616,19 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     }
   }
 
+  private normalizeProject(p: ProjectDetailDto): ProjectDetailDto {
+    return {
+      ...p,
+      hasVideo: Boolean(p.hasVideo || p.video),
+      hasEdl: Boolean(p.hasEdl || (p.edlVersiyon != null && p.edlVersiyon > 0)),
+      hasRenderOutput: Boolean(p.hasRenderOutput || (p.sonRender && (p.sonRender.ciktiYolu || p.sonRender.indirmeUrl)))
+    };
+  }
+
   private loadProject(id: string): void {
     this.projectService.getById(id).subscribe({
-      next: (p) => {
+      next: (raw) => {
+        const p = this.normalizeProject(raw);
         this.project.set(p);
         if (p.durum === ProjectDurumu.AnalizEdiliyor) {
           this.isAnalyzing.set(true);
@@ -612,6 +653,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
         .subscribe(() => {
           this.isAnalyzing.set(false);
+          this.analysisError.set(null);
           this.analysisPercentage.set(100);
           this.loadProject(projectId);
         })
@@ -620,8 +662,19 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     this.sub.add(
       this.signalr.analysisProgress$
         .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
-        .subscribe((e) => {
+        .subscribe((e: any) => {
+          if (e.durum === 'Failed') {
+            this.isAnalyzing.set(false);
+            this.analysisError.set(e.mesaj || 'Analiz sırasında bir hata oluştu.');
+            this.loadProject(projectId);
+            return;
+          }
           this.isAnalyzing.set(true);
+          this.analysisError.set(null);
+          const cur = this.project();
+          if (cur && cur.durum !== ProjectDurumu.AnalizEdiliyor) {
+            this.project.set({ ...cur, durum: ProjectDurumu.AnalizEdiliyor });
+          }
           if (typeof e.yuzde === 'number') {
             this.analysisPercentage.set(e.yuzde);
           }
@@ -638,7 +691,9 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
         .subscribe((err) => {
           this.isAnalyzing.set(false);
+          this.analysisError.set(err.hataMesaji || 'Analiz sırasında beklenmeyen bir hata oluştu.');
           this.analysisStageMessage.set(`Hata oluştu: ${err.hataMesaji}`);
+          this.loadProject(projectId);
         })
     );
   }
@@ -688,6 +743,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   triggerReanalyzeWithSelectedFlags(): void {
     const p = this.project();
     if (!p) return;
+    this.analysisError.set(null);
     this.isAnalyzing.set(true);
     this.analysisPercentage.set(5);
     this.analysisStageMessage.set('Seçili AI kurgu adımları başlatılıyor...');
@@ -700,7 +756,9 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       gestureCommandsEnabled: this.gestureCommandsEnabled,
       autoDirectorEnabled: this.autoDirectorEnabled
     }).subscribe({
-      next: () => {},
+      next: () => {
+        this.loadProject(p.id);
+      },
       error: (err) => {
         this.isAnalyzing.set(false);
         alert('Yeniden analiz başlatılamadı: ' + (err.error?.detail || err.message));
@@ -713,6 +771,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     if (!p) return;
 
     const directMode = this.isDirectEditorMode();
+    this.analysisError.set(null);
     this.uploading.set(true);
     this.uploadPercentage.set(0);
 
@@ -755,7 +814,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       ad: p.ad,
       videoFormati: format
     }).subscribe({
-      next: (updated) => this.project.set(updated),
+      next: (updated) => this.project.set(this.normalizeProject(updated)),
       error: (err) => alert('Format güncellenemedi: ' + err.message)
     });
   }
@@ -768,7 +827,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       ad: p.ad,
       templateId
     }).subscribe({
-      next: (updated) => this.project.set(updated),
+      next: (updated) => this.project.set(this.normalizeProject(updated)),
       error: (err) => alert('Şablon güncellenemedi: ' + err.message)
     });
   }

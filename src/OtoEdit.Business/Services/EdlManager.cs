@@ -429,6 +429,7 @@ public class EdlManager : IEdlService
             existing.GuncellemeTarihi = DateTime.UtcNow;
             await _context.SaveChangesAsync(cancellationToken);
             await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
+            await _cacheService.RemoveAsync($"project:{projectId}", cancellationToken);
             return existing;
         }
 
@@ -443,6 +444,7 @@ public class EdlManager : IEdlService
         _context.EditDecisionLists.Add(newEdl);
         await _context.SaveChangesAsync(cancellationToken);
         await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
+        await _cacheService.RemoveAsync($"project:{projectId}", cancellationToken);
 
         return newEdl;
     }

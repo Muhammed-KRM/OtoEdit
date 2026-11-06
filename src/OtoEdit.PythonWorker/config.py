@@ -3,9 +3,41 @@ from pathlib import Path
 try:
     import importlib
     dotenv = importlib.import_module("dotenv")
-    dotenv.load_dotenv()
+    env_paths = [
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / "OtoEdit" / ".env",
+        Path(os.getcwd()) / ".env"
+    ]
+    for ep in env_paths:
+        if ep.is_file():
+            dotenv.load_dotenv(ep)
+            break
 except Exception:
-    pass
+    # python-dotenv paketi yoksa yerel .env okuyucu yedeği
+    env_paths = [
+        Path(__file__).resolve().parent / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / ".env",
+        Path(__file__).resolve().parent.parent.parent / "OtoEdit" / ".env",
+        Path(os.getcwd()) / ".env"
+    ]
+    for ep in env_paths:
+        if ep.is_file():
+            try:
+                with open(ep, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if k and k not in os.environ:
+                                os.environ[k] = v
+            except Exception:
+                pass
+            break
 
 
 class Config:
@@ -41,7 +73,7 @@ class Config:
     OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "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")
     OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
     OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-3.8-flash")
-    AI_ACTIVE_PROVIDER = os.getenv("AI_ACTIVE_PROVIDER", "antigravity")
+    AI_ACTIVE_PROVIDER = os.getenv("AI_ACTIVE_PROVIDER", "groq")
     PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 
     # STT Motor Zinciri ve Parçalama

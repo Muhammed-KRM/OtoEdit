@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+﻿import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { filter, Subscription } from 'rxjs';
@@ -17,10 +17,10 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
     <app-navbar></app-navbar>
 
     <main class="max-w-4xl mx-auto px-6 py-12">
-      <!-- Durum Başlığı -->
+      <!-- Durum BaÅŸlÄ±ÄŸÄ± -->
       <div class="text-center mb-8">
-        <h1 class="text-3xl font-display font-extrabold text-white tracking-tight mb-2">Video Dışa Aktarma (Render)</h1>
-        <p class="text-slate-400 text-sm">FFmpeg donanım hızlandırmalı motor ile kurgulanmış nihai videonuz hazırlanıyor.</p>
+        <h1 class="text-3xl font-display font-extrabold text-white tracking-tight mb-2">Video DÄ±ÅŸa Aktarma (Render)</h1>
+        <p class="text-slate-400 text-sm">FFmpeg donanÄ±m hÄ±zlandÄ±rmalÄ± motor ile kurgulanmÄ±ÅŸ nihai videonuz hazÄ±rlanÄ±yor.</p>
       </div>
 
       <!-- Render Devam Ediyor Durumu -->
@@ -33,24 +33,24 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
         </div>
 
         <div>
-          <h3 class="text-lg font-bold text-white mb-1">Videonuz İşleniyor...</h3>
-          <p class="text-xs text-slate-400">Tüm kesimler, altyazılar ve görseller videoya kalıcı olarak işleniyor.</p>
+          <h3 class="text-lg font-bold text-white mb-1">Videonuz Ä°ÅŸleniyor...</h3>
+          <p class="text-xs text-slate-400">TÃ¼m kesimler, altyazÄ±lar ve gÃ¶rseller videoya kalÄ±cÄ± olarak iÅŸleniyor.</p>
         </div>
 
-        <app-progress-bar [percentage]="renderPercentage()" label="Render İlerlemesi"></app-progress-bar>
+        <app-progress-bar [percentage]="renderPercentage()" label="Render Ä°lerlemesi"></app-progress-bar>
       </div>
 
-      <!-- Render Tamamlandı Durumu -->
+      <!-- Render TamamlandÄ± Durumu -->
       <div *ngIf="isCompleted()" class="space-y-6 animate-fade-in">
-        <!-- Başarı Banner -->
+        <!-- BaÅŸarÄ± Banner -->
         <div class="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between">
           <div class="flex items-center gap-3">
             <div class="w-9 h-9 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
-              ✓
+              âœ“
             </div>
             <div>
-              <h4 class="text-sm font-bold text-white">Render Başarıyla Tamamlandı!</h4>
-              <p class="text-xs text-slate-400">Videonuz indirilmeye ve paylaşılmaya hazır.</p>
+              <h4 class="text-sm font-bold text-white">Render BaÅŸarÄ±yla TamamlandÄ±!</h4>
+              <p class="text-xs text-slate-400">Videonuz indirilmeye ve paylaÅŸÄ±lmaya hazÄ±r.</p>
             </div>
           </div>
 
@@ -63,11 +63,11 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
-            Nihai Videoyu İndir
+            Nihai Videoyu Ä°ndir
           </a>
         </div>
 
-        <!-- Video Player Önizleme -->
+        <!-- Video Player Ã–nizleme -->
         <div class="relative bg-black rounded-2xl overflow-hidden shadow-2xl border border-slate-800 flex items-center justify-center min-h-[380px] max-h-[540px]">
           <video 
             *ngIf="downloadUrl()"
@@ -81,11 +81,11 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
         <!-- Eylemler -->
         <div class="flex items-center justify-between pt-4">
           <a [routerLink]="['/project', projectId, 'editor']" class="text-xs text-slate-400 hover:text-white flex items-center gap-1 transition-colors">
-            ← Editöre Geri Dön
+            â† EditÃ¶re Geri DÃ¶n
           </a>
 
           <a [routerLink]="['/']" class="text-xs text-brand-cyan hover:underline">
-            Tüm Projelerime Git →
+            TÃ¼m Projelerime Git â†’
           </a>
         </div>
       </div>
@@ -93,10 +93,10 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
       <!-- Hata Durumu -->
       <div *ngIf="isFailed()" class="glass-panel rounded-2xl p-8 border border-rose-500/40 text-center space-y-4">
         <div class="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center mx-auto text-rose-400 text-2xl font-bold">
-          ✕
+          âœ•
         </div>
-        <h3 class="text-lg font-bold text-white">Render Sırasında Hata Oluştu</h3>
-        <p class="text-xs text-rose-300 max-w-md mx-auto">{{ renderStatus()?.hataMesaji || 'Bilinmeyen bir hata nedeniyle işlem tamamlanamadı.' }}</p>
+        <h3 class="text-lg font-bold text-white">Render SÄ±rasÄ±nda Hata OluÅŸtu</h3>
+        <p class="text-xs text-rose-300 max-w-md mx-auto">{{ renderStatus()?.hataMesaji || 'Bilinmeyen bir hata nedeniyle iÅŸlem tamamlanamadÄ±.' }}</p>
         <button (click)="retryRender()" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white text-xs font-semibold">
           Yeniden Dene
         </button>
@@ -162,21 +162,21 @@ export class RenderResultComponent implements OnInit, OnDestroy {
           this.fetchDownloadUrl();
         }
       },
-      error: (err) => console.error('Render durumu okunamadı:', err)
+      error: (err) => console.error('Render durumu okunamadÄ±:', err)
     });
   }
 
   private fetchDownloadUrl(): void {
     this.renderService.getDownloadUrl(this.projectId, this.renderJobId).subscribe({
       next: (res) => this.downloadUrl.set(res.downloadUrl),
-      error: (err) => console.error('İndirme URL alınamadı:', err)
+      error: (err) => console.error('Ä°ndirme URL alÄ±namadÄ±:', err)
     });
   }
 
   private setupSignalR(): void {
     this.signalr.joinProjectGroup(this.projectId);
 
-    // Canlı render tamamlanma bildirimi
+    // CanlÄ± render tamamlanma bildirimi
     this.sub.add(
       this.signalr.renderCompleted$
         .pipe(filter(e => e.renderJobId === this.renderJobId))
@@ -186,7 +186,7 @@ export class RenderResultComponent implements OnInit, OnDestroy {
         })
     );
 
-    // Canlı ilerleme (progress) bildirimi
+    // CanlÄ± ilerleme (progress) bildirimi
     this.sub.add(
       this.signalr.renderProgress$
         .pipe(filter(e => !e.renderJobId || e.renderJobId === this.renderJobId))
@@ -217,6 +217,7 @@ export class RenderResultComponent implements OnInit, OnDestroy {
         this.renderJobId = res.renderJobId;
         this.renderStatus.set(res);
         this.renderPercentage.set(10);
+        this.startPolling();
       }
     });
   }

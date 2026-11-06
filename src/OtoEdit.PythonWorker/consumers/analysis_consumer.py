@@ -418,9 +418,9 @@ class AnalysisConsumer:
                 video_path=local_video_path,
             )
 
-            # 💾 REDIS ÖNBELLEĞE KAYDET
-            if Config.ENABLE_ANALYSIS_CACHE:
-                self.cache.set_cached_edl(cache_key, edl_dict)
+            # 💾 REDIS ÖNBELLEĞE KAYDET (Yayın öncesi her zaman yedekle ki uzun analiz sonucu asla kaybolmasın)
+            self.cache.set_cached_edl(cache_key, edl_dict)
+            self.cache.set_cached_edl(f"latest_project:{project_id}", edl_dict)
 
             # 10. Tamamlandı Bildirimi ve EDL'yi .NET API'ye Gönder
             self.publisher.publish_analysis_completed(project_id, video_id, edl_dict)

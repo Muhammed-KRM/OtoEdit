@@ -27,7 +27,10 @@ class FaceTracker:
                 return tracking_data
 
             fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-            step_frames = max(1, int(fps * sample_interval_sec))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+            # Uzun videolarda (örn. 45-75 dk, 4+ GB) binlerce rastgele disk seek işlemini önlemek için azami 150 örneklem sınırı
+            min_step_for_cap = max(1, total_frames // 150) if total_frames > 0 else 1
+            step_frames = max(1, int(fps * sample_interval_sec), min_step_for_cap)
             frame_idx = 0
             previous_x = 0.5
 
@@ -42,14 +45,40 @@ class FaceTracker:
 
             haar_cascade = None
             if mp_face_solution is None:
-                cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-                haar_cascade = cv2.CascadeClassifier(cascade_path)
+                import os
+                cascade_base = getattr(getattr(cv2, "data", None), "haarcascades", "") or ""
+                cascade_path = os.path.join(cascade_base, "haarcascade_frontalface_default.xml")
+                if cascade_path and os.path.exists(cascade_path):
+                    haar_cascade = cv2.CascadeClassifier(cascade_path)
 
             face_ctx = (
                 mp_face_solution.FaceDetection(model_selection=1, min_detection_confidence=0.6)
                 if mp_face_solution is not None
                 else None
             )
+
+            has_detector = (face_ctx is not None) or (haar_cascade is not None and not haar_cascade.empty())
+            if not has_detector:
+                cap.release()
+                duration_sec = (total_frames / fps) if (total_frames > 0 and fps > 0) else 0.0
+                sample_step = max(sample_interval_sec, duration_sec / 150.0) if duration_sec > 0 else sample_interval_sec
+                t = 0.0
+                while t <= duration_sec and duration_sec > 0:
+                    ts = round(t, 2)
+                    tracking_data.append({
+                        "timestamp": ts,
+                        "time": ts,
+                        "raw_x": 0.5,
+                        "raw_y": 0.30,
+                        "center_x": 0.5,
+                        "center_y": 0.30,
+                        "width": 0.18,
+                        "height": 0.24,
+                        "smoothed_crop_x": 0.5
+                    })
+                    t += sample_step
+                logger.info(f"Yüz takibi hızlı modda tamamlandı (aktif dedektör yok, {len(tracking_data)} merkez koordinat üretildi).")
+                return tracking_data
 
             try:
                 while cap.isOpened():

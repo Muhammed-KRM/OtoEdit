@@ -60,9 +60,20 @@ class MinioClient:
             raise
 
     def download_video(self, project_id: str, video_id: str, object_key: str | None = None) -> str:
-        """Video dosyasını indirir."""
+        """Video dosyasını indirir (uzantı .mp4, .mov, .mkv vb. ne olursa olsun MinIO'dan otomatik bulur)."""
         if not object_key:
-            object_key = f"videos/{project_id}/{video_id}.mp4"
+            prefix = f"videos/{project_id}/{video_id}" if video_id else f"videos/{project_id}/"
+            try:
+                objs = list(self.client.list_objects(self.bucket_name, prefix=prefix))
+                if not objs and video_id:
+                    objs = list(self.client.list_objects(self.bucket_name, prefix=f"videos/{project_id}/"))
+                if objs:
+                    object_key = objs[0].object_name
+                    logger.info(f"MinIO'da kaynak video nesnesi bulundu: {object_key}")
+            except Exception as e:
+                logger.warning(f"MinIO nesne arama uyarısı ({prefix}): {e}")
+            if not object_key:
+                object_key = f"videos/{project_id}/{video_id}.mp4"
         return self.download_file(object_key)
 
     def upload_file(self, local_path: str, object_key: str, content_type: str = "application/octet-stream") -> str:

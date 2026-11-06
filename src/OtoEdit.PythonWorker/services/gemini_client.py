@@ -29,18 +29,7 @@ class GeminiClient:
         self.active_provider = getattr(Config, "AI_ACTIVE_PROVIDER", "antigravity")
 
         self._redis = None
-        try:
-            import redis
-            self._redis = redis.Redis(
-                host=getattr(Config, "REDIS_HOST", "redis"),
-                port=int(getattr(Config, "REDIS_PORT", 6379)),
-                password=getattr(Config, "REDIS_PASSWORD", None) or None,
-                db=int(getattr(Config, "REDIS_DB", 0)),
-                decode_responses=True,
-                socket_timeout=1.5
-            )
-        except Exception:
-            pass
+        self._redis_checked = False
 
         self.api_key = Config.GEMINI_API_KEY
         self.api_keys: List[str] = list(getattr(Config, "GEMINI_API_KEYS", []) or ([] if not self.api_key else [self.api_key]))
@@ -48,7 +37,7 @@ class GeminiClient:
         self.groq_api_key = getattr(Config, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
         self.groq_api_keys: List[str] = list(getattr(Config, "GROQ_API_KEYS", []) or ([] if not self.groq_api_key else [self.groq_api_key]))
         self._groq_key_idx = 0
-        self.groq_models = ["openai/gpt-oss-120b", "qwen/qwen3.8-27b", "openai/gpt-oss-20b"]
+        self.groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
         self.model = None
         self._genai = None
         self._proxy_dead = False
@@ -82,7 +71,6 @@ class GeminiClient:
         if not self.groq_api_keys:
             return None
         url = "https://api.groq.com/openai/v1/chat/completions"
-        import requests
         for model_name in self.groq_models:
             active_key = self.groq_api_keys[self._groq_key_idx % len(self.groq_api_keys)]
             self._groq_key_idx += 1
@@ -113,14 +101,43 @@ class GeminiClient:
                 logger.warning(f"Groq LLM ({model_name}) çağrısı başarısız: {ex}")
         return None
 
+    def _get_redis(self):
+        if getattr(self, "_redis_checked", False):
+            return self._redis
+        self._redis_checked = True
+        if not getattr(Config, "ENABLE_ANALYSIS_CACHE", False):
+            self._redis = None
+            return None
+        try:
+            import socket
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(0.2)
+            s.connect((getattr(Config, "REDIS_HOST", "redis"), int(getattr(Config, "REDIS_PORT", 6379))))
+            s.close()
+            import redis
+            r = redis.Redis(
+                host=getattr(Config, "REDIS_HOST", "redis"),
+                port=int(getattr(Config, "REDIS_PORT", 6379)),
+                password=getattr(Config, "REDIS_PASSWORD", None) or None,
+                db=int(getattr(Config, "REDIS_DB", 0)),
+                decode_responses=True,
+                socket_timeout=0.5,
+                socket_connect_timeout=0.5,
+            )
+            self._redis = r
+        except Exception:
+            self._redis = None
+        return self._redis
+
     def _get_active_provider_config(self) -> Dict[str, Any]:
         """Redis'ten veya Config'ten en güncel AI sağlayıcı ayarlarını alır."""
         provider = self.active_provider
         openrouter_key = self.openrouter_api_key
         openrouter_model = self.openrouter_model
-        if self._redis:
+        r = self._get_redis()
+        if r:
             try:
-                raw = self._redis.get("otoedit:settings:ai_provider")
+                raw = r.get("otoedit:settings:ai_provider")
                 if raw:
                     data = json.loads(raw)
                     provider = data.get("ActiveProvider") or data.get("activeProvider") or provider
@@ -129,7 +146,7 @@ class GeminiClient:
             except Exception:
                 pass
         return {
-            "provider": (provider or "antigravity").lower(),
+            "provider": (provider or "groq").lower(),
             "openrouter_key": openrouter_key,
             "openrouter_model": openrouter_model
         }
@@ -214,18 +231,67 @@ class GeminiClient:
             logger.warning(f"OpenRouter LLM ({target_model}) çağrısı başarısız: {ex}")
         return None
 
+    def _call_direct_gemini(self, prompt: str, max_retries: int = 2) -> Optional[str]:
+        """Google Gemini API çağrısı (google.generativeai veya doğrudan REST)."""
+        if self._gemini_dead or not self.api_keys:
+            return None
+        delay = 1.0
+        total_attempts = max(max_retries, min(len(self.api_keys), 3))
+        for attempt in range(1, total_attempts + 1):
+            try:
+                key = self.api_keys[self._key_idx % len(self.api_keys)]
+                self._key_idx += 1
+                if self._genai:
+                    self._genai.configure(api_key=key)
+                    model_name = getattr(self, "model_name", "gemini-2.5-flash")
+                    model = self._genai.GenerativeModel(model_name)
+                    response = model.generate_content(prompt)
+                    if response and hasattr(response, "text"):
+                        return response.text
+                # REST yedek
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
+                pdata = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
+                req = urllib.request.Request(url, data=pdata, headers={"Content-Type": "application/json"}, method="POST")
+                import ssl
+                ctx = ssl.create_default_context()
+                with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
+                    rdata = json.loads(resp.read().decode("utf-8"))
+                    cand = rdata.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                    if cand:
+                        return cand
+            except Exception as ex:
+                logger.warning(f"Direct Gemini API denemesi #{attempt} başarısız: {ex}")
+                if "402" in str(ex) or "RESOURCE_EXHAUSTED" in str(ex):
+                    logger.warning("Gemini API kredisi tükenmiş (402). Yedek sağlayıcıya geçiliyor.")
+                    break
+                if attempt < total_attempts:
+                    time.sleep(delay)
+        return None
+
     def _execute_with_retry(self, prompt: str, max_retries: int = 2) -> Optional[str]:
-        """Aktif sağlayıcıya (OpenRouter / Antigravity Proxy) göre LLM çağrısını gerçekleştirir."""
+        """Aktif sağlayıcıya göre LLM çağrısını gerçekleştirir (Groq / Gemini / OpenRouter / Proxy)."""
         cfg = self._get_active_provider_config()
         active_provider = cfg["provider"]
 
-        # 1. Eğer OpenRouter aktifse öncelikle OpenRouter'a gönder
+        # 1. Eğer Groq aktifse doğrudan Groq'a gönder (yüksek hız, güvenilir)
+        if active_provider == "groq" and self.groq_api_key:
+            res = self._call_groq_llm(prompt)
+            if res:
+                return res
+
+        # 2. Eğer Gemini doğrudan aktifse
+        if active_provider in ("gemini", "google") and self.api_keys:
+            res = self._call_direct_gemini(prompt, max_retries=max_retries)
+            if res:
+                return res
+
+        # 3. Eğer OpenRouter aktifse
         if active_provider == "openrouter":
             res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
             if res:
                 return res
 
-        # 2. Antigravity Proxy (Half-Open Circuit Breaker ile korunmuş)
+        # 4. Antigravity Proxy (varsa)
         now_ts = time.time()
         if getattr(self, "use_proxy", False) and now_ts >= self._proxy_disabled_until:
             url = f"{self.proxy_url}/chat/completions"
@@ -257,40 +323,25 @@ class GeminiClient:
                 else:
                     logger.warning(f"Antigravity Proxy denemesi başarısız ({ex}); yedek sağlayıcı deneniyor.")
 
-        # 2.1. Eğer Antigravity aktifken başarısız olduysa ve OpenRouter tanımlıysa OpenRouter dene
-        if active_provider != "openrouter" and cfg["openrouter_key"]:
-            res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
-            if res:
-                return res
-
-        # 3. Hızlı Groq Cloud LLM Yedeği
-        if self.groq_api_key:
+        # --- YEDEK ZİNCİRİ (FALLBACK CHAIN) ---
+        # Groq yedeği
+        if self.groq_api_key and active_provider != "groq":
             groq_res = self._call_groq_llm(prompt)
             if groq_res:
                 return groq_res
 
-        # 3. Gemini API Anahtar Havuzu Rotasyonu
-        if self._gemini_dead or not self.model or not self._genai or not self.api_keys:
-            return None
+        # Gemini doğrudan yedeği
+        if self.api_keys and active_provider not in ("gemini", "google"):
+            gemini_res = self._call_direct_gemini(prompt, max_retries=max_retries)
+            if gemini_res:
+                return gemini_res
 
-        delay = 1.5
-        total_attempts = max(max_retries, min(len(self.api_keys), 4))
-        for attempt in range(1, total_attempts + 1):
-            try:
-                key = self.api_keys[self._key_idx % len(self.api_keys)]
-                self._key_idx += 1
-                self._genai.configure(api_key=key)
-                self.model = self._genai.GenerativeModel(getattr(self, "model_name", "gemini-2.5-flash"))
-                response = self.model.generate_content(prompt)
-                if response and hasattr(response, "text"):
-                    return response.text
-            except Exception as ex:
-                logger.warning(f"Gemini API denemesi #{attempt} başarısız: {ex}")
-                if "API_KEY_INVALID" in str(ex) and attempt >= len(self.api_keys):
-                    self._gemini_dead = True
-                    break
-                if attempt < total_attempts:
-                    time.sleep(delay)
+        # OpenRouter yedeği
+        if cfg.get("openrouter_key") and active_provider != "openrouter":
+            res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
+            if res:
+                return res
+
         return None
 
     def is_available(self) -> bool:

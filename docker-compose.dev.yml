@@ -80,6 +80,7 @@ services:
       - ANTIGRAVITY_PROXY_URL=${ANTIGRAVITY_PROXY_URL:-http://host.docker.internal:8045/v1}
       - ANTIGRAVITY_PROXY_KEY=${ANTIGRAVITY_PROXY_KEY:-}
       - ANTIGRAVITY_PROXY_MODEL=${ANTIGRAVITY_PROXY_MODEL:-gemini-3.8-flash-tiered}
+      - AI_ACTIVE_PROVIDER=${AI_ACTIVE_PROVIDER:-groq}
       - STT_ENGINE_ORDER=${STT_ENGINE_ORDER:-gemini_transcribe,groq,proxy_gemini,local_whisper}
       - STT_CHUNK_MAX_SEC=${STT_CHUNK_MAX_SEC:-600}
       - LOCAL_WHISPER_MODEL=${LOCAL_WHISPER_MODEL:-large-v3-turbo}

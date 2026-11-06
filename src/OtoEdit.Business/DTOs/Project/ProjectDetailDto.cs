@@ -21,4 +21,7 @@ public record ProjectDetailDto
     public int? EdlVersiyon { get; init; }
     public int ChatMesajSayisi { get; init; }
     public RenderStatusDto? SonRender { get; init; }
+    public bool HasVideo => Video != null;
+    public bool HasEdl => EdlVersiyon.HasValue && EdlVersiyon.Value > 0;
+    public bool HasRenderOutput => SonRender != null && (!string.IsNullOrEmpty(SonRender.CiktiYolu) || !string.IsNullOrEmpty(SonRender.IndirmeUrl));
 }

@@ -33,10 +33,14 @@ export interface ProjectDetailDto {
   videoFormati: VideoFormati;
   templateId?: string;
   templateAdi?: string;
+  templateAd?: string;
   gestureCommandsEnabled: boolean;
   audioEnhancementEnabled: boolean;
   olusturulmaTarihi: string;
   guncellenmeTarihi?: string;
+  video?: any;
+  edlVersiyon?: number | null;
+  sonRender?: any;
   hasEdl: boolean;
   hasVideo: boolean;
   hasRenderOutput: boolean;

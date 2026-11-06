@@ -1,4 +1,5 @@
 import threading
+import time
 import json
 try:
     import importlib
@@ -27,7 +28,7 @@ class RabbitMQPublisher:
             port=Config.RABBITMQ_PORT,
             virtual_host=Config.RABBITMQ_VHOST,
             credentials=credentials,
-            heartbeat=60,
+            heartbeat=0,
             blocked_connection_timeout=300
         )
         return pika.BlockingConnection(parameters)
@@ -41,34 +42,49 @@ class RabbitMQPublisher:
         return self._channel
 
     def publish(self, exchange_name: str, message_dict: dict):
-        """Verilen exchange üzerine raw JSON mesajı yayınlar (Thread-safe)."""
+        """Verilen exchange üzerine raw JSON mesajı yayınlar (Thread-safe ve otomatik yeniden bağlanmalı)."""
         with self._lock:
-            try:
-                channel = self._get_channel()
-                exchanges = [exchange_name]
-                if not exchange_name.startswith("OtoEdit.Business.Events:"):
-                    exchanges.append(f"OtoEdit.Business.Events:{exchange_name}")
+            exchanges = [exchange_name]
+            if not exchange_name.startswith("OtoEdit.Business.Events:"):
+                exchanges.append(f"OtoEdit.Business.Events:{exchange_name}")
 
-                body = json.dumps(message_dict, ensure_ascii=False).encode('utf-8')
-                properties = pika.BasicProperties(
-                    content_type='application/json',
-                    delivery_mode=2  # Persistent mesaj
-                )
+            body = json.dumps(message_dict, ensure_ascii=False).encode('utf-8')
+            properties = pika.BasicProperties(
+                content_type='application/json',
+                delivery_mode=2  # Persistent mesaj
+            )
 
-                for ex in exchanges:
-                    channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
-                    channel.basic_publish(
-                        exchange=ex,
-                        routing_key='',
-                        body=body,
-                        properties=properties
-                    )
-                    logger.info(f"RabbitMQ event yayınlandı: exchange={ex}")
-            except Exception as e:
-                logger.error(f"RabbitMQ yayın hatası (exchange={exchange_name}): {e}", exc_info=True)
-                # Bağlantıyı sıfırla ki bir sonraki istekte yeniden denesin
-                self._close()
-                raise
+            max_attempts = 3
+            last_error = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    channel = self._get_channel()
+                    for ex in exchanges:
+                        channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
+                        channel.basic_publish(
+                            exchange=ex,
+                            routing_key='',
+                            body=body,
+                            properties=properties
+                        )
+                        logger.info(f"RabbitMQ event yayınlandı: exchange={ex}")
+                    return
+                except Exception as e:
+                    last_error = e
+                    # Bozuk/kopmuş soketi sıfırla ve yeniden dene
+                    self._close()
+                    if attempt < max_attempts:
+                        logger.warning(
+                            f"RabbitMQ yayın bağlantısı koptu (exchange={exchange_name}, deneme={attempt}/{max_attempts}), "
+                            f"yeniden bağlanıp tekrar deneniyor: {e}"
+                        )
+                        time.sleep(0.5 * attempt)
+                    else:
+                        logger.error(
+                            f"RabbitMQ yayın hatası ({max_attempts} deneme başarısız, exchange={exchange_name}): {e}",
+                            exc_info=True
+                        )
+            raise last_error
 
     def publish_stage_changed(self, project_id: str, video_id: str, asama: str, yuzde: int, mesaj: str = ""):
         """Pipeline aşama ilerleme bildirimini .NET'e gönderir."""

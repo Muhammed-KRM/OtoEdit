@@ -95,10 +95,14 @@ class LlmDirector:
 
         # AŞAMA 3: Kelime-Senkronlu Kurgu Olaylarını Somutlaştır
         # NOT: Sıradan nefes/retake kesimlerine (normalized_cuts[:8]) körlemesine geçiş efekti
-        # eklenmez; geçiş efektleri YALNIZCA anlamlı konu/bölüm (chapter) sınırlarında üretilir
-        # ve yalnızca hızlı sola kayma (slideleft) + temiz swish-whoosh sesi kullanılır.
+        # eklenmez; geçiş efektleri YALNIZCA tema profili izin veriyorsa ve akademik ders/konuşmacı
+        # gibi tek kamera anlatımları DIŞINDA anlamlı bölüm sınırlarında üretilir.
+        allow_chapter_transitions = (
+            theme_profile.id != "academic_lecture"
+            and bool(getattr(theme_profile, "allowed_transitions", None))
+        )
         for ch_idx, ch in enumerate(chapter_plans):
-            if ch_idx > 0 and ch.start_sec > 3.5:
+            if ch_idx > 0 and ch.start_sec > 3.5 and allow_chapter_transitions:
                 tr_ts = round(ch.start_sec, 2)
                 sfx_ts = tr_ts
 

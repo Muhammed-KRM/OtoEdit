@@ -23,6 +23,7 @@ public class VideoManager : IVideoService
     private readonly ILogService _logService;
     private readonly ILogger<VideoManager> _logger;
     private readonly IEdlService? _edlService;
+    private readonly ICacheService? _cacheService;
 
     private static readonly string[] AllowedExtensions = { ".mp4", ".mkv", ".avi", ".mov", ".webm" };
     private const long MaxFileSize = 53687091200L; // 50GB
@@ -34,7 +35,8 @@ public class VideoManager : IVideoService
         IPublishEndpoint publishEndpoint,
         ILogService logService,
         ILogger<VideoManager> logger,
-        IEdlService? edlService = null)
+        IEdlService? edlService = null,
+        ICacheService? cacheService = null)
     {
         _videoRepository = videoRepository;
         _projectRepository = projectRepository;
@@ -43,6 +45,7 @@ public class VideoManager : IVideoService
         _logService = logService;
         _logger = logger;
         _edlService = edlService;
+        _cacheService = cacheService;
     }
 
     public async Task<VideoListDto> UploadVideoAsync(
@@ -129,6 +132,11 @@ public class VideoManager : IVideoService
             await _projectRepository.UpdateStatusAsync(projectId, ProjectDurumu.AnalizEdiliyor);
         }
 
+        if (_cacheService != null)
+        {
+            await _cacheService.RemoveAsync($"project:{projectId}", cancellationToken);
+        }
+
         // 4. RabbitMQ üzerinden Python Worker'a event publish et
         await _publishEndpoint.Publish(new VideoUploadedEvent
         {
@@ -203,6 +211,11 @@ public class VideoManager : IVideoService
 
         _videoRepository.Delete(video);
         await _videoRepository.SaveChangesAsync();
+
+        if (_cacheService != null)
+        {
+            await _cacheService.RemoveAsync($"project:{projectId}", cancellationToken);
+        }
     }
 
     private static readonly HttpClient _httpClient = new HttpClient();
@@ -254,6 +267,10 @@ public class VideoManager : IVideoService
             ?? throw new NotFoundException("Projeye ait video bulunamadı", projectId);
 
         await _projectRepository.UpdateStatusAsync(projectId, ProjectDurumu.AnalizEdiliyor);
+        if (_cacheService != null)
+        {
+            await _cacheService.RemoveAsync($"project:{projectId}", cancellationToken);
+        }
 
         await _publishEndpoint.Publish(new VideoUploadedEvent
         {

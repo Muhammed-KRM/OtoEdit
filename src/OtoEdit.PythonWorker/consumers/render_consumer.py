@@ -160,7 +160,10 @@ class RenderConsumer:
             clean_key = source_url.replace("s3://", "").lstrip("/")
             if clean_key.startswith(f"{self.minio.bucket_name}/"):
                 clean_key = clean_key[len(self.minio.bucket_name) + 1:]
-            return self.minio.download_file(clean_key)
+            try:
+                return self.minio.download_file(clean_key)
+            except Exception as ex:
+                logger.warning(f"sourceVideoUrl ({clean_key}) indirilemedi, proje/video ID ile aranıyor: {ex}")
 
         return self.minio.download_video(project_id, video_id)
 
