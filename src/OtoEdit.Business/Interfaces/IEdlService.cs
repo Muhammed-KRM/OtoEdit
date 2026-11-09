@@ -12,4 +12,6 @@ public interface IEdlService
     Task<EdlDto> RedoAsync(Guid projectId, CancellationToken cancellationToken = default);
     Task<EditDecisionList> CreateOrUpdateAsync(Guid projectId, JsonDocument edlJson, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<double>> EnsureHighResolutionWaveformAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<EdlDto> ApproveScenarioAsync(Guid projectId, CancellationToken cancellationToken = default);
+    Task<EdlDto> ReviseScenarioAsync(Guid projectId, string userFeedback, CancellationToken cancellationToken = default);
 }

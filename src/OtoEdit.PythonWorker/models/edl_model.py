@@ -241,4 +241,5 @@ class EdlDocument(BaseModel):
     proactiveSuggestions: List[Dict[str, Any]] = Field(default_factory=list)
     repurposing: RepurposingData = Field(default_factory=RepurposingData)
     template: Dict[str, Any] = Field(default_factory=dict)
+    masterScript: Optional[Dict[str, Any]] = None
     audioPeaks: Optional[List[float]] = None

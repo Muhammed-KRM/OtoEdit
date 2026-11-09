@@ -5,6 +5,7 @@ export enum ProjectDurumu {
   AnalizTamamlandi = 'AnalizTamamlandi',
   RenderEdiliyor = 'RenderEdiliyor',
   Tamamlandi = 'Tamamlandi',
+  SenaryoOnayiBekliyor = 'SenaryoOnayiBekliyor',
   Hata = 'Hata'
 }
 

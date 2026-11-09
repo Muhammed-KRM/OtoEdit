@@ -450,7 +450,7 @@ class TranscriptVerifier:
 
         agent_findings: List[Dict[str, Any]] = []
         if self.gemini and self.gemini.is_available() and chunks:
-            max_workers = min(2, len(chunks))
+            max_workers = 1  # Yerel proxy kuyruğunu tıkamamak için parçaları sıralı çalıştır
             pool = ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="RetakeAgentPool")
             try:
                 futures = {
@@ -464,15 +464,15 @@ class TranscriptVerifier:
                     for c_idx, c_words in enumerate(chunks)
                 }
                 try:
-                    for fut in as_completed(futures, timeout=25):
+                    for fut in as_completed(futures, timeout=300):
                         try:
-                            res = fut.result(timeout=3)
+                            res = fut.result()
                             if res:
                                 agent_findings.extend(res)
                         except Exception as ex:
                             logger.warning(f"Paralel parça ajanı sonucu alınamadı: {ex}")
                 except TimeoutError:
-                    logger.warning("⏱️ Çok Ajanlı LLM Retake denetimi zaman aşımına uğradı (25s). TakeAligner sonuçları korunarak güvenle devam ediliyor.")
+                    logger.warning("⏱️ Çok Ajanlı LLM Retake denetimi zaman aşımına uğradı (300s). TakeAligner sonuçları korunarak güvenle devam ediliyor.")
                 except Exception as loop_ex:
                     logger.warning(f"LLM ajan döngüsü hatası: {loop_ex}")
             finally:

@@ -24,6 +24,9 @@ class PipelineStage:
     EDL_OLUSTURMA = "EdlOlusturma"
     RENDER = "Render"
     TAMAMLANDI = "Tamamlandi"
+    SENARYO_BIRLESTIRME = "SenaryoBirlestirme"
+    SENARYO_DENETIMI = "SenaryoDenetimi"
+    SENARYO_ONAYI_BEKLIYOR = "SenaryoOnayiBekliyor"
 
     # Kolaylık ve Takma Adlar (.NET PipelineAsamasi enum eşleşmeleri)
     RETAKE = "SessizlikAlgilama"
@@ -40,9 +43,16 @@ class RabbitMQConstants:
     EXCHANGE_RENDER_REQUESTED = "RenderRequestedEvent"
     QUEUE_RENDER_REQUESTED = "render-requested"
 
+    EXCHANGE_SCENARIO_REVISION_REQUESTED = "ScenarioRevisionRequestedEvent"
+    QUEUE_SCENARIO_REVISION_REQUESTED = "scenario-revision-requested"
+
+    EXCHANGE_SCENARIO_APPROVED = "ScenarioApprovedEvent"
+    QUEUE_SCENARIO_APPROVED = "scenario-approved"
+
     # Giden Mesajlar (Python -> .NET MassTransit)
     EXCHANGE_STAGE_CHANGED = "PipelineStageChangedEvent"
     EXCHANGE_ANALYSIS_COMPLETED = "AnalysisCompletedEvent"
+    EXCHANGE_SCENARIO_APPROVAL_REQUIRED = "ScenarioApprovalRequiredEvent"
     EXCHANGE_PIPELINE_ERROR = "PipelineErrorEvent"
     EXCHANGE_RENDER_COMPLETED = "RenderCompletedEvent"
 

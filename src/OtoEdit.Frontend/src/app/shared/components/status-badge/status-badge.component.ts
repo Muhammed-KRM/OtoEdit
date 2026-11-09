@@ -36,6 +36,7 @@ export class StatusBadgeComponent {
       case ProjectDurumu.AnalizTamamlandi: return 'Analiz Hazır';
       case ProjectDurumu.RenderEdiliyor: return 'Render Ediliyor';
       case ProjectDurumu.Tamamlandi: return 'Tamamlandı';
+      case ProjectDurumu.SenaryoOnayiBekliyor: return 'Senaryo Onayı Bekliyor';
       case ProjectDurumu.Hata: return 'Hata';
       default: return 'Bilinmiyor';
     }
@@ -50,6 +51,9 @@ export class StatusBadgeComponent {
     }
     if (this.status === ProjectDurumu.AnalizTamamlandi) {
       return 'bg-purple-500/10 text-purple-400 border border-purple-500/20';
+    }
+    if (this.status === ProjectDurumu.SenaryoOnayiBekliyor) {
+      return 'bg-amber-500/10 text-amber-400 border border-amber-500/20';
     }
     if (this.status === ProjectDurumu.Hata || (this.isRender && this.status === RenderDurumu.Hata)) {
       return 'bg-rose-500/10 text-rose-400 border border-rose-500/20';

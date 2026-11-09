@@ -80,6 +80,7 @@ builder.Services.AddBusinessLayer(builder.Configuration, x =>
 {
     // Python Worker'dan gelen event'leri dinleyen MassTransit Consumer'lar
     x.AddConsumer<AnalysisNotificationConsumer>();
+    x.AddConsumer<ScenarioNotificationConsumer>();
     x.AddConsumer<RenderNotificationConsumer>();
     x.AddConsumer<PipelineStageChangedConsumer>();
     x.AddConsumer<PipelineErrorConsumer>();

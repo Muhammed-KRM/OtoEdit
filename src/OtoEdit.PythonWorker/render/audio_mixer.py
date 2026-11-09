@@ -308,6 +308,11 @@ class AudioMixer:
                 raw_vol = float(clip.get("volume") if clip.get("volume") is not None else 0.8)
                 # Eğer volume 0..100 yüzdelik olarak geldiyse (örn. video overlay volume=100) 0.0..1.0 aralığına çevir
                 volume = (raw_vol / 100.0) if raw_vol > 1.5 else raw_vol
+                # SFX ses efektlerinin konuşma sesleri altında ezilmemesi için net duyulabilir seviyeye yükselt
+                if 0.01 <= volume <= 0.40:
+                    volume = min(1.0, volume * 3.5)
+                elif 0.40 < volume < 0.70:
+                    volume = min(1.0, volume * 1.5)
                 if volume <= 0.005:
                     continue
                 fade_in = float(clip.get("fadeIn") or 0.0)

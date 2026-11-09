@@ -103,24 +103,31 @@ public class RequestResponseLoggingMiddleware
         {
             stopwatch.Stop();
 
-            responseBodyStream.Seek(0, SeekOrigin.Begin);
             string? responseBody = null;
-            if (responseBodyStream.Length <= 65536)
+            try
             {
-                using var reader = new StreamReader(responseBodyStream, Encoding.UTF8, leaveOpen: true);
-                var rawRes = await reader.ReadToEndAsync();
-                if (!string.IsNullOrEmpty(rawRes))
+                responseBodyStream.Seek(0, SeekOrigin.Begin);
+                if (responseBodyStream.Length <= 65536)
                 {
-                    var slicedRes = rawRes.Length > 4000 ? rawRes[..4000] : rawRes;
-                    responseBody = slicedRes.Replace("\0", string.Empty);
+                    using var reader = new StreamReader(responseBodyStream, Encoding.UTF8, leaveOpen: true);
+                    var rawRes = await reader.ReadToEndAsync();
+                    if (!string.IsNullOrEmpty(rawRes))
+                    {
+                        var slicedRes = rawRes.Length > 4000 ? rawRes[..4000] : rawRes;
+                        responseBody = slicedRes.Replace("\0", string.Empty);
+                    }
                 }
+                else
+                {
+                    responseBody = $"[LARGE_RESPONSE:{responseBodyStream.Length}_BYTES]";
+                }
+                responseBodyStream.Seek(0, SeekOrigin.Begin);
+                await responseBodyStream.CopyToAsync(originalBodyStream);
             }
-            else
+            finally
             {
-                responseBody = $"[LARGE_RESPONSE:{responseBodyStream.Length}_BYTES]";
+                context.Response.Body = originalBodyStream;
             }
-            responseBodyStream.Seek(0, SeekOrigin.Begin);
-            await responseBodyStream.CopyToAsync(originalBodyStream);
 
             // Log kaydını hazırla ve DB'ye asenkron yaz
             try

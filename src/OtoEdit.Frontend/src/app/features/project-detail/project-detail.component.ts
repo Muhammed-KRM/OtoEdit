@@ -9,6 +9,7 @@ import { VideoService } from '../../core/services/video.service';
 import { TemplateService } from '../../core/services/template.service';
 import { SignalrService } from '../../core/services/signalr.service';
 import { SettingsService } from '../../core/services/settings.service';
+import { EdlService } from '../../core/services/edl.service';
 import { ProjectDetailDto, ProjectDurumu, VideoFormati } from '../../core/models/project.model';
 import { TemplateDto } from '../../core/models/template.model';
 import { NavbarComponent } from '../../shared/components/navbar/navbar.component';
@@ -48,25 +49,151 @@ import { ProgressBarComponent } from '../../shared/components/progress-bar/progr
       </div>
 
       <!-- Live Analysis Progress (SignalR) -->
-      <div *ngIf="isAnalyzing()" class="mb-8 p-6 rounded-2xl glass-panel border border-brand-cyan/30 shadow-glow-sm animate-fade-in">
-        <div class="flex items-center justify-between gap-4 mb-2">
-          <h3 class="text-base font-bold text-white flex items-center gap-2">
-            <span class="w-2.5 h-2.5 rounded-full bg-brand-cyan animate-ping"></span>
-            Yapay Zeka Video Analiz Hattı Çalışıyor
-          </h3>
-          <button
-            type="button"
-            (click)="goToEditor()"
-            class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-brand-cyan border border-brand-cyan/30 font-semibold transition-all">
-            Beklemeden Editöre Geç →
-          </button>
+      <div *ngIf="isAnalyzing()" class="mb-8 p-6 rounded-2xl glass-panel border border-brand-cyan/30 shadow-glow-sm animate-fade-in space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span class="w-2.5 h-2.5 rounded-full bg-brand-cyan animate-ping"></span>
+              Yapay Zeka Video Analiz Hattı Çalışıyor
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">
+              Seçtiğiniz akıllı kurgu adımları Gemini 3.8 Flash modeliyle titizlikle yürütülüyor.
+            </p>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-2">
+            <!-- Canlı Süre Sayacı -->
+            <div class="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-dark-900 border border-brand-cyan/40 text-brand-cyan font-mono font-bold text-xs shadow-inner">
+              <span class="text-sm">⏱️</span>
+              <span>Yapay Zeka: {{ formatElapsedTime(aiElapsedSeconds()) }}</span>
+            </div>
+
+            <!-- Yedek Kural Motoruna Geç Butonu -->
+            <button
+              type="button"
+              [disabled]="fallbackRequested()"
+              (click)="requestFallbackToRules()"
+              title="Yapay zeka yanıtını beklemek istemiyorsanız dahili hızlı kural motoruna geçebilirsiniz"
+              class="text-xs px-3.5 py-1.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 disabled:opacity-50 text-amber-300 border border-amber-500/40 font-bold transition-all flex items-center gap-1.5 cursor-pointer">
+              <span>⚡</span>
+              <span>{{ fallbackRequested() ? 'Kural Motoruna Geçiliyor...' : 'Yedek Kural Motoruna Geç' }}</span>
+            </button>
+
+            <!-- Beklemeden Editöre Geç -->
+            <button
+              type="button"
+              (click)="goToEditor()"
+              class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 font-semibold transition-all">
+              Editöre Geç →
+            </button>
+          </div>
         </div>
-        <p class="text-xs text-slate-400 mb-4">Seçtiğiniz akıllı kurgu adımları yürütülüyor...</p>
         
         <app-progress-bar 
           [percentage]="analysisPercentage()" 
           [label]="analysisStageMessage()">
         </app-progress-bar>
+      </div>
+
+      <!-- Otonom Kurgu Senaryosu Onay & Revizyon Paneli (3. Tur Sonrası / Senaryo İnceleme) -->
+      <div *ngIf="masterScript() && (showScenarioPanel() || project()?.durum === ProjectDurumu.SenaryoOnayiBekliyor || masterScript()?.requires_user_approval)" class="mb-8 p-6 rounded-2xl glass-panel border border-amber-500/40 bg-slate-900/80 shadow-glow-sm animate-fade-in space-y-5">
+        <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div>
+            <div class="flex items-center gap-2.5">
+              <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                🎬 Kurgu Senaryosu ({{ masterScript()?.iteration_count || 1 }} Tur AI Denetimi)
+              </span>
+              <span class="text-xs text-slate-400">
+                Tema: <strong class="text-slate-200">{{ masterScript()?.theme_display_name || masterScript()?.theme_profile_id }}</strong>
+              </span>
+            </div>
+            <h3 class="text-lg font-bold text-white mt-1.5">
+              Bu Kurgu Senaryosunu Uygulayalım mı, Yoksa Düzeltme mi Yapalım?
+            </h3>
+            <p class="text-xs text-amber-200/90 mt-1" *ngIf="masterScript()?.last_critic_message">
+              🤖 <strong>Başeditör AI Notu:</strong> {{ masterScript()?.last_critic_message }}
+            </p>
+          </div>
+          <div class="flex items-center gap-2.5 shrink-0">
+            <button
+              type="button"
+              [disabled]="isScenarioBusy()"
+              (click)="approveScenarioAndOpenEditor()"
+              class="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 text-slate-950 font-extrabold text-xs transition-all shadow-lg">
+              ✅ Senaryoyu Beğendim, Uygula
+            </button>
+          </div>
+        </div>
+
+        <!-- Sahne Parçaları (Parça 1 -> [Geçiş] -> Parça 2 ...) -->
+        <div class="space-y-3 max-h-96 overflow-y-auto pr-1">
+          <ng-container *ngFor="let sc of masterScript()?.scenes; let last = last">
+            <div class="p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-2.5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-2">
+                  <span class="px-2 py-0.5 rounded bg-brand-cyan/15 text-brand-cyan text-xs font-bold border border-brand-cyan/30">
+                    Parça #{{ sc.scene_id }} ({{ sc.start_sec }}s - {{ sc.end_sec }}s)
+                  </span>
+                  <span class="text-xs font-bold text-white">{{ sc.title_tr }}</span>
+                </div>
+                <span class="text-[11px] px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono">
+                  {{ sc.narrative_role }}
+                </span>
+              </div>
+
+              <p class="text-xs text-slate-300 italic leading-relaxed bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                "{{ sc.transcript_text }}"
+              </p>
+
+              <!-- Parçadaki Planlanan Editler (Yazılar, Kişi/Eser Görselleri, Listeler) -->
+              <div class="flex flex-wrap gap-2 pt-1" *ngIf="sc.items?.length; else emptySceneItems">
+                <div *ngFor="let it of sc.items" class="px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700/80 text-xs flex items-center gap-2">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                    {{ it.action_type }}
+                  </span>
+                  <span class="font-bold text-white">{{ it.text_primary }}</span>
+                  <span *ngIf="it.text_secondary" class="text-slate-400">({{ it.text_secondary }})</span>
+                  <span class="text-[10px] text-slate-500 font-mono">{{ it.start_sec }}s-{{ it.end_sec }}s</span>
+                </div>
+              </div>
+              <ng-template #emptySceneItems>
+                <p class="text-[11px] text-slate-500">Bu parçada ek görsel/yazı bindirmesi bulunmuyor.</p>
+              </ng-template>
+            </div>
+
+            <!-- Sahne Arası [GEÇİŞ] İşareti -->
+            <div *ngIf="sc.transition_after || !last" class="flex items-center justify-center gap-3 py-1">
+              <div class="h-px bg-amber-500/30 flex-1"></div>
+              <span class="px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/40 text-amber-300 text-[11px] font-bold">
+                ⚡ [GEÇİŞ {{ sc.transition_after?.timestamp ? ('@ ' + sc.transition_after.timestamp + 's') : '' }}]
+                {{ sc.transition_after?.reason || 'Yeni Konu / Tanımlama Geçişi' }}
+              </span>
+              <div class="h-px bg-amber-500/30 flex-1"></div>
+            </div>
+          </ng-container>
+        </div>
+
+        <!-- Kullanıcı Doğal Dil Revizyon Kutusu -->
+        <div class="pt-3 border-t border-slate-800 space-y-2">
+          <label class="block text-xs font-bold text-slate-300">
+            ✏️ Senaryoda Değişiklik / Revize İste (Örn: "2. parçaya 'Pragmatik Hürriyet' başlığı ekle, ilk yazıyı kaldır"):
+          </label>
+          <div class="flex flex-col sm:flex-row gap-2.5">
+            <input
+              type="text"
+              [(ngModel)]="scenarioFeedbackText"
+              (keydown.enter)="submitScenarioRevision()"
+              placeholder="Şu kısımlara şunu ekle, şuradaki yazıyı şöyle düzelt..."
+              class="flex-1 px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400" />
+            <button
+              type="button"
+              [disabled]="isScenarioBusy() || !scenarioFeedbackText.trim()"
+              (click)="submitScenarioRevision()"
+              class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 font-bold text-xs transition-all shrink-0">
+              {{ isScenarioBusy() ? 'Revize Ediliyor...' : '🔄 Senaryoyu Revize Et' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- Analysis Error Banner -->
@@ -519,6 +646,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   private videoService = inject(VideoService);
   private templateService = inject(TemplateService);
   private signalr = inject(SignalrService);
+  private edlService = inject(EdlService);
   readonly settingsService = inject(SettingsService);
 
   readonly project = signal<ProjectDetailDto | null>(null);
@@ -528,7 +656,14 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   readonly analysisPercentage = signal<number>(0);
   readonly analysisStageMessage = signal<string>('Analiz başlıyor...');
   readonly isAnalyzing = signal<boolean>(false);
+  readonly aiElapsedSeconds = signal<number>(0);
+  readonly fallbackRequested = signal<boolean>(false);
+  private aiTimerSub?: any;
   readonly analysisError = signal<string | null>(null);
+  readonly masterScript = signal<any | null>(null);
+  readonly showScenarioPanel = signal<boolean>(false);
+  readonly isScenarioBusy = signal<boolean>(false);
+  scenarioFeedbackText = '';
   readonly VideoFormati = VideoFormati;
   readonly ProjectDurumu = ProjectDurumu;
 
@@ -558,7 +693,48 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     if (id) {
       this.signalr.leaveProjectGroup(id);
     }
+    this.stopAiTimer();
     this.sub.unsubscribe();
+  }
+
+  formatElapsedTime(totalSec: number): string {
+    const mins = Math.floor(totalSec / 60);
+    const secs = totalSec % 60;
+    const mm = mins < 10 ? '0' + mins : String(mins);
+    const ss = secs < 10 ? '0' + secs : String(secs);
+    return `${mm}:${ss}`;
+  }
+
+  requestFallbackToRules(): void {
+    const id = this.project()?.id;
+    if (!id) return;
+    this.fallbackRequested.set(true);
+    this.videoService.fallbackToRules(id).subscribe({
+      next: () => {
+        this.analysisStageMessage.set('⚡ Kullanıcı isteğiyle yedek kural motoruna geçiliyor...');
+      },
+      error: (err) => {
+        console.error('Yedek kural motoruna geçilemedi:', err);
+        this.fallbackRequested.set(false);
+        alert('Geçiş isteği iletilemedi: ' + (err.error?.detail || err.message));
+      }
+    });
+  }
+
+  private startAiTimer(): void {
+    if (this.aiTimerSub) return;
+    this.aiElapsedSeconds.set(0);
+    this.fallbackRequested.set(false);
+    this.aiTimerSub = setInterval(() => {
+      this.aiElapsedSeconds.update(s => s + 1);
+    }, 1000);
+  }
+
+  private stopAiTimer(): void {
+    if (this.aiTimerSub) {
+      clearInterval(this.aiTimerSub);
+      this.aiTimerSub = undefined;
+    }
   }
 
   isDirectEditorMode(): boolean {
@@ -626,15 +802,151 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   }
 
   private loadProject(id: string): void {
+    if (id === 'demo-scenario' || id === 'demo') {
+      const demoProject: ProjectDetailDto = {
+        id: 'demo-scenario',
+        ad: 'Adalet ve Hürriyet Nazariyesi — Otonom Kurgu Testi',
+        aciklama: 'Örnek metin transkripti üzerinden 5 Aşamalı Otonom Yönetmen kurgu senaryosu onay & revizyon döngüsü testi.',
+        durum: ProjectDurumu.SenaryoOnayiBekliyor,
+        videoFormati: VideoFormati.Yatay_16_9,
+        gestureCommandsEnabled: true,
+        audioEnhancementEnabled: true,
+        hasVideo: true,
+        hasEdl: true,
+        hasRenderOutput: false,
+        olusturulmaTarihi: new Date().toISOString(),
+        guncellenmeTarihi: new Date().toISOString()
+      };
+      this.project.set(demoProject);
+      this.masterScript.set({
+        iteration_count: 3,
+        requires_user_approval: true,
+        theme_profile_id: 'academic_lecture',
+        theme_display_name: 'Akademik / Felsefi Ders (CapCut & YouTube Stili)',
+        last_critic_message: '3 tur AI başeditör denetimi tamamlandı. Sahne 1-2 retorik geçişi ve düşünür listesi (Hobbes, Topçu) eklendi; son onay ve kullanıcı revizyonu bekleniyor.',
+        scenes: [
+          {
+            scene_id: 1,
+            start_sec: 0.0,
+            end_sec: 29.25,
+            title_tr: 'Giriş: Adalet Nazariyesi ve Mizan',
+            narrative_role: 'Tez Kapanışı & Kozmik Denge',
+            transcript_text: 'Değerli izleyenler, önceki dersimizde adalet nazariyesinin köklerine inmiş; efradını câmi, ağyarını mâni tarifiyle adaletin ne olduğunu, kâinattaki kozmik mizanı ve adalet-i mahza ilkesini incelemiştik...',
+            items: [
+              { action_type: 'TEXT_ACCENT', text_primary: 'Efrâdını Câmi, Ağyârını Mâni', text_secondary: 'Klasik Mantık Tanımı', start_sec: 2.5, end_sec: 8.0 },
+              { action_type: 'LOWER_THIRD', text_primary: 'Adalet-i Mahza İlkesi', text_secondary: 'Temel Aksiyom', start_sec: 14.0, end_sec: 21.0 },
+              { action_type: 'SOUND_FX', text_primary: 'Whoosh Deep Transition', text_secondary: 'Geçiş Efekti', start_sec: 28.5, end_sec: 29.25 }
+            ],
+            transition_after: {
+              transition_type: 'thesis_closure -> philosophical_foundation'
+            }
+          },
+          {
+            scene_id: 2,
+            start_sec: 29.25,
+            end_sec: 65.25,
+            title_tr: 'Temel Alıntı & Felsefi Yol Haritası',
+            narrative_role: 'Alıntı Tanımı & Düşünür Listesi',
+            transcript_text: 'Bediüzzaman Said Nursi’nin o çarpıcı tespitiyle söylersek: "Hürriyet, imanın bir hassasıdır." ... Thomas Hobbes’un korku felsefesinden Nurettin Topçu’nun isyan ahlakına kadar hakiki hürriyetin mimarisini inşa edeceğiz.',
+            items: [
+              { action_type: 'QUOTE_CARD', text_primary: 'Bediüzzaman Said Nursi', text_secondary: '"Hürriyet, imanın bir hassasıdır."', start_sec: 29.5, end_sec: 42.0 },
+              { action_type: 'PROGRESSIVE_LIST', text_primary: 'Thomas Hobbes', text_secondary: 'Korku Felsefesi', start_sec: 50.0, end_sec: 54.0 },
+              { action_type: 'PROGRESSIVE_LIST', text_primary: 'Nurettin Topçu', text_secondary: 'İsyan Ahlakı', start_sec: 54.0, end_sec: 58.0 },
+              { action_type: 'LOWER_THIRD', text_primary: 'Kolektif Aklın 111 Sırrı', text_secondary: 'Meşveret Nizamı', start_sec: 59.0, end_sec: 64.0 }
+            ],
+            transition_after: {
+              transition_type: 'roadmap_promise -> modern_critique'
+            }
+          },
+          {
+            scene_id: 3,
+            start_sec: 65.25,
+            end_sec: 85.0,
+            title_tr: 'Modern Beşerî Hukuk ve Pragmatizm Eleştirisi',
+            narrative_role: 'Pragmatik Sınır Tanımı',
+            transcript_text: 'Modern dünyanın beşerî hukuk sistemlerine baktığımızda, hürriyetin sınırını son derece pragmatik bir tarifle çizerler: "Başkalarının hak ve hürriyetine zarar vermediğin sürece dilediğini yapabilirsin."',
+            items: [
+              { action_type: 'DEFINITION_CARD', text_primary: 'Pragmatik Hukuk Sınırı', text_secondary: 'Zarar Vermeme Prensibi', start_sec: 67.0, end_sec: 78.0 },
+              { action_type: 'TEXT_ACCENT', text_primary: 'Negatif vs Pozitif Hürriyet', text_secondary: 'Felsefi Karşılaştırma', start_sec: 79.0, end_sec: 84.5 }
+            ]
+          }
+        ]
+      });
+      this.showScenarioPanel.set(true);
+      return;
+    }
+
     this.projectService.getById(id).subscribe({
       next: (raw) => {
         const p = this.normalizeProject(raw);
         this.project.set(p);
         if (p.durum === ProjectDurumu.AnalizEdiliyor) {
           this.isAnalyzing.set(true);
+          this.startAiTimer();
+        } else {
+          this.stopAiTimer();
+          if (p.durum === ProjectDurumu.SenaryoOnayiBekliyor || p.hasEdl) {
+            this.loadScenarioFromEdl(id);
+          }
         }
       },
       error: (err) => console.error('Proje detayı yüklenemedi:', err)
+    });
+  }
+
+  private loadScenarioFromEdl(projectId: string): void {
+    this.edlService.getEdl(projectId).subscribe({
+      next: (dto: any) => {
+        const ms = dto?.edl?.masterScript;
+        if (ms) {
+          this.masterScript.set(ms);
+          if (ms.requires_user_approval || this.project()?.durum === ProjectDurumu.SenaryoOnayiBekliyor) {
+            this.showScenarioPanel.set(true);
+          }
+        }
+      },
+      error: () => {}
+    });
+  }
+
+  approveScenarioAndOpenEditor(): void {
+    const id = this.project()?.id;
+    if (!id) return;
+    this.isScenarioBusy.set(true);
+    this.edlService.approveScenario(id).subscribe({
+      next: (dto: any) => {
+        this.isScenarioBusy.set(false);
+        this.showScenarioPanel.set(false);
+        if (dto?.edl?.masterScript) {
+          this.masterScript.set(dto.edl.masterScript);
+        }
+        this.goToEditor();
+      },
+      error: () => {
+        this.isScenarioBusy.set(false);
+        this.goToEditor();
+      }
+    });
+  }
+
+  submitScenarioRevision(): void {
+    const id = this.project()?.id;
+    const fb = this.scenarioFeedbackText.trim();
+    if (!id || !fb) return;
+    this.isScenarioBusy.set(true);
+    this.edlService.reviseScenario(id, fb).subscribe({
+      next: (dto: any) => {
+        this.isScenarioBusy.set(false);
+        this.scenarioFeedbackText = '';
+        if (dto?.edl?.masterScript) {
+          this.masterScript.set(dto.edl.masterScript);
+          this.showScenarioPanel.set(true);
+        }
+      },
+      error: (err) => {
+        this.isScenarioBusy.set(false);
+        console.error('Senaryo revizyonu uygulanamadı:', err);
+      }
     });
   }
 
@@ -653,6 +965,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
         .subscribe(() => {
           this.isAnalyzing.set(false);
+          this.stopAiTimer();
           this.analysisError.set(null);
           this.analysisPercentage.set(100);
           this.loadProject(projectId);
@@ -665,11 +978,13 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         .subscribe((e: any) => {
           if (e.durum === 'Failed') {
             this.isAnalyzing.set(false);
+            this.stopAiTimer();
             this.analysisError.set(e.mesaj || 'Analiz sırasında bir hata oluştu.');
             this.loadProject(projectId);
             return;
           }
           this.isAnalyzing.set(true);
+          this.startAiTimer();
           this.analysisError.set(null);
           const cur = this.project();
           if (cur && cur.durum !== ProjectDurumu.AnalizEdiliyor) {
@@ -691,8 +1006,23 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
         .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
         .subscribe((err) => {
           this.isAnalyzing.set(false);
+          this.stopAiTimer();
           this.analysisError.set(err.hataMesaji || 'Analiz sırasında beklenmeyen bir hata oluştu.');
           this.analysisStageMessage.set(`Hata oluştu: ${err.hataMesaji}`);
+          this.loadProject(projectId);
+        })
+    );
+
+    this.sub.add(
+      this.signalr.scenarioApprovalRequired$
+        .pipe(filter(e => String(e.projectId).toLowerCase() === String(projectId).toLowerCase()))
+        .subscribe((evt: any) => {
+          this.isAnalyzing.set(false);
+          this.stopAiTimer();
+          if (evt?.masterScript) {
+            this.masterScript.set(evt.masterScript);
+          }
+          this.showScenarioPanel.set(true);
           this.loadProject(projectId);
         })
     );
@@ -701,7 +1031,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
   canGoToEditor(): boolean {
     const p = this.project();
     if (!p) return false;
-    return p.hasEdl || p.hasVideo || p.durum === ProjectDurumu.AnalizTamamlandi || p.durum === ProjectDurumu.RenderEdiliyor || p.durum === ProjectDurumu.Tamamlandi;
+    return p.hasEdl || p.hasVideo || p.durum === ProjectDurumu.AnalizTamamlandi || p.durum === ProjectDurumu.SenaryoOnayiBekliyor || p.durum === ProjectDurumu.RenderEdiliyor || p.durum === ProjectDurumu.Tamamlandi;
   }
 
   goToEditor(): void {
@@ -745,6 +1075,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
     if (!p) return;
     this.analysisError.set(null);
     this.isAnalyzing.set(true);
+    this.startAiTimer();
     this.analysisPercentage.set(5);
     this.analysisStageMessage.set('Seçili AI kurgu adımları başlatılıyor...');
     this.videoService.reanalyzeProject(p.id, {
@@ -761,6 +1092,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
       },
       error: (err) => {
         this.isAnalyzing.set(false);
+        this.stopAiTimer();
         alert('Yeniden analiz başlatılamadı: ' + (err.error?.detail || err.message));
       }
     });
@@ -796,6 +1128,7 @@ export class ProjectDetailComponent implements OnInit, OnDestroy {
             return;
           }
           this.isAnalyzing.set(true);
+          this.startAiTimer();
           this.loadProject(p.id);
         }
       },

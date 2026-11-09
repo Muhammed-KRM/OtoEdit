@@ -51,6 +51,7 @@ export class SignalrService {
   readonly renderProgress$ = new Subject<RenderProgressEvent>();
   readonly renderCompleted$ = new Subject<RenderCompletedEvent>();
   readonly pipelineError$ = new Subject<PipelineErrorEvent>();
+  readonly scenarioApprovalRequired$ = new Subject<any>();
 
   private activeProjectGroups = new Set<string>();
 
@@ -99,6 +100,10 @@ export class SignalrService {
 
     this.hubConnection.on('PipelineError', (data: PipelineErrorEvent) => {
       this.pipelineError$.next(data);
+    });
+
+    this.hubConnection.on('ScenarioApprovalRequired', (data: any) => {
+      this.scenarioApprovalRequired$.next(data);
     });
 
     this.hubConnection.onreconnecting(() => {

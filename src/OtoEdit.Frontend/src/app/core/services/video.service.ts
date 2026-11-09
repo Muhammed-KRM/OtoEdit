@@ -72,4 +72,8 @@ export class VideoService {
   ): Observable<any> {
     return this.http.post(`${this.baseUrl}/projects/${projectId}/reanalyze`, options);
   }
+
+  fallbackToRules(projectId: string): Observable<any> {
+    return this.http.post(`${this.baseUrl}/pipeline/project/${projectId}/fallback-to-rules`, {});
+  }
 }

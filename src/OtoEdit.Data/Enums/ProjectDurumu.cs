@@ -36,6 +36,11 @@ public enum ProjectDurumu
     Tamamlandi = 5,
 
     /// <summary>
+    /// 3. yapay zeka denetimi sonunda kurgu senaryosu için kullanıcı onayı/revizyonu bekleniyor.
+    /// </summary>
+    SenaryoOnayiBekliyor = 6,
+
+    /// <summary>
     /// Herhangi bir aşamada kritik hata oluştu.
     /// </summary>
     Hata = 99

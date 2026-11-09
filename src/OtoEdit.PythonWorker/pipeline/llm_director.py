@@ -54,6 +54,11 @@ class LlmDirector:
         existing_transitions: Optional[List[Dict[str, Any]]] = None,
         subtitles_enabled: bool = True,
         video_path: Optional[str] = None,
+        project_id: str = "",
+        video_id: str = "",
+        force_user_approval: bool = False,
+        progress_callback: Optional[Any] = None,
+        precomputed_master_script: Optional[Any] = None,
     ) -> Dict[str, Any]:
         norm_existing_overlays: List[Dict[str, Any]] = []
         for eo in existing_overlays or []:
@@ -75,10 +80,32 @@ class LlmDirector:
                 "transitions": existing_transitions,
             }
 
-        # AŞAMA 1: Kelime-Senkronlu Bütüncül Analiz ve Kilitli ThemeProfile
-        theme_profile, summary, chapter_plans = self.analyzer.analyze_video(
-            segments=segments, video_duration=video_duration, cuts=cuts
-        )
+        # AŞAMA 1: Kelime-Senkronlu Bütüncül Analiz, Parçalı Kurgu Senaryosu ve Başeditör Denetimi
+        if precomputed_master_script is not None:
+            from pipeline.scenario_engine import ScenarioMerger
+            from pipeline.scenario_models import MasterEditingScript
+            from pipeline.theme_profiles import THEME_PROFILE_REGISTRY, detect_theme_profile_heuristic
+
+            if isinstance(precomputed_master_script, dict):
+                precomputed_master_script = MasterEditingScript.from_dict(precomputed_master_script)
+            full_text = " ".join(str(s.get("text", "")).strip() for s in segments)
+            theme_profile = THEME_PROFILE_REGISTRY.get(
+                getattr(precomputed_master_script, "theme_profile_id", ""),
+                detect_theme_profile_heuristic(full_text),
+            )
+            chapter_plans = ScenarioMerger.to_chapter_plans(precomputed_master_script)
+            summary = f"{theme_profile.display_name} ({len(chapter_plans)} Bölüm, {video_duration:.1f}s)"
+            self.analyzer.last_master_script = precomputed_master_script
+        else:
+            theme_profile, summary, chapter_plans = self.analyzer.analyze_video(
+                segments=segments,
+                video_duration=video_duration,
+                cuts=cuts,
+                project_id=project_id,
+                video_id=video_id,
+                force_user_approval=force_user_approval,
+                progress_callback=progress_callback,
+            )
 
         # AŞAMA 2: SafeZone Uzamsal Çözücü Başlatımı
         spatial_solver = SafeZoneSpatialSolver(
@@ -94,13 +121,9 @@ class LlmDirector:
         normalized_cuts = self.analyzer._normalize_cuts(cuts or [])
 
         # AŞAMA 3: Kelime-Senkronlu Kurgu Olaylarını Somutlaştır
-        # NOT: Sıradan nefes/retake kesimlerine (normalized_cuts[:8]) körlemesine geçiş efekti
-        # eklenmez; geçiş efektleri YALNIZCA tema profili izin veriyorsa ve akademik ders/konuşmacı
-        # gibi tek kamera anlatımları DIŞINDA anlamlı bölüm sınırlarında üretilir.
-        allow_chapter_transitions = (
-            theme_profile.id != "academic_lecture"
-            and bool(getattr(theme_profile, "allowed_transitions", None))
-        )
+        # NOT: Sıradan nefes/retake kesimlerine körlemesine geçiş efekti eklenmez;
+        # geçiş efektleri YALNIZCA retorik [geçiş] (sahne/bölüm) sınırlarında üretilir.
+        allow_chapter_transitions = bool(getattr(theme_profile, "allowed_transitions", None))
         for ch_idx, ch in enumerate(chapter_plans):
             if ch_idx > 0 and ch.start_sec > 3.5 and allow_chapter_transitions:
                 tr_ts = round(ch.start_sec, 2)
@@ -544,6 +567,12 @@ class LlmDirector:
             f"Overlay={len(valid_overlays)} SFX={len(valid_sfx)} Geçiş={len(valid_transitions)}"
         )
 
+        master_script = getattr(self.analyzer, "last_master_script", None)
+        master_script_dict = (
+            master_script.to_dict() if master_script and hasattr(master_script, "to_dict") else None
+        )
+        req_approval = bool(master_script and getattr(master_script, "requires_user_approval", False))
+
         return {
             "theme_profile_id": theme_profile.id,
             "subject_summary": summary,
@@ -553,4 +582,6 @@ class LlmDirector:
             "sfx_list": valid_sfx,
             "sfxClips": valid_sfx,
             "transitions": valid_transitions,
+            "master_script": master_script_dict,
+            "requires_user_approval": req_approval,
         }

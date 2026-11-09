@@ -812,4 +812,203 @@ public class EdlManager : IEdlService
             return false;
         }
     }
+
+    public async Task<EdlDto> ApproveScenarioAsync(Guid projectId, CancellationToken cancellationToken = default)
+    {
+        var edl = await _context.EditDecisionLists
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId, cancellationToken);
+
+        if (edl == null)
+        {
+            throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
+        }
+
+        var rootNode = JsonNode.Parse(edl.EdlJson) as JsonObject ?? new JsonObject();
+        if (rootNode["masterScript"] is JsonObject msObj)
+        {
+            msObj["is_approved"] = true;
+            msObj["requires_user_approval"] = false;
+            msObj["approval_status"] = "user_approved";
+            msObj["last_critic_message"] = "Kurgu senaryosu kullanıcı tarafından onaylandı ve uygulandı.";
+        }
+
+        edl.EdlJson = rootNode.ToJsonString(JsonOptions);
+        edl.Versiyon += 1;
+        edl.GuncellemeTarihi = DateTime.UtcNow;
+
+        var project = await _context.Projects.FirstOrDefaultAsync(p => p.Id == projectId, cancellationToken);
+        if (project != null && project.Durum == OtoEdit.Data.Enums.ProjectDurumu.SenaryoOnayiBekliyor)
+        {
+            project.Durum = OtoEdit.Data.Enums.ProjectDurumu.AnalizTamamlandi;
+            project.GuncellemeTarihi = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
+        await _cacheService.RemoveAsync($"project:{projectId}", cancellationToken);
+
+        return await GetEdlAsync(projectId, cancellationToken);
+    }
+
+    public async Task<EdlDto> ReviseScenarioAsync(Guid projectId, string userFeedback, CancellationToken cancellationToken = default)
+    {
+        var edl = await _context.EditDecisionLists
+            .FirstOrDefaultAsync(e => e.ProjectId == projectId, cancellationToken);
+
+        if (edl == null)
+        {
+            throw new NotFoundException("Projeye ait EDL bulunamadı", projectId);
+        }
+
+        await SaveSnapshotAsync(projectId, edl, $"Senaryo Revizyonu: {userFeedback}", "user_scenario_revision", cancellationToken);
+
+        var rootNode = JsonNode.Parse(edl.EdlJson) as JsonObject ?? new JsonObject();
+        var msObj = rootNode["masterScript"] as JsonObject ?? new JsonObject();
+        var scenesArr = msObj["scenes"] as JsonArray ?? new JsonArray();
+        var overlaysArr = rootNode["overlays"] as JsonArray ?? new JsonArray();
+
+        var feedbackTrimmed = (userFeedback ?? string.Empty).Trim();
+        var feedbackLower = feedbackTrimmed.ToLowerInvariant();
+        int changesCount = 0;
+
+        // 1. Hedef sahne numarasını çöz (örn: "2. parçaya", "sahne 2", "1. kısma")
+        int targetSceneId = 1;
+        var scMatch = System.Text.RegularExpressions.Regex.Match(feedbackLower, @"(\d+)\s*\.?\s*(?:sahne|parça|kısım|bölüm)");
+        if (scMatch.Success && int.TryParse(scMatch.Groups[1].Value, out int parsedSc))
+        {
+            targetSceneId = Math.Max(1, parsedSc);
+        }
+
+        // 2. Kaldırma / Silme Komutları ("... kaldır", "... sil")
+        if (feedbackLower.Contains("kaldır") || feedbackLower.Contains("sil") || feedbackLower.Contains("çıkar"))
+        {
+            foreach (var scNode in scenesArr)
+            {
+                if (scNode is not JsonObject scObj || scObj["items"] is not JsonArray itemsArr) continue;
+                for (int i = itemsArr.Count - 1; i >= 0; i--)
+                {
+                    var itObj = itemsArr[i] as JsonObject;
+                    var primary = itObj?["text_primary"]?.GetValue<string>()?.ToLowerInvariant() ?? "";
+                    if (!string.IsNullOrEmpty(primary) && feedbackLower.Contains(primary))
+                    {
+                        itemsArr.RemoveAt(i);
+                        changesCount++;
+                    }
+                }
+            }
+
+            for (int i = overlaysArr.Count - 1; i >= 0; i--)
+            {
+                var ovObj = overlaysArr[i] as JsonObject;
+                var txt = (ovObj?["text"]?.GetValue<string>() ?? ovObj?["content"]?.GetValue<string>() ?? "").ToLowerInvariant();
+                if (!string.IsNullOrEmpty(txt) && feedbackLower.Contains(txt))
+                {
+                    overlaysArr.RemoveAt(i);
+                    changesCount++;
+                }
+            }
+        }
+
+        // 3. Ekleme Komutları ("... ekle", "... koy", "... yaz")
+        if (feedbackLower.Contains("ekle") || feedbackLower.Contains("koy") || feedbackLower.Contains("yaz"))
+        {
+            string? textToAdd = null;
+            var quoteMatch = System.Text.RegularExpressions.Regex.Match(feedbackTrimmed, @"['""“”‘’]([^'""“”‘’]{2,45})['""“”‘’]");
+            if (quoteMatch.Success)
+            {
+                textToAdd = quoteMatch.Groups[1].Value.Trim().ToUpperInvariant();
+            }
+            else
+            {
+                var cleaned = System.Text.RegularExpressions.Regex.Replace(
+                    feedbackTrimmed,
+                    @"\b(\d+\.?\s*(?:sahneye|parçaya|kısma|bölüme)|ekle|koy|yaz|başlığı|kartı|yazısı|lütfen|şuraya|buraya|kısmına)\b",
+                    "",
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase).Trim(' ', '.', ',', '!', '?', ':', ';', '-');
+                if (cleaned.Length >= 2)
+                {
+                    textToAdd = cleaned.Length > 38 ? cleaned[..38].ToUpperInvariant() : cleaned.ToUpperInvariant();
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(textToAdd))
+            {
+                JsonObject? targetScene = null;
+                foreach (var scNode in scenesArr)
+                {
+                    if (scNode is JsonObject s && s["scene_id"]?.GetValue<int>() == targetSceneId)
+                    {
+                        targetScene = s;
+                        break;
+                    }
+                }
+                targetScene ??= scenesArr.Count > 0 ? scenesArr[0] as JsonObject : null;
+
+                double startSec = targetScene?["start_sec"]?.GetValue<double>() ?? 2.0;
+                double endSec = Math.Min(targetScene?["end_sec"]?.GetValue<double>() ?? (startSec + 4.0), startSec + 3.5);
+                var newItemId = $"sc{targetSceneId}_usr_{Guid.NewGuid().ToString("N")[..6]}";
+
+                if (targetScene != null)
+                {
+                    var itemsArr = targetScene["items"] as JsonArray ?? new JsonArray();
+                    itemsArr.Add(new JsonObject
+                    {
+                        ["item_id"] = newItemId,
+                        ["scene_id"] = targetSceneId,
+                        ["action_type"] = "KEY_TERM_CALLOUT",
+                        ["start_word_idx"] = targetScene["start_word_idx"]?.GetValue<int>() ?? 0,
+                        ["end_word_idx"] = targetScene["end_word_idx"]?.GetValue<int>() ?? 5,
+                        ["start_sec"] = Math.Round(startSec, 2),
+                        ["end_sec"] = Math.Round(endSec, 2),
+                        ["text_primary"] = textToAdd,
+                        ["text_secondary"] = "Kullanıcı Revizyonu",
+                        ["rationale"] = feedbackTrimmed
+                    });
+                    targetScene["items"] = itemsArr;
+                    targetScene["status"] = "revised";
+                }
+
+                overlaysArr.Add(new JsonObject
+                {
+                    ["id"] = $"ad_txt_{newItemId}",
+                    ["type"] = "text",
+                    ["text"] = textToAdd,
+                    ["content"] = textToAdd,
+                    ["start"] = Math.Round(startSec, 2),
+                    ["end"] = Math.Round(endSec, 2),
+                    ["timestamp"] = Math.Round(startSec, 2),
+                    ["duration"] = Math.Round(endSec - startSec, 2),
+                    ["position"] = "top-left",
+                    ["positionX"] = 18.5,
+                    ["positionY"] = 22.0,
+                    ["fontSize"] = 52,
+                    ["fontColor"] = "#FFFFFF",
+                    ["backgroundColor"] = "#00000080",
+                    ["animation"] = "slide-up",
+                    ["trackId"] = 2
+                });
+                rootNode["overlays"] = overlaysArr;
+                changesCount++;
+            }
+        }
+
+        var historyArr = msObj["user_feedback_history"] as JsonArray ?? new JsonArray();
+        historyArr.Add(feedbackTrimmed);
+        msObj["user_feedback_history"] = historyArr;
+        msObj["requires_user_approval"] = true;
+        msObj["is_approved"] = false;
+        msObj["approval_status"] = "awaiting_user";
+        msObj["last_critic_message"] = $"Revizyon talebiniz (\"{feedbackTrimmed}\") senaryoya işlendi ({Math.Max(1, changesCount)} güncelleme). Bu halini uygulayalım mı, yoksa başka düzeltme yapalım mı?";
+        rootNode["masterScript"] = msObj;
+
+        edl.EdlJson = rootNode.ToJsonString(JsonOptions);
+        edl.Versiyon += 1;
+        edl.GuncellemeTarihi = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await _cacheService.RemoveAsync($"{CachePrefix}{projectId}", cancellationToken);
+        await _cacheService.RemoveAsync($"project:{projectId}", cancellationToken);
+
+        return await GetEdlAsync(projectId, cancellationToken);
+    }
 }

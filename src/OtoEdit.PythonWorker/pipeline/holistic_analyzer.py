@@ -277,6 +277,36 @@ class SemanticTransitionBoundaryDetector:
                 score = (84.0 if is_q_pivot else 74.0) + pause_gap * 5.0
                 reason = "Evrensel Türkçe söylem dönüşümü + cümle kapanışı"
 
+            # Kategori 5: ANA TEZ / ÖZET KAPANIŞI -> KURUCU ALINTI VEYA TANIM GİRİŞİ
+            # Örn: "...adaleti ortak bir akılla ete kemiğe büründüren usul ise meşveret hukukudur. || Bediüzzaman Said Nursi'nin o çarpıcı tespitiyle söylersek:"
+            elif (
+                la.endswith(("hukukudur", "iradesidir", "iklimdir", "menbaıdır", "anasıdır", "ilkesidir", "esasıdır"))
+                or (";" in ta and la.endswith(("dır", "dir", "dur", "dür", "tır", "tir", "tur", "tür")))
+            ) and (
+                "tespitiyle" in lb[:65]
+                or "ifadesiyle" in lb[:65]
+                or "tarifiyle" in lb[:65]
+                or "sözüyle" in lb[:65]
+                or lb.startswith(("bediüzzaman", "imam gazali", "aristoteles", "farabi", "nurettin topçu", "thomas hobbes"))
+            ):
+                cat = "PRE_EXPLANATION_PIVOT"
+                score = 99.0
+                reason = "Ana tez/üçlü hüküm kapanışı -> Kurucu alıntı ve kavramsal çerçevelemeye geçiş"
+
+            # Kategori 6: YOL HARİTASI VAADİ BİTİŞİ -> YENİ ALT KONU / KAVRAMSAL TANIMLAMA GİRİŞİ
+            # Örn: "Bugün; ... hakiki hürriyetin mimarisini inşa edeceğiz. || Modern dünyanın beşerî hukuk sistemlerine baktığımızda, hürriyetin sınırını son derece pragmatik bir tarifle çizerler:"
+            elif re.search(
+                r"\b(inşa edeceğiz|ele alacağız|inceleyeceğiz|tahlil edeceğiz|konuşacağız|ortaya koyacağız|açıklayacağız)\s*[.!]?$",
+                la,
+            ) and (
+                "baktığımızda" in lb[:80]
+                or "tarifle çizerler" in lb
+                or lb.startswith(("modern dünyanın", "modern çağın", "beşeri hukuk", "beşerî hukuk", "tarihsel süreçte", "ilk olarak"))
+            ):
+                cat = "RETROSPECTIVE_CLOSURE_TO_NEW_TOPIC"
+                score = 100.0
+                reason = "Ders yol haritası vaadi tamamlandı -> İlk alt konu ve kavramsal tanımlamaya geçiş"
+
             if cat:
                 candidates.append(
                     SemanticTransitionBoundary(
@@ -307,6 +337,9 @@ class SemanticTransitionBoundaryDetector:
 # (anahtar_kelime_listesi, Ekran Başlığı, Türkçe Wikipedia Başlığı, İngilizce Wikipedia Başlığı) eşlemesi
 KNOWN_PERSONS_WIKI_MAP: List[Tuple[Tuple[str, ...], str, str, str]] = [
     (("imam gazali", "imam-ı gazali", "gazali", "gazzali"), "İMAM GAZALİ", "Gazzâlî", "Al-Ghazali"),
+    (("hazreti ali", "hz. ali", "hz ali", "imam ali", "ali bin ebi talib", "hz. ali'ye", "hz ali'ye", "hz. ali'nin", "hz ali'nin"), "HZ. ALİ", "Ali", "Ali"),
+    (("cafer-i sadık", "caferi sadık", "imam cafer-i sadık", "imam caferi sadık", "imam cafer", "cafer es-sadık", "cafer es sadık"), "İMAM CAFER-İ SADIK", "Cafer es-Sâdık", "Ja'far al-Sadiq"),
+    (("imam maturidi", "imam-ı maturidi", "maturidi", "mâtürîdî"), "İMAM MÂTÜRÎDÎ", "Ebû Mansûr el-Mâtürîdî", "Abu Mansur al-Maturidi"),
     (("aristoteles", "aristo"), "ARİSTOTELES", "Aristoteles", "Aristotle"),
     (("farabi", "fârâbî"), "FÂRÂBÎ", "Fârâbî", "Al-Farabi"),
     (("ibn sina", "ibni sina", "ibn-i sina"), "İBN SÎNÂ", "İbn Sînâ", "Avicenna"),
@@ -328,6 +361,11 @@ KNOWN_PERSONS_WIKI_MAP: List[Tuple[Tuple[str, ...], str, str, str]] = [
     (("mevlana", "celaleddin rumi"), "MEVLÂNÂ CELÂLEDDÎN-İ RÛMÎ", "Mevlânâ Celâleddîn-i Rûmî", "Rumi"),
     (("albert einstein", "einstein"), "ALBERT EINSTEIN", "Albert Einstein", "Albert Einstein"),
     (("isaac newton", "newton"), "ISAAC NEWTON", "Isaac Newton", "Isaac Newton"),
+    (("thomas hobbes", "hobbes"), "THOMAS HOBBES", "Thomas Hobbes", "Thomas Hobbes"),
+    (("nurettin topçu", "nureddin topçu"), "NURETTİN TOPÇU", "Nurettin Topçu", "Nurettin Topçu"),
+    (("john locke", "locke"), "JOHN LOCKE", "John Locke", "John Locke"),
+    (("montesquieu", "monteskiyö"), "MONTESQUIEU", "Montesquieu", "Montesquieu"),
+    (("jean-jacques rousseau", "rousseau"), "JEAN-JACQUES ROUSSEAU", "Jean-Jacques Rousseau", "Jean-Jacques Rousseau"),
 ]
 
 # Sadece somut bir Kitap / Eser / Kanunname tanıtıldığında görsel konulacak eserler
@@ -363,6 +401,10 @@ SHORT_CONCEPT_TERMS: List[Tuple[Tuple[str, ...], str, str, str]] = [
     (("zülcenahen", "zülcenaheyn"), "zülcenahen", "arar", "ZÜLCENAHEYN"),
     (("ismet sıfatı",), "ismet", "sıfatı", "İSMET SIFATI"),
     (("ratio legis", "ratyolegesini"), "ratyolegesini", "arar", "RATIO LEGIS"),
+    (("efradını câmi", "efradını cami", "efradını"), "efradını", "mani", "EFRADINI CÂMİ, AĞYARINI MÂNİ"),
+    (("vela teziru", "ve la teziru", "tezirü vaziratun", "vaziratun"), "vela", "uhra", "VE LÂ TEZİRU VÂZİRATUN VİZRA UHRÂ"),
+    (("müsbet isyan iradesidir", "müsbet isyan"), "müsbet", "iradesidir", "MÜSBET İSYAN İRADESİ"),
+    (("meşveret hukukudur", "meşveret nizamından"), "meşveret", "hukukudur", "MEŞVERET HUKUKU"),
 ]
 
 # İkili kavram vurguları (Önce 1. kelime çıkar, tam 2. kelime söylendiğinde altına 2. kelime eklenir, cümle sonunda ikisi birden gider)
@@ -967,12 +1009,17 @@ class HolisticAnalyzer:
     def __init__(self, gemini_client: Any = None, enable_llm_planning: bool = True):
         self.gemini = gemini_client
         self.enable_llm_planning = enable_llm_planning
+        self.last_master_script: Optional[Any] = None
 
     def analyze_video(
         self,
         segments: List[Dict[str, Any]],
         video_duration: float,
         cuts: Optional[List[Any]] = None,
+        project_id: str = "",
+        video_id: str = "",
+        force_user_approval: bool = False,
+        progress_callback: Optional[Any] = None,
     ) -> Tuple[ThemeProfile, str, List[ChapterPlan]]:
         normalized_cuts = self._normalize_cuts(cuts or [])
         active_segments = self._filter_active_segments(segments, normalized_cuts)
@@ -1061,6 +1108,33 @@ class HolisticAnalyzer:
                 chapter_triggers=ch_triggers,
             )
             chapter_plans.append(ch_plan)
+
+        # 6. 5 Aşamalı Otonom Kurgu Senaryosu (Parçalı Paralel AI + Başeditör Denetim Döngüsü + 3. Tur Onay)
+        try:
+            from pipeline.scenario_engine import ScenarioOrchestrator, ScenarioMerger
+
+            all_planned_events = [ev for ch in chapter_plans for ev in ch.events]
+            orchestrator = ScenarioOrchestrator(gemini_client=self.gemini if self.enable_llm_planning else None)
+            master_script = orchestrator.build_and_verify_scenario(
+                project_id=project_id,
+                video_id=video_id,
+                word_stream=word_stream,
+                video_duration=safe_duration,
+                theme_profile=theme_profile,
+                deterministic_triggers=all_planned_events,
+                enable_llm=self.enable_llm_planning,
+                force_user_approval=force_user_approval,
+                progress_callback=progress_callback,
+            )
+            self.last_master_script = master_script
+
+            # Başeditör (Critic) AI tarafından eklenen veya düzeltilen olayları bölüm planlarına yansıt
+            if master_script and master_script.scenes and master_script.iteration_count > 0:
+                has_revisions = any(len(r.revisions) > 0 for r in master_script.critique_history)
+                if has_revisions:
+                    chapter_plans = ScenarioMerger.to_chapter_plans(master_script)
+        except Exception as sc_err:
+            logger.warning(f"[HolisticAnalyzer] Otonom Senaryo Orkestratörü uyarısı (temel plan korundu): {sc_err}")
 
         subject_summary = (
             f"{theme_profile.display_name} ({len(chapter_plans)} Bölüm, {safe_duration:.1f}s)"
@@ -1454,14 +1528,42 @@ class HolisticAnalyzer:
                 )
                 if in_cur or in_boundary:
                     if s_start - seen_persons.get(display_name, -999.0) >= 240.0:
-                        first_kw = next((k.split()[0] for k in kw_tuple if k in lower_win2), kw_tuple[0].split()[0])
-                        start_tok = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 1), first_kw)
+                        first_kw = next((k.split()[0].strip(".-") for k in kw_tuple if k in lower_win2 and k.split()[0].strip(".-")), kw_tuple[0].split()[0].strip(".-"))
+                        start_tok = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 2), first_kw)
+                        if not start_tok:
+                            for kw_cand in kw_tuple:
+                                for w_c in [w.strip(".-") for w in kw_cand.split() if len(w.strip(".-")) >= 3]:
+                                    start_tok = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 2), w_c)
+                                    if start_tok:
+                                        break
+                                if start_tok:
+                                    break
                         ev_start = round(start_tok.start if start_tok else s_start, 2)
                         if start_tok:
                             end_tok = self._find_sentence_end_word(word_stream, start_tok, min(n_segs - 1, i + 2))
                             ev_end = round(max(ev_start + 1.8, min(ev_start + 4.8, end_tok.end)), 2)
                         else:
                             ev_end = round(min(video_duration - 0.2, ev_start + 3.8), 2)
+
+                        if is_range_busy(ev_start, ev_end):
+                            # Art arda gelen düşünür/kişi tanıtımlarında (örn. Maturidi -> Cafer-i Sadık)
+                            # önceki kişi kartını bu kişinin başlangıcında bitirerek her iki şahsiyeti de ekle
+                            for prev_trig in reversed(triggers):
+                                if prev_trig.action_type == "PERSON_INTRODUCTION" and prev_trig.start_sec < ev_start:
+                                    if ev_start - prev_trig.start_sec >= 1.35:
+                                        prev_trig.end_sec = round(ev_start - 0.10, 2)
+                                        for o_idx, (o_st, o_en) in enumerate(occupied_ranges):
+                                            if abs(o_st - prev_trig.start_sec) < 0.12:
+                                                occupied_ranges[o_idx] = (o_st, prev_trig.end_sec)
+                                                break
+                                    break
+                                elif prev_trig.action_type not in ("PERSON_INTRODUCTION", "PAIRED_TERMS", "PROGRESSIVE_LIST"):
+                                    if prev_trig.start_sec < ev_start and prev_trig.end_sec > ev_start:
+                                        prev_trig.end_sec = round(ev_start - 0.10, 2)
+                                        for o_idx, (o_st, o_en) in enumerate(occupied_ranges):
+                                            if abs(o_st - prev_trig.start_sec) < 0.12:
+                                                occupied_ranges[o_idx] = (o_st, prev_trig.end_sec)
+                                                break
 
                         if not is_range_busy(ev_start, ev_end):
                             seen_persons[display_name] = s_start
@@ -1486,20 +1588,30 @@ class HolisticAnalyzer:
                             matched_person = True
                             break
 
-            # Dinamik Unvanlı Kişi Yakalayıcı (Örn. "Prof. Dr. Ahmet Arslan")
+            # Dinamik Unvanlı Kişi Yakalayıcı (Örn. "Prof. Dr. Ahmet Arslan", "Hz. Ali", "İmam Ali")
             if not matched_person:
                 dyn_match = re.search(
-                    r"\b((?:Prof\.?\s*(?:Dr\.?\s*)?|Doç\.?\s*Dr\.?\s*|İmam(?:-ı)?\s+)[A-ZÇĞİÖŞÜÂÎÛ][a-zçğıöşüâîû]+(?:\s+[A-ZÇĞİÖŞÜÂÎÛ][a-zçğıöşüâîû]+){0,2})",
+                    r"\b((?:Prof\.?\s*(?:Dr\.?\s*)?|Doç\.?\s*Dr\.?\s*|İmam(?:-ı)?\s+|Hz\.?\s*|Hazreti\s+)[A-ZÇĞİÖŞÜÂÎÛ][a-zçğıöşüâîû]+(?:\s+[A-ZÇĞİÖŞÜÂÎÛ][a-zçğıöşüâîû]+){0,2})",
                     window_2,
                 )
                 if dyn_match and dyn_match.start() < len(text_cur) + 6:
                     raw_person = re.sub(r"['’].*$", "", dyn_match.group(1).strip())
                     disp_person = to_turkish_upper(raw_person)
-                    if len(disp_person) >= 7 and s_start - seen_persons.get(disp_person, -999.0) >= 240.0:
-                        clean_wiki = re.sub(r"^(Prof\.?\s*(?:Dr\.?\s*)?|Doç\.?\s*Dr\.?\s*)", "", raw_person, flags=re.I).strip()
+                    if len(disp_person) >= 6 and s_start - seen_persons.get(disp_person, -999.0) >= 240.0:
+                        clean_wiki = re.sub(r"^(Prof\.?\s*(?:Dr\.?\s*)?|Doç\.?\s*Dr\.?\s*|Hz\.?\s*|Hazreti\s+)", "", raw_person, flags=re.I).strip()
                         start_tok = self._find_word_in_range(word_stream, i, min(n_segs - 1, i + 1), clean_wiki.split()[0])
                         ev_start = round(start_tok.start if start_tok else s_start, 2)
                         ev_end = round(min(video_duration - 0.2, ev_start + 3.6), 2)
+                        if is_range_busy(ev_start, ev_end):
+                            for prev_trig in reversed(triggers):
+                                if prev_trig.action_type == "PERSON_INTRODUCTION" and prev_trig.start_sec < ev_start:
+                                    if ev_start - prev_trig.start_sec >= 1.35:
+                                        prev_trig.end_sec = round(ev_start - 0.10, 2)
+                                        for o_idx, (o_st, o_en) in enumerate(occupied_ranges):
+                                            if abs(o_st - prev_trig.start_sec) < 0.12:
+                                                occupied_ranges[o_idx] = (o_st, prev_trig.end_sec)
+                                                break
+                                    break
                         if not is_range_busy(ev_start, ev_end):
                             seen_persons[disp_person] = s_start
                             triggers.append(
@@ -1737,12 +1849,30 @@ class HolisticAnalyzer:
             "parayı", "parasın", "paray", "evlendireceği", "alacağı", "edeceği",
             "olmayana", "evlenemeyeni", "biriktirmek", "fazla",
         }
+        VERB_FILTER_RE = re.compile(
+            r"(?:malıdır|melidir|malı|meli|"
+            r"yordu|yordun|yormuş|ıyor|iyor|uyor|üyor|"
+            r"acaktır|ecektir|mıştır|miştir|muştur|müştür|"
+            r"mektedir|maktadır|"
+            r"yorsa|yerse|varsa|yoksa|olursa|yaşarsa|yaparsa|giderse|"
+            r"dığında|diğinde|duğunda|düğünde|tığında|tiğinde|tuğunda|tüğünde|"
+            r"arak|erek|ince|ınca|dikçe|dıkça|dukça|dükçe|"
+            r"amaz|emez|mıyoruz|miyoruz|muyoruz|müyoruz|madık|medik)$",
+            re.IGNORECASE | re.UNICODE,
+        )
+        arabic_verse_blacklist = {
+            "vela", "teziru", "tezirü", "vaziratun", "vâziratun", "vizra", "uhra", "uhrâ",
+            "bismillah", "bismillahi", "rahman", "rahim", "kul", "inna", "vellezi",
+            "subhaneke", "hasbunallah", "ve-la", "lâ", "teâlâ"
+        }
         idx = 0
         while idx < n_tokens - 3:
             tok = word_stream[idx]
             if (
                 tok.has_comma
                 and len(tok.clean) >= 3
+                and not VERB_FILTER_RE.search(tok.lower)
+                and tok.lower not in arabic_verse_blacklist
                 and tok.lower not in salutation_and_discourse_Blacklist
                 and tok.lower not in narrative_clause_blacklist
             ):
@@ -1781,6 +1911,9 @@ class HolisticAnalyzer:
                     scan = cur
                     while scan < min(n_tokens, cur + 3):
                         st_tok = word_stream[scan]
+                        if VERB_FILTER_RE.search(st_tok.lower) or st_tok.lower in arabic_verse_blacklist:
+                            sub_tokens = []
+                            break
                         if st_tok.lower in ("ve", "ile", "yahut", "veya"):
                             found_conj = True
                             break
@@ -1887,14 +2020,14 @@ class HolisticAnalyzer:
                 for p in phrase_chain:
                     p_txt = " ".join(t.clean for t in p).strip()
                     p_low = to_turkish_lower(p_txt)
+                    has_finite_verb = any(VERB_FILTER_RE.search(t.lower) for t in p)
+                    has_arabic = any(t.lower in arabic_verse_blacklist for t in p)
                     if (
                         len(p_txt) < 3
                         or p_low in salutation_and_discourse_Blacklist
                         or any(t.lower in salutation_and_discourse_Blacklist or t.lower in narrative_clause_blacklist for t in p)
-                        or any(
-                            t.lower.endswith(("erek", "arak", "ip", "ıp", "up", "üp", "ince", "ınca", "ken", "dikçe", "dıkça"))
-                            for t in p
-                        )
+                        or has_finite_verb
+                        or has_arabic
                         or any(p_low.endswith(suf) for suf in ("mıyoruz", "miyoruz", "muyoruz", "müyoruz", "madık", "medik", "mayız", "meyiz", "yor", "yordu"))
                     ):
                         continue

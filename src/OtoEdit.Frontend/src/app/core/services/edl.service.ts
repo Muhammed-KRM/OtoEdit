@@ -28,4 +28,12 @@ export class EdlService {
   getHighResWaveform(projectId: string): Observable<number[]> {
     return this.api.get<number[]>(`/projects/${projectId}/edl/waveform`);
   }
+
+  approveScenario(projectId: string): Observable<EdlDto> {
+    return this.api.post<EdlDto>(`/projects/${projectId}/edl/scenario/approve`, {});
+  }
+
+  reviseScenario(projectId: string, feedback: string): Observable<EdlDto> {
+    return this.api.post<EdlDto>(`/projects/${projectId}/edl/scenario/revise`, { feedback });
+  }
 }

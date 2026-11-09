@@ -58,6 +58,7 @@ class EdlBuilder:
         sfx_clips: Optional[List[Dict[str, Any]]] = None,
         video_clips: Optional[List[Dict[str, Any]]] = None,
         video_path: Optional[str] = None,
+        progress_callback: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Tüm analiz çıktılarını tek bir EDL JSON sözlüğüne derler."""
         logger.info(f"EDL dokümanı inşa ediliyor: ProjectId={project_id}, VideoId={video_id}")
@@ -163,6 +164,7 @@ class EdlBuilder:
         )
 
         # 3.5 LlmDirector (5 Aşamalı Multimodal Otonom Yönetmen): Yalnızca auto_director açık olduğunda çalışır!
+        master_script_dict: Optional[Dict[str, Any]] = None
         if auto_director:
             try:
                 from pipeline.llm_director import LlmDirector
@@ -177,6 +179,9 @@ class EdlBuilder:
                     existing_transitions=merged_transitions,
                     subtitles_enabled=bool(subtitles_enabled),
                     video_path=video_path,
+                    project_id=project_id,
+                    video_id=video_id,
+                    progress_callback=progress_callback,
                 )
                 overlays = []
                 for ad_ov in composed.get("overlays", []):
@@ -186,6 +191,8 @@ class EdlBuilder:
                         overlays.append(OverlayItem(**ad_ov))
                 merged_transitions = [dict(ad_tr) for ad_tr in composed.get("transitions", [])]
                 merged_sfx_clips = [dict(ad_sfx) for ad_sfx in composed.get("sfxClips", composed.get("sfx_list", []))]
+                if isinstance(composed.get("master_script"), dict):
+                    master_script_dict = composed.get("master_script")
             except Exception as ad_err:
                 logger.warning(f"LlmDirector uyarısı: {ad_err}")
 
@@ -224,6 +231,7 @@ class EdlBuilder:
             suggestions=suggestions,
             proactiveSuggestions=proactive_sugs,
             repurposing=repurposing_data,
+            masterScript=master_script_dict,
             audioPeaks=rounded_audio_peaks
         )
 

@@ -75,4 +75,33 @@ public class EdlController : ControllerBase
         var peaks = await _edlService.EnsureHighResolutionWaveformAsync(projectId, cancellationToken);
         return Ok(peaks);
     }
+
+    /// <summary>
+    /// 3. denetim turu sonrasında veya kullanıcı incelemesinde kurgu senaryosunu onaylar ve uygular.
+    /// </summary>
+    [HttpPost("scenario/approve")]
+    [ProducesResponseType(typeof(EdlDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ApproveScenario(Guid projectId, CancellationToken cancellationToken)
+    {
+        var result = await _edlService.ApproveScenarioAsync(projectId, cancellationToken);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Kullanıcının doğal dille verdiği revizyonu ("Şu kısımlara şunu ekle...") kurgu senaryosuna uygular ve tekrar onaya sunar.
+    /// </summary>
+    [HttpPost("scenario/revise")]
+    [ProducesResponseType(typeof(EdlDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ReviseScenario(
+        Guid projectId,
+        [FromBody] ScenarioRevisionRequestDto request,
+        CancellationToken cancellationToken)
+    {
+        var result = await _edlService.ReviseScenarioAsync(projectId, request.Feedback, cancellationToken);
+        return Ok(result);
+    }
 }
+
+public record ScenarioRevisionRequestDto(string Feedback);

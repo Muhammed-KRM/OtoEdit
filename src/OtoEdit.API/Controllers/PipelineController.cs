@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using OtoEdit.Business.Interfaces;
 using OtoEdit.Data.Context;
 using OtoEdit.Data.Enums;
 
@@ -72,5 +73,16 @@ public class PipelineController : ControllerBase
             olusturmaTarihi = video.OlusturmaTarihi,
             islemTamamlanmaTarihi = video.IslemTamamlanmaTarihi
         });
+    }
+
+    /// <summary>
+    /// Kullanıcının yapay zeka beklemesi sırasında yedek kural motoruna geçmesini sağlar.
+    /// </summary>
+    [HttpPost("project/{projectId:guid}/fallback-to-rules")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> FallbackToRules(Guid projectId, [FromServices] ICacheService cacheService)
+    {
+        await cacheService.SetAsync($"project:{projectId}:force_fallback", true, TimeSpan.FromHours(1));
+        return Ok(new { success = true, message = "Yedek kural motoruna geçiş talep edildi." });
     }
 }

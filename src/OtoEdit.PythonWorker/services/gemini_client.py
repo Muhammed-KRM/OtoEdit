@@ -8,7 +8,7 @@ from config import Config
 from utils.logger import get_logger
 
 # Asılı kalan dış API soketlerinin iş parçacıklarını sonsuza kadar bloke etmesini önle
-socket.setdefaulttimeout(25.0)
+socket.setdefaulttimeout(90.0)
 
 logger = get_logger(__name__)
 
@@ -19,11 +19,14 @@ import urllib.error
 class GeminiClient:
     """Google Gemini API ve Antigravity Proxy ile viral klip tespiti ve transkript zenginleştirme istemcisi."""
 
+    _global_project_id: Optional[str] = None
+
     def __init__(self):
+        self.current_project_id: Optional[str] = None
         self.proxy_url = getattr(Config, "ANTIGRAVITY_PROXY_URL", "http://host.docker.internal:8045/v1").rstrip("/")
         self.proxy_key = getattr(Config, "ANTIGRAVITY_PROXY_KEY", "")
         self.proxy_model = getattr(Config, "ANTIGRAVITY_PROXY_MODEL", "gemini-3.8-flash-tiered")
-        self.openrouter_api_key = getattr(Config, "OPENROUTER_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", "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")
+        self.openrouter_api_key = getattr(Config, "OPENROUTER_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", "")
         self.openrouter_base_url = getattr(Config, "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
         self.openrouter_model = getattr(Config, "OPENROUTER_MODEL", "google/gemini-2.5-flash")
         self.active_provider = getattr(Config, "AI_ACTIVE_PROVIDER", "antigravity")
@@ -68,7 +71,7 @@ class GeminiClient:
 
     def _call_groq_llm(self, prompt: str, json_mode: bool = False) -> Optional[str]:
         """Groq Cloud OpenAI-uyumlu uç noktasını anahtar havuzu rotasyonuyla çağırır."""
-        if not self.groq_api_keys:
+        if not self.groq_api_keys or time.time() < getattr(self, "_groq_disabled_until", 0.0):
             return None
         url = "https://api.groq.com/openai/v1/chat/completions"
         for model_name in self.groq_models:
@@ -96,24 +99,15 @@ class GeminiClient:
                 if content:
                     return content
             except Exception as ex:
-                if "429" in str(ex):
-                    time.sleep(1.2)
                 logger.warning(f"Groq LLM ({model_name}) çağrısı başarısız: {ex}")
+        self._groq_disabled_until = time.time() + 30.0
         return None
 
     def _get_redis(self):
-        if getattr(self, "_redis_checked", False):
+        if getattr(self, "_redis_checked", False) and self._redis is not None:
             return self._redis
         self._redis_checked = True
-        if not getattr(Config, "ENABLE_ANALYSIS_CACHE", False):
-            self._redis = None
-            return None
         try:
-            import socket
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(0.2)
-            s.connect((getattr(Config, "REDIS_HOST", "redis"), int(getattr(Config, "REDIS_PORT", 6379))))
-            s.close()
             import redis
             r = redis.Redis(
                 host=getattr(Config, "REDIS_HOST", "redis"),
@@ -121,9 +115,10 @@ class GeminiClient:
                 password=getattr(Config, "REDIS_PASSWORD", None) or None,
                 db=int(getattr(Config, "REDIS_DB", 0)),
                 decode_responses=True,
-                socket_timeout=0.5,
-                socket_connect_timeout=0.5,
+                socket_timeout=1.0,
+                socket_connect_timeout=1.0,
             )
+            r.ping()
             self._redis = r
         except Exception:
             self._redis = None
@@ -134,6 +129,10 @@ class GeminiClient:
         provider = self.active_provider
         openrouter_key = self.openrouter_api_key
         openrouter_model = self.openrouter_model
+        proxy_url = self.proxy_url
+        proxy_key = self.proxy_key
+        proxy_model = self.proxy_model
+
         r = self._get_redis()
         if r:
             try:
@@ -143,18 +142,29 @@ class GeminiClient:
                     provider = data.get("ActiveProvider") or data.get("activeProvider") or provider
                     openrouter_key = data.get("OpenRouterApiKey") or data.get("openRouterApiKey") or openrouter_key
                     openrouter_model = data.get("OpenRouterModel") or data.get("openRouterModel") or openrouter_model
+                    proxy_url = data.get("AntigravityProxyUrl") or data.get("antigravityProxyUrl") or proxy_url
+                    proxy_key = data.get("AntigravityProxyKey") or data.get("antigravityProxyKey") or proxy_key
+                    proxy_model = data.get("AntigravityProxyModel") or data.get("antigravityProxyModel") or proxy_model
             except Exception:
                 pass
+
+        # Docker içinde localhost:8045 veya 127.0.0.1:8045 gelirse host.docker.internal'a dönüştür
+        if proxy_url and ("localhost" in proxy_url or "127.0.0.1" in proxy_url):
+            proxy_url = proxy_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+
         return {
-            "provider": (provider or "groq").lower(),
+            "provider": (provider or "antigravity").lower(),
             "openrouter_key": openrouter_key,
-            "openrouter_model": openrouter_model
+            "openrouter_model": openrouter_model,
+            "proxy_url": proxy_url.rstrip("/"),
+            "proxy_key": proxy_key,
+            "proxy_model": proxy_model or "gemini-3.8-flash-tiered",
         }
 
     def _call_openrouter_llm(self, prompt: str, json_mode: bool = False, model: str = None, api_key: str = None) -> Optional[str]:
         """OpenRouter API uç noktasını çağırır (22s sert zaman aşımı ile kilitlenmeye karşı korunmuştur)."""
         key = api_key or self.openrouter_api_key
-        if not key:
+        if not key or time.time() < getattr(self, "_openrouter_disabled_until", 0.0):
             return None
         from concurrent.futures import ThreadPoolExecutor, TimeoutError
         pool = ThreadPoolExecutor(max_workers=1)
@@ -227,13 +237,17 @@ class GeminiClient:
                     return content
             else:
                 logger.warning(f"OpenRouter LLM ({target_model}) HTTP {status_code}: {err_txt}")
+                if status_code in (401, 402, 403):
+                    self._openrouter_disabled_until = time.time() + 60.0
         except Exception as ex:
             logger.warning(f"OpenRouter LLM ({target_model}) çağrısı başarısız: {ex}")
+            if "401" in str(ex) or "402" in str(ex):
+                self._openrouter_disabled_until = time.time() + 60.0
         return None
 
     def _call_direct_gemini(self, prompt: str, max_retries: int = 2) -> Optional[str]:
         """Google Gemini API çağrısı (google.generativeai veya doğrudan REST)."""
-        if self._gemini_dead or not self.api_keys:
+        if self._gemini_dead or not self.api_keys or time.time() < getattr(self, "_gemini_disabled_until", 0.0):
             return None
         delay = 1.0
         total_attempts = max(max_retries, min(len(self.api_keys), 3))
@@ -263,92 +277,150 @@ class GeminiClient:
                 logger.warning(f"Direct Gemini API denemesi #{attempt} başarısız: {ex}")
                 if "402" in str(ex) or "RESOURCE_EXHAUSTED" in str(ex):
                     logger.warning("Gemini API kredisi tükenmiş (402). Yedek sağlayıcıya geçiliyor.")
+                    self._gemini_disabled_until = time.time() + 60.0
                     break
                 if attempt < total_attempts:
                     time.sleep(delay)
         return None
 
+    def is_fallback_requested(self) -> bool:
+        """Kullanıcının bu proje için kural tabanlı yedek motora geçiş talep edip etmediğini kontrol eder."""
+        pid = self.current_project_id or getattr(GeminiClient, "_global_project_id", None)
+        if not pid:
+            return False
+        r = self._get_redis()
+        if not r:
+            return False
+        try:
+            return bool(r.get(f"project:{pid}:force_fallback"))
+        except Exception:
+            return False
+
+    def _call_antigravity_proxy(self, prompt: str, cfg: Optional[Dict[str, Any]] = None, timeout: float = 300.0) -> Optional[str]:
+        """Antigravity CLI / Manager yerel API Proxy'sini (Gemini 3.8 Flash) çağırır."""
+        cfg = cfg or self._get_active_provider_config()
+        p_url = cfg.get("proxy_url") or self.proxy_url
+        p_key = cfg.get("proxy_key") or self.proxy_key
+        p_model = cfg.get("proxy_model") or self.proxy_model
+
+        if not p_url or not p_key:
+            return None
+
+        active_provider = cfg.get("provider", "").lower()
+        now_ts = time.time()
+        # Eğer aktif sağlayıcı antigravity ise geçici soğuma kilidini yok say ve ısrarla proxy'yi çağır
+        if active_provider != "antigravity" and now_ts < getattr(self, "_proxy_disabled_until", 0.0):
+            return None
+
+        url = f"{p_url}/chat/completions"
+        payload = {
+            "model": p_model,
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {p_key}",
+            "Connection": "close",
+        }
+        try:
+            req = urllib.request.Request(
+                url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            if content:
+                self._proxy_fail_count = 0
+                self._proxy_dead = False
+                return content
+        except Exception as ex:
+            self._proxy_fail_count = getattr(self, "_proxy_fail_count", 0) + 1
+            logger.warning(f"Antigravity Proxy ({p_model}) çağrı hatası (#{self._proxy_fail_count}): {ex}")
+            if active_provider != "antigravity" and self._proxy_fail_count >= 3:
+                self._proxy_disabled_until = time.time() + 30.0
+                logger.warning(f"Antigravity Proxy ({p_model}) 3 kez erişilemedi; 30s soğumaya alındı, yedek sağlayıcıya geçiliyor.")
+        return None
+
     def _execute_with_retry(self, prompt: str, max_retries: int = 2) -> Optional[str]:
-        """Aktif sağlayıcıya göre LLM çağrısını gerçekleştirir (Groq / Gemini / OpenRouter / Proxy)."""
+        """Aktif sağlayıcıya göre LLM çağrısını gerçekleştirir (Antigravity Proxy / Groq / Gemini / OpenRouter)."""
         cfg = self._get_active_provider_config()
         active_provider = cfg["provider"]
 
-        # 1. Eğer Groq aktifse doğrudan Groq'a gönder (yüksek hız, güvenilir)
+        # 1. Antigravity Proxy (aktif sağlayıcı antigravity ise kullanıcı yedek butona basana kadar bekle)
+        if active_provider == "antigravity":
+            proxy_attempts = 0
+            while True:
+                proxy_attempts += 1
+                res = self._call_antigravity_proxy(prompt, cfg=cfg, timeout=300.0)
+                if res:
+                    return res
+
+                # Kullanıcı arayüzdeki [⚡ Yedek Kural Motoruna Geç] butonuna bastı mı?
+                if self.is_fallback_requested():
+                    logger.warning("⚡ Kullanıcı arayüzden 'Yedek Kural Motoruna Geç' butonuna bastı. Kural tabanlı yedek motora geçiliyor.")
+                    break
+
+                # Kullanıcı butona basmadığı sürece yapay zekayı beklemeye devam et
+                if proxy_attempts >= 2:
+                    logger.info(f"⏳ Antigravity Proxy bekleniyor (Deneme #{proxy_attempts}). Kullanıcı yedek butonuna basmadıkça beklenmeye devam edilecek...")
+                    time.sleep(3.0)
+                    if proxy_attempts >= 10:
+                        if self.is_fallback_requested():
+                            break
+                        time.sleep(5.0)
+                        if proxy_attempts >= 20:
+                            logger.error("❌ Antigravity Proxy 20 deneme boyunca yanıt vermedi. Güvenlik için kural motoruna geçiliyor.")
+                            break
+                else:
+                    time.sleep(1.5)
+
+        # 2. Eğer Groq aktifse doğrudan Groq'a gönder (yüksek hız, güvenilir)
         if active_provider == "groq" and self.groq_api_key:
             res = self._call_groq_llm(prompt)
             if res:
                 return res
 
-        # 2. Eğer Gemini doğrudan aktifse
+        # 3. Eğer Gemini doğrudan aktifse
         if active_provider in ("gemini", "google") and self.api_keys:
             res = self._call_direct_gemini(prompt, max_retries=max_retries)
             if res:
                 return res
 
-        # 3. Eğer OpenRouter aktifse
+        # 4. Eğer OpenRouter aktifse
         if active_provider == "openrouter":
             res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
             if res:
                 return res
 
-        # 4. Antigravity Proxy (varsa)
-        now_ts = time.time()
-        if getattr(self, "use_proxy", False) and now_ts >= self._proxy_disabled_until:
-            url = f"{self.proxy_url}/chat/completions"
-            payload = {
-                "model": self.proxy_model,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.proxy_key}",
-                "Connection": "close",
-            }
-            try:
-                req = urllib.request.Request(
-                    url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=18) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                if content:
-                    self._proxy_fail_count = 0
-                    self._proxy_dead = False
-                    return content
-            except Exception as ex:
-                self._proxy_fail_count += 1
-                if self._proxy_fail_count >= 3:
-                    self._proxy_disabled_until = time.time() + 60.0
-                    logger.warning(f"Antigravity Proxy 3 kez erişilemedi ({ex}); 60s soğumaya alındı, yedek sağlayıcıya geçiliyor.")
-                else:
-                    logger.warning(f"Antigravity Proxy denemesi başarısız ({ex}); yedek sağlayıcı deneniyor.")
-
         # --- YEDEK ZİNCİRİ (FALLBACK CHAIN) ---
-        # Groq yedeği
-        if self.groq_api_key and active_provider != "groq":
-            groq_res = self._call_groq_llm(prompt)
-            if groq_res:
-                return groq_res
+        # Yalnızca kullanıcı fallback talep ettiyse veya aktif sağlayıcı antigravity değilse
+        if active_provider != "antigravity" or self.is_fallback_requested():
+            # Groq yedeği
+            if self.groq_api_key and active_provider != "groq":
+                groq_res = self._call_groq_llm(prompt)
+                if groq_res:
+                    return groq_res
 
-        # Gemini doğrudan yedeği
-        if self.api_keys and active_provider not in ("gemini", "google"):
-            gemini_res = self._call_direct_gemini(prompt, max_retries=max_retries)
-            if gemini_res:
-                return gemini_res
+            # Gemini doğrudan yedeği
+            if self.api_keys and active_provider not in ("gemini", "google"):
+                gemini_res = self._call_direct_gemini(prompt, max_retries=max_retries)
+                if gemini_res:
+                    return gemini_res
 
-        # OpenRouter yedeği
-        if cfg.get("openrouter_key") and active_provider != "openrouter":
-            res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
-            if res:
-                return res
+            # OpenRouter yedeği
+            if cfg.get("openrouter_key") and active_provider != "openrouter":
+                res = self._call_openrouter_llm(prompt, model=cfg["openrouter_model"], api_key=cfg["openrouter_key"])
+                if res:
+                    return res
 
         return None
 
     def is_available(self) -> bool:
         """Gemini API, Groq LLM, OpenRouter veya Antigravity Proxy aktif mi kontrol eder."""
         cfg = self._get_active_provider_config()
+        has_proxy = bool(cfg.get("proxy_key") and cfg.get("proxy_url") and not getattr(self, "_proxy_dead", False))
         has_openrouter = bool(cfg.get("openrouter_key"))
-        return bool(self.model or self.groq_api_key or has_openrouter or (getattr(self, "use_proxy", False) and not self._proxy_dead))
+        return bool(self.model or self.groq_api_key or has_openrouter or has_proxy)
 
     def generate_text(self, prompt: str, max_retries: int = 2) -> Optional[str]:
         """Genel metin/prompt üretimi için aktif LLM sağlayıcısını çağırır."""

@@ -459,23 +459,30 @@ class MasterPlanValidator:
         for tr_idx, tr in enumerate(repaired_transitions):
             tr_ts = float(tr.get("timestamp") or tr.get("boundaryTime") or 0.0)
             tr_type = str(tr.get("type") or "smoothleft")
-            sfx_ts = round(max(0.05, tr_ts), 2)
             if tr_type in ("zoomin", "zoomout"):
                 tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
-                    "whoosh-fast", "Fast Zoom Whoosh", 0.45, 0.20, "whoosh"
+                    "whoosh-fast", "Fast Zoom Whoosh", 0.45, 0.55, "whoosh"
                 )
+                lead_in = 0.12
             elif tr_type in ("dissolve", "fade", "fadeblack"):
                 tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
-                    "cinematic-swell", "Cinematic Ambient Swell", 0.90, 0.18, "whoosh"
+                    "cinematic-swell", "Cinematic Ambient Swell", 0.90, 0.50, "whoosh"
                 )
+                lead_in = 0.25
             elif tr_type in ("circleopen", "circleclose"):
                 tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
-                    "pop-bubble", "Circle Reveal Pop", 0.35, 0.18, "pop"
+                    "pop-bubble", "Circle Reveal Pop", 0.35, 0.55, "pop"
                 )
+                lead_in = 0.05
             else:
                 tr_sfx_preset, tr_sfx_name, tr_sfx_dur, tr_sfx_vol, tr_sfx_cat = (
-                    "capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, 0.22, "whoosh"
+                    "capcut-swish-large", "Swish Whoosh (Large 794558)", 0.81, 0.60, "whoosh"
                 )
+                lead_in = 0.15
+
+            # Akustik Zirve Senkrezisi: Whoosh sesinin en şiddetli tepe noktası (peak)
+            # tam görsel sahne geçişi anına (tr_ts) denk gelsin diye ses lead-in kadar önce başlar
+            sfx_ts = round(max(0.05, tr_ts - lead_in), 2)
             if not any(
                 abs(float(s.get("start", 0.0)) - sfx_ts) < 0.22 and s.get("isTransitionSfx")
                 for s in repaired_sfx

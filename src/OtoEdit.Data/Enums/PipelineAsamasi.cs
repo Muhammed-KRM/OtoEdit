@@ -17,5 +17,8 @@ public enum PipelineAsamasi
     OneriOlusturma = 6,
     EdlOlusturma = 7,
     Render = 8,
-    Tamamlandi = 9
+    Tamamlandi = 9,
+    SenaryoBirlestirme = 10,
+    SenaryoDenetimi = 11,
+    SenaryoOnayiBekliyor = 12
 }

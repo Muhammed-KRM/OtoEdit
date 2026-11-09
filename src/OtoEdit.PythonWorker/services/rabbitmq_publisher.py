@@ -106,6 +106,24 @@ class RabbitMQPublisher:
         }
         self.publish(RabbitMQConstants.EXCHANGE_ANALYSIS_COMPLETED, payload)
 
+    def publish_scenario_approval_required(
+        self,
+        project_id: str,
+        video_id: str,
+        master_script: dict,
+        edl_json: dict,
+    ):
+        """3. AI denetim turu sonunda kullanıcı onayı gerektiğinde .NET'e kurgu senaryosunu gönderir."""
+        payload = {
+            "projectId": project_id,
+            "videoId": video_id,
+            "iterationCount": int(master_script.get("iteration_count", 3)),
+            "criticMessage": str(master_script.get("last_critic_message", "")),
+            "masterScript": master_script,
+            "edlJson": edl_json,
+        }
+        self.publish(RabbitMQConstants.EXCHANGE_SCENARIO_APPROVAL_REQUIRED, payload)
+
     def publish_pipeline_error(self, project_id: str, video_id: str, asama: str, hata_mesaji: str):
         """Pipeline hata bildirimini .NET'e gönderir."""
         payload = {

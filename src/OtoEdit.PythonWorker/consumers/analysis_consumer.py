@@ -1,5 +1,6 @@
 import json
 import concurrent.futures
+from typing import Any, Dict, List, Optional, Tuple
 try:
     import importlib
     pika = importlib.import_module("pika")
@@ -77,12 +78,26 @@ class AnalysisConsumer:
             channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
             channel.queue_bind(queue=RabbitMQConstants.QUEUE_VIDEO_UPLOADED, exchange=ex)
 
+        # Kullanıcı Senaryo Revizyon Kuyruğu
+        channel.queue_declare(queue=RabbitMQConstants.QUEUE_SCENARIO_REVISION_REQUESTED, durable=True)
+        for ex in [
+            RabbitMQConstants.EXCHANGE_SCENARIO_REVISION_REQUESTED,
+            f"OtoEdit.Business.Events:{RabbitMQConstants.EXCHANGE_SCENARIO_REVISION_REQUESTED}",
+        ]:
+            channel.exchange_declare(exchange=ex, exchange_type='fanout', durable=True)
+            channel.queue_bind(queue=RabbitMQConstants.QUEUE_SCENARIO_REVISION_REQUESTED, exchange=ex)
+
         # Qos: Her seferde 1 mesaj al
         channel.basic_qos(prefetch_count=1)
 
         channel.basic_consume(
             queue=RabbitMQConstants.QUEUE_VIDEO_UPLOADED,
             on_message_callback=self._on_message,
+            auto_ack=False
+        )
+        channel.basic_consume(
+            queue=RabbitMQConstants.QUEUE_SCENARIO_REVISION_REQUESTED,
+            on_message_callback=self._on_scenario_revision,
             auto_ack=False
         )
 
@@ -122,6 +137,9 @@ class AnalysisConsumer:
         # 💓 RabbitMQ Arka Plan Nabız Koruyucusu (Uzun analizlerde soket kopmasını önler)
         heartbeat = RabbitHeartbeatKeeper(self._connection, interval_sec=10.0)
         heartbeat.start()
+
+        from services.gemini_client import GeminiClient
+        GeminiClient._global_project_id = project_id
 
         try:
             # 1. Ham videoyu MinIO'dan indir
@@ -399,6 +417,11 @@ class AnalysisConsumer:
                 project_id, video_id, PipelineStage.EDL_OLUSTURMA, 95,
                 message="Nihai EDL karar listesi derleniyor..."
             )
+            def _director_progress_cb(stage: str, pct: int, msg: str):
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.OTONOM_YONETMEN, pct, message=msg
+                )
+
             edl_dict = self.edl_builder.build(
                 project_id=project_id,
                 video_id=video_id,
@@ -416,19 +439,35 @@ class AnalysisConsumer:
                 subtitles_enabled=auto_subtitles,
                 auto_director=auto_director,
                 video_path=local_video_path,
+                progress_callback=_director_progress_cb,
             )
 
             # 💾 REDIS ÖNBELLEĞE KAYDET (Yayın öncesi her zaman yedekle ki uzun analiz sonucu asla kaybolmasın)
             self.cache.set_cached_edl(cache_key, edl_dict)
             self.cache.set_cached_edl(f"latest_project:{project_id}", edl_dict)
 
-            # 10. Tamamlandı Bildirimi ve EDL'yi .NET API'ye Gönder
-            self.publisher.publish_analysis_completed(project_id, video_id, edl_dict)
-            self.pipeline_logger.log_progress(
-                project_id, video_id, PipelineStage.TAMAMLANDI, 100,
-                status="Completed",
-                message="Analiz başarıyla tamamlandı!"
-            )
+            master_script_data = edl_dict.get("masterScript") if isinstance(edl_dict, dict) else None
+            if isinstance(master_script_data, dict) and master_script_data.get("requires_user_approval"):
+                logger.info(f"⏳ 3. AI denetimi sonrası kullanıcı senaryo onayı bekleniyor: ProjectId={project_id}")
+                self.publisher.publish_scenario_approval_required(
+                    project_id, video_id, master_script_data, edl_dict
+                )
+                self.pipeline_logger.log_progress(
+                    project_id,
+                    video_id,
+                    PipelineStage.SENARYO_ONAYI_BEKLIYOR,
+                    98,
+                    status="AwaitingScenarioApproval",
+                    message="Kurgu senaryosu hazırlandı; onayınız veya revizyonunuz bekleniyor...",
+                )
+            else:
+                # 10. Tamamlandı Bildirimi ve EDL'yi .NET API'ye Gönder
+                self.publisher.publish_analysis_completed(project_id, video_id, edl_dict)
+                self.pipeline_logger.log_progress(
+                    project_id, video_id, PipelineStage.TAMAMLANDI, 100,
+                    status="Completed",
+                    message="Analiz başarıyla tamamlandı!"
+                )
 
             logger.info(f"🎉 Pipeline analizi başarıyla tamamlandı: VideoId={video_id}")
             ch.basic_ack(delivery_tag=method.delivery_tag)
@@ -452,4 +491,98 @@ class AnalysisConsumer:
                 if 'local_video_path' in locals():
                     to_clean.append(local_video_path)
                 cleanup_files(*to_clean)
+
+    def _on_scenario_revision(self, ch, method, properties, body):
+        """Kullanıcının doğal dille verdiği kurgu senaryosu revizyon talebini işler ve güncel senaryoyu döner."""
+        try:
+            msg = json.loads(body.decode("utf-8"))
+        except Exception as ex:
+            logger.error(f"Senaryo revizyon mesajı JSON parse edilemedi: {ex}")
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+            return
+
+        project_id = str(msg.get("projectId", ""))
+        video_id = str(msg.get("videoId", ""))
+        user_feedback = str(msg.get("userFeedback", ""))
+        edl_payload = msg.get("edlJson")
+
+        try:
+            updated_edl = self.revise_scenario_and_rebuild_edl(
+                project_id=project_id,
+                video_id=video_id,
+                user_feedback=user_feedback,
+                current_edl_dict=edl_payload if isinstance(edl_payload, dict) else None,
+            )
+            if updated_edl:
+                master_script_data = updated_edl.get("masterScript") or {}
+                self.publisher.publish_scenario_approval_required(
+                    project_id, video_id, master_script_data, updated_edl
+                )
+            ch.basic_ack(delivery_tag=method.delivery_tag)
+        except Exception as ex:
+            logger.error(f"Senaryo revizyonu işlenirken hata (ProjectId={project_id}): {ex}", exc_info=True)
+            ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
+
+    def revise_scenario_and_rebuild_edl(
+        self,
+        project_id: str,
+        video_id: str,
+        user_feedback: str,
+        current_edl_dict: Optional[dict] = None,
+    ) -> Optional[dict]:
+        """Kullanıcının revizyon metnini mevcut senaryoya uygular, kurguyu yeniden derler ve önbelleği günceller."""
+        from pipeline.holistic_analyzer import HolisticAnalyzer
+        from pipeline.llm_director import LlmDirector
+        from pipeline.scenario_engine import ScenarioRefiner
+        from pipeline.scenario_models import MasterEditingScript
+        from services.gemini_client import GeminiClient
+
+        edl_dict = current_edl_dict or self.cache.get_cached_edl(f"latest_project:{project_id}")
+        if not isinstance(edl_dict, dict):
+            return None
+
+        transcript_dict = edl_dict.get("transcript") or {}
+        segments = transcript_dict.get("segments") or []
+        cuts = edl_dict.get("cuts") or []
+        duration = float(edl_dict.get("duration") or 30.0)
+
+        analyzer = HolisticAnalyzer(enable_llm_planning=False)
+        norm_cuts = analyzer._normalize_cuts(cuts)
+        active_segs = analyzer._filter_active_segments(segments, norm_cuts)
+        word_stream = analyzer._build_word_stream(active_segs)
+
+        raw_ms = edl_dict.get("masterScript")
+        if isinstance(raw_ms, dict):
+            master_script = MasterEditingScript.from_dict(raw_ms)
+        else:
+            _, _, _ = analyzer.analyze_video(segments, duration, cuts, project_id=project_id, video_id=video_id)
+            master_script = analyzer.last_master_script
+
+        if master_script is None:
+            return edl_dict
+
+        refiner = ScenarioRefiner(gemini_client=GeminiClient())
+        updated_script, _ = refiner.apply_user_natural_language_feedback(
+            master_script, user_feedback, word_stream
+        )
+
+        director = LlmDirector(enable_web_crawl=False)
+        composed = director.compose_intelligent_plan(
+            segments=segments,
+            cuts=cuts,
+            video_duration=duration,
+            subtitles_enabled=bool((edl_dict.get("settings") or {}).get("subtitlesEnabled", True)),
+            project_id=project_id,
+            video_id=video_id,
+            precomputed_master_script=updated_script,
+        )
+
+        edl_dict["overlays"] = composed.get("overlays", edl_dict.get("overlays", []))
+        edl_dict["transitions"] = composed.get("transitions", edl_dict.get("transitions", []))
+        edl_dict["sfxClips"] = composed.get("sfxClips", edl_dict.get("sfxClips", []))
+        edl_dict["masterScript"] = updated_script.to_dict()
+
+        self.cache.set_cached_edl(f"latest_project:{project_id}", edl_dict)
+        return edl_dict
+
 

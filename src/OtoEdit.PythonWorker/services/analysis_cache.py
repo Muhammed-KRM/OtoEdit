@@ -122,3 +122,28 @@ class AnalysisCacheService:
         except Exception as ex:
             logger.warning(f"Redis set_cached_edl yazma hatası (ihmal edildi): {ex}")
             return False
+
+    def is_fallback_requested(self, project_id: str) -> bool:
+        """Kullanıcının bu proje için kural motoruna geçiş (fallback) talep edip etmediğini kontrol eder."""
+        try:
+            client = self._get_client()
+            if not client or not project_id:
+                return False
+            val = client.get(f"project:{project_id}:force_fallback")
+            return bool(val)
+        except Exception as ex:
+            logger.warning(f"Redis fallback kontrol hatası: {ex}")
+            return False
+
+    def request_fallback(self, project_id: str) -> bool:
+        """Kullanıcı tarafından kural motoruna geçiş talebini Redis'e yazar."""
+        try:
+            client = self._get_client()
+            if not client or not project_id:
+                return False
+            client.set(f"project:{project_id}:force_fallback", "true", ex=3600)
+            logger.info(f"⚡ Proje {project_id} için kullanıcı tarafından kural motoruna geçiş talep edildi.")
+            return True
+        except Exception as ex:
+            logger.warning(f"Redis fallback yazma hatası: {ex}")
+            return False
