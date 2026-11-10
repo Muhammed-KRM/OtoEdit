@@ -51,8 +51,9 @@ class WebImageCrawler:
     BLOCKED_DOMAINS = (
         "shutterstock", "istockphoto", "gettyimages", "alamy",
         "123rf", "dreamstime", "depositphotos", ".svg", ".gif", ".pdf", ".djvu",
-        # Haber, tabloid, forum, ödev ve e-ticaret siteleri (alakasız görsel kirliliğini önler)
-        "haber", "gazete", "sivasekspres", "nefes.com.tr", "tgrthaber",
+        # Haber, tabloid, forum, ödev, okul ve e-ticaret siteleri (alakasız görsel kirliliğini önler)
+        "meb.gov.tr", "k12.tr", "ilkokul", "ortaokul", "lisesi", "belediye",
+        "wa00", "whatsapp", "haber", "gazete", "sivasekspres", "nefes.com.tr", "tgrthaber",
         "yeniakit", "oncusehir", "habergo", "risalehaber", "yenicaggazetesi",
         "sansasyonel", "bilecikhaber", "ensonhaber", "milliyet", "hurriyet",
         "sabah.com", "sozcu.com", "cumhuriyet.com", "chegg", "eodev",
@@ -65,6 +66,7 @@ class WebImageCrawler:
         self.work_dir = work_dir
         self.pexels = pexels_client
         self.used_links: Set[str] = set()
+        self.entity_portrait_cache: Dict[str, List[Dict[str, Any]]] = {}
         os.makedirs(self.work_dir, exist_ok=True)
 
     @staticmethod
@@ -97,6 +99,10 @@ class WebImageCrawler:
         Türkçe ve İngilizce Wikipedia özet görsellerini, MediaWiki arama + Wikidata P18 köprüsünü,
         madde içi görselleri (generator=images), Wikimedia Commons ve Bing adaylarını toplar (PROB-5.1, PROB-5.2, PROB-5.3).
         """
+        entity_key = f"{'work' if is_work else 'person'}:{(wiki_title_tr or wiki_title_en).strip().lower()}"
+        if not is_work and entity_key in self.entity_portrait_cache and self.entity_portrait_cache[entity_key]:
+            return [dict(c) for c in self.entity_portrait_cache[entity_key][:max_candidates]]
+
         raw_pool: List[Dict[str, Any]] = []
         tr_titles: List[str] = []
         for cand_t in (wiki_title_tr, self._strip_subclause_qualifiers(wiki_title_tr)):
@@ -130,16 +136,17 @@ class WebImageCrawler:
             raw_pool.extend(found_en)
 
         # 2. Ardından konu başlığı ile örtüşen madde içi görseller (generator=images)
+        # Kişi portrelerinde relax_stem_filter=False tutularak makale içindeki başka kişilerin (örn. Ebu Hanife) görselleri engellenir.
         for t_tr in tr_titles:
             raw_pool.extend(
                 self._search_wikipedia_article_images(
-                    t_tr, lang="tr", source_tag="wikipedia_portrait", limit=4, relax_stem_filter=True
+                    t_tr, lang="tr", source_tag="wikipedia_portrait", limit=4, relax_stem_filter=is_work
                 )
             )
         for t_en in en_titles:
             raw_pool.extend(
                 self._search_wikipedia_article_images(
-                    t_en, lang="en", source_tag="wikipedia_portrait", limit=4, relax_stem_filter=True
+                    t_en, lang="en", source_tag="wikipedia_portrait", limit=4, relax_stem_filter=is_work
                 )
             )
 
@@ -151,15 +158,19 @@ class WebImageCrawler:
         if len(raw_pool) < 2:
             fallback_q = (tr_titles[0] if tr_titles else "") or (en_titles[0] if en_titles else "")
             if fallback_q:
-                raw_pool.extend(self._search_bing_images(fallback_q, limit=3))
+                raw_pool.extend(self._search_bing_images(fallback_q, limit=4, is_portrait=not is_work))
 
         verified: List[Dict[str, Any]] = []
+        reusable_verified: List[Dict[str, Any]] = []
         seen_urls: Set[str] = set()
         for item in raw_pool:
             url = str(item.get("url", ""))
-            if not url or url in self.used_links or url in seen_urls:
+            if not url or url in seen_urls:
                 continue
             seen_urls.add(url)
+            already_used = url in self.used_links
+            if already_used and verified and is_work:
+                continue
             local_path = self._download_candidate(url)
             if not local_path:
                 continue
@@ -172,9 +183,16 @@ class WebImageCrawler:
             item["local_path"] = local_path
             item["cv_metrics"] = metrics
             item["is_work"] = is_work
-            verified.append(item)
-            if len(verified) >= max_candidates:
-                break
+            if already_used and is_work:
+                reusable_verified.append(item)
+            else:
+                verified.append(item)
+                if len(verified) >= max_candidates:
+                    break
+        if not verified and reusable_verified:
+            verified.extend(reusable_verified[:max_candidates])
+        if verified and not is_work:
+            self.entity_portrait_cache[entity_key] = [dict(c) for c in verified]
         return verified
 
     def gather_verified_candidates(
@@ -298,10 +316,10 @@ class WebImageCrawler:
                     for inner_p in ("page3-", "page5-", "page7-"):
                         candidate_urls.append(re.sub(r"/page1-", f"/{inner_p}", thumb_url, flags=re.IGNORECASE))
                 else:
-                    url_960 = re.sub(r"/\d+px-", "/960px-", thumb_url)
-                    if url_960 != thumb_url:
-                        candidate_urls.append(url_960)
                     candidate_urls.append(thumb_url)
+                    url_800 = re.sub(r"/\d+px-", "/800px-", thumb_url)
+                    if url_800 != thumb_url:
+                        candidate_urls.append(url_800)
             if orig_url and orig_url.lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
                 if not re.search(r"\.(pdf|djvu)\b", orig_url, re.IGNORECASE) and orig_url not in candidate_urls:
                     candidate_urls.append(orig_url)
@@ -500,14 +518,17 @@ class WebImageCrawler:
             logger.debug(f"[WebImageCrawler] Wikipedia article images hatası ({lang}:{title}): {exc}")
             return []
 
-    def _search_bing_images(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
+    def _search_bing_images(self, query: str, limit: int = 3, is_portrait: bool = False) -> List[Dict[str, Any]]:
         """Bing Images üzerinden filtrelenmiş doğrudan görsel URL'lerini çeker."""
         if not query:
             return []
+        search_q = query.strip()
+        if is_portrait and "portre" not in search_q.lower():
+            search_q = f"{search_q} portre"
         try:
             text_body = self._http_get_text(
                 "https://www.bing.com/images/search",
-                params={"q": query, "qft": "+filterui:imagesize-large+filterui:photo-photo", "FORM": "IRFLTR"},
+                params={"q": search_q, "qft": "+filterui:imagesize-large+filterui:photo-photo", "FORM": "IRFLTR"},
                 headers=self.BROWSER_HEADERS,
                 timeout=5,
             )
@@ -515,16 +536,27 @@ class WebImageCrawler:
                 return []
             matches = re.findall(r'm="(\{[^"]*murl[^"]*\})"', text_body)
             results: List[Dict[str, Any]] = []
+            bad_portrait_terms = (
+                "ilkokul", "ortaokul", "lise", "okul", "öğrenci", "ogrenci",
+                "meb", "belediye", "tören", "toren", "etkinlik", "ziyaret",
+                "mezuniyet", "cadde", "park", "wa00", "whatsapp", "sempozyum", "konferans salonu",
+            )
             for raw_m in matches:
                 try:
                     meta = json.loads(html.unescape(raw_m))
                     murl = str(meta.get("murl", ""))
+                    title_meta = str(meta.get("t", "") or "")
+                    purl_meta = str(meta.get("purl", "") or "")
+                    combined_meta = f"{murl} {title_meta} {purl_meta}".lower()
                     if not murl or any(bad in murl.lower() for bad in self.BLOCKED_DOMAINS):
+                        continue
+                    if is_portrait and any(bp in combined_meta for bp in bad_portrait_terms):
                         continue
                     results.append({
                         "url": murl,
                         "source": "bing_web",
-                        "alt": meta.get("t", query),
+                        "alt": title_meta or query,
+                        "description": title_meta,
                     })
                     if len(results) >= limit:
                         break

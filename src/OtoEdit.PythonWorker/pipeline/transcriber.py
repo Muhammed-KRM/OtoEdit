@@ -192,7 +192,7 @@ class Transcriber:
         for w in words:
             w_text = w.word.strip()
             w_norm = w_text.lower().replace(".", "").replace(",", "")
-            if w_norm in ("altyazı", "mısır", "diber"):
+            if w_norm in ("altyazı", "mısır", "diber", "referanscom"):
                 continue
             if float(w.end) >= float(w.start):
                 cleaned_raw.append(Word(
@@ -201,6 +201,29 @@ class Transcriber:
                     end=float(w.end),
                     confidence=float(getattr(w, "confidence", 1.0))
                 ))
+
+        # 1.2. Uzun sessizliklerde Whisper'ın ürettiği çok kelimeli halüsinasyon cümlelerini temizle
+        if len(cleaned_raw) >= 4:
+            hallucination_phrases = (
+                ("izlediğiniz", "için", "teşekkür", "ederim"),
+                ("izlediğiniz", "için", "teşekkürler"),
+                ("videoyu", "beğenmeyi", "ve", "abone"),
+                ("kanalıma", "abone", "olmayı"),
+                ("referans", "eğitim", "aracılığıyla"),
+            )
+            norm_tokens = [
+                w.word.strip().lower().strip(".,!?;:\"'")
+                for w in cleaned_raw
+            ]
+            drop_indices: set = set()
+            for i_w in range(len(norm_tokens)):
+                for hp in hallucination_phrases:
+                    m_len = len(hp)
+                    if i_w + m_len <= len(norm_tokens) and tuple(norm_tokens[i_w : i_w + m_len]) == hp:
+                        for k_idx in range(i_w, i_w + m_len):
+                            drop_indices.add(k_idx)
+            if drop_indices:
+                cleaned_raw = [w for idx_w, w in enumerate(cleaned_raw) if idx_w not in drop_indices]
 
         if not cleaned_raw:
             return []

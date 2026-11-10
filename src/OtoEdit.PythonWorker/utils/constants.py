@@ -32,6 +32,7 @@ class PipelineStage:
     RETAKE = "SessizlikAlgilama"
     VIRAL_KLIP = "Repurposing"
     BROLL = "OneriOlusturma"
+    OTONOM_YONETMEN = "EdlOlusturma"
 
 
 

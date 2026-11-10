@@ -1113,7 +1113,19 @@ class HolisticAnalyzer:
         try:
             from pipeline.scenario_engine import ScenarioOrchestrator, ScenarioMerger
 
-            all_planned_events = [ev for ch in chapter_plans for ev in ch.events]
+            llm_ready = bool(
+                self.enable_llm_planning
+                and self.gemini
+                and hasattr(self.gemini, "is_available")
+                and self.gemini.is_available()
+            )
+            all_planned_events = [
+                ev
+                for ch in chapter_plans
+                for ev in ch.events
+                if not llm_ready
+                or not str(ev.event_id or "").startswith("evt_ch")
+            ]
             orchestrator = ScenarioOrchestrator(gemini_client=self.gemini if self.enable_llm_planning else None)
             master_script = orchestrator.build_and_verify_scenario(
                 project_id=project_id,
@@ -1128,11 +1140,16 @@ class HolisticAnalyzer:
             )
             self.last_master_script = master_script
 
-            # Başeditör (Critic) AI tarafından eklenen veya düzeltilen olayları bölüm planlarına yansıt
-            if master_script and master_script.scenes and master_script.iteration_count > 0:
-                has_revisions = any(len(r.revisions) > 0 for r in master_script.critique_history)
-                if has_revisions:
-                    chapter_plans = ScenarioMerger.to_chapter_plans(master_script)
+            # Parçalı AI (ChunkDirector) ve Başeditör (Critic) tarafından üretilen/onaylanan olayları bölüm planlarına yansıt
+            if master_script and master_script.scenes:
+                converted_plans = ScenarioMerger.to_chapter_plans(master_script)
+                for c_plan in converted_plans:
+                    if c_plan.events:
+                        c_plan.events = VerbatimTranscriptValidator.enforce_verbatim_fidelity(
+                            c_plan.events, word_stream
+                        )
+                if any(len(c.events) > 0 for c in converted_plans):
+                    chapter_plans = converted_plans
         except Exception as sc_err:
             logger.warning(f"[HolisticAnalyzer] Otonom Senaryo Orkestratörü uyarısı (temel plan korundu): {sc_err}")
 
@@ -1434,14 +1451,20 @@ class HolisticAnalyzer:
                         occupied_ranges.append((matched_items[0][0].start, shared_end_sec))
                         break
 
-        # Genel Virgüllü / "ve" Bağlaçlı Sıralama Yakalayıcı (Özel listede olmayan her türlü yeni video için!)
-        self._detect_generic_comma_lists(
-            active_segments, word_stream, triggers, occupied_ranges, is_range_busy
+        llm_ready = bool(
+            self.enable_llm_planning
+            and self.gemini
+            and hasattr(self.gemini, "is_available")
+            and self.gemini.is_available()
         )
-        # Çok Cümleli Sıra Sayılı ("Birincisi X... İkincisi Y... Üçüncüsü Z...") Kümülatif Liste Yakalayıcı
-        self._detect_multi_sentence_ordinal_lists(
-            active_segments, word_stream, triggers, occupied_ranges, is_range_busy, seen_groups
-        )
+        # Genel Virgüllü / "ve" Bağlaçlı Sıralama Yakalayıcı (Yalnızca LLM devre dışıyken yedek olarak çalışır; LLM aktifken ChunkDirector semantik listeleri üretir)
+        if not llm_ready:
+            self._detect_generic_comma_lists(
+                active_segments, word_stream, triggers, occupied_ranges, is_range_busy
+            )
+            self._detect_multi_sentence_ordinal_lists(
+                active_segments, word_stream, triggers, occupied_ranges, is_range_busy, seen_groups
+            )
 
         # ------------------------------------------------------------------
         # AŞAMA B: İKİLİ KAVRAM VURGULARI (PAIRED_TERMS)
@@ -1498,10 +1521,11 @@ class HolisticAnalyzer:
                         )
                     occupied_ranges.append((tok1.start, shared_end))
 
-        # Evrensel İkili Kavram Yakalayıcı (Her türlü video konusu için paralel ve bağlaçlı ikililer)
-        self._detect_universal_paired_terms(
-            active_segments, word_stream, triggers, occupied_ranges, is_range_busy, seen_groups
-        )
+        # Evrensel İkili Kavram Yakalayıcı (Yalnızca LLM devre dışıyken yedek olarak çalışır; LLM aktifken ChunkDirector ikili kavramları üretir)
+        if not llm_ready:
+            self._detect_universal_paired_terms(
+                active_segments, word_stream, triggers, occupied_ranges, is_range_busy, seen_groups
+            )
 
         # ------------------------------------------------------------------
         # AŞAMA C: KİŞİ VEYA ESER TANITIMLARI (SADECE BUNLARDA GÖRSEL KONUR!)
@@ -1768,10 +1792,11 @@ class HolisticAnalyzer:
 
         # ------------------------------------------------------------------
         # AŞAMA E: EVRENSEL LLM KELİME-SENKRONLU ÇIKARIM (KATMAN 1)
-        # (Tıp, Yazılım, Tarih, Ekonomi, Psikoloji, Spor vb. her türlü yeni videoda
-        # deterministik kalıpların yakalamadığı boş pencereleri LLM ile zenginleştirir)
+        # Not: Ana akışta Aşama 6 (ScenarioOrchestrator -> ChunkDirector paralel sahne AI + Critic)
+        # devreye girdiği için burada sıralı 140 kelimelik pencere döngüsünü tekrar çalıştırıp
+        # süreyi uzatmıyoruz; yalnızca doğrudan _detect_global_semantic_triggers çağrılarında isteğe bağlıdır.
         # ------------------------------------------------------------------
-        if self.enable_llm_planning and self.gemini and hasattr(self.gemini, "is_available") and self.gemini.is_available():
+        if getattr(self, "_use_legacy_window_llm", False) and llm_ready:
             self._extract_events_via_llm(
                 word_stream=word_stream,
                 video_duration=video_duration,
@@ -2217,7 +2242,13 @@ class HolisticAnalyzer:
                         phrase_start = scan + 1
                         if phrase_start < n_tokens and word_stream[phrase_start].lower in ("olarak", "ise", "yani", "de", "da", "madde", "şart"):
                             phrase_start += 1
-                        cand_toks = word_stream[phrase_start : min(n_tokens, phrase_start + 5)]
+                        cand_toks: List[WordToken] = []
+                        for ct in word_stream[phrase_start : min(n_tokens, phrase_start + 5)]:
+                            if ct.lower in ("yani", "çünkü", "zira", "ki", "ise", "demek") and cand_toks:
+                                break
+                            cand_toks.append(ct)
+                            if ct.has_comma or ct.has_sentence_end:
+                                break
                         if cand_toks:
                             raw_cand = " ".join(t.clean for t in cand_toks)
                             title = extract_turkish_semantic_title(raw_cand, max_chars=26)
@@ -2658,7 +2689,10 @@ class HolisticAnalyzer:
                 raw_resp = self.gemini.generate_text(prompt, max_retries=1)
                 if not raw_resp:
                     continue
-                parsed = GeminiClient.extract_balanced_json(raw_resp)
+                balanced_str = GeminiClient.extract_balanced_json(raw_resp, prefer_array=True) or GeminiClient.extract_balanced_json(raw_resp)
+                if not balanced_str:
+                    continue
+                parsed = json.loads(balanced_str) if isinstance(balanced_str, str) else balanced_str
                 if isinstance(parsed, dict) and isinstance(parsed.get("events"), list):
                     parsed = parsed["events"]
                 if not isinstance(parsed, list):

@@ -8,8 +8,9 @@ Stage 5: DeterministicTimelineExecutor Çıktısı (overlays, sfx_list / sfxClip
 """
 
 import os
+import re
 import tempfile
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from pipeline.holistic_analyzer import ENGINE_VERSION, HolisticAnalyzer, audit_overlay_sync
 from pipeline.master_plan_validator import MasterPlanValidator
 from pipeline.safe_zone_vision_engine import DynamicTypographySizer, SafeZoneSpatialSolver
@@ -161,13 +162,16 @@ class LlmDirector:
                     "isTransitionSfx": True,
                 })
 
-            # Grup bazlı (PROGRESSIVE_LIST & PAIRED_TERMS) toplam satır sayısını ve uyumlu grup font boyutunu önceden hesapla
+            # Grup bazlı (PROGRESSIVE_LIST & PAIRED_TERMS) toplam satır sayısını, uyumlu grup font boyutunu
+            # ve 2'şerli görsel sayfalama (pagination) için slot başlangıç zamanlarını önceden hesapla
             group_counts: Dict[str, int] = {}
             group_texts: Dict[str, List[str]] = {}
+            group_slot_starts: Dict[Tuple[str, int], float] = {}
             for e_item in ch.events:
                 if e_item.group_id and e_item.stack_slot is not None:
                     group_counts[e_item.group_id] = group_counts.get(e_item.group_id, 0) + 1
                     group_texts.setdefault(e_item.group_id, []).append(e_item.text_primary)
+                    group_slot_starts[(e_item.group_id, int(e_item.stack_slot))] = float(e_item.start_sec)
 
             group_harmonized_font: Dict[str, int] = {}
             for grp_id, texts in group_texts.items():
@@ -398,6 +402,81 @@ class LlmDirector:
                         "groupId": evt.group_id or f"stack_{evt.event_id}",
                         "stackSlot": slot,
                     })
+
+                    # Kullanıcı Kuralı: "Ne olursa olsun bir kişi sayıldığı zaman resmi de olmalı! Sağda alt alta sıralanabilir."
+                    wiki_p_tr = evt.person_wiki_tr if evt.action_type == "PERSON_INTRODUCTION" else ""
+                    is_person_item = bool(
+                        evt.action_type == "PERSON_INTRODUCTION"
+                        or any(
+                            k in evt.text_primary.lower()
+                            for k in ("hz.", "imam", "ebu ", "ibn ", "alim", "şahsiyet", "filozof", "efendimiz")
+                        )
+                    )
+                    if is_person_item and (wiki_p_tr or evt.text_primary):
+                        p_query = wiki_p_tr or re.sub(r"^\d+\.\s*", "", evt.text_primary).strip()
+                        p_asset = None
+                        if self.enable_web_crawl:
+                            cand_portraits = self.crawler.gather_person_portrait_candidates(
+                                wiki_title_tr=p_query,
+                                wiki_title_en=evt.person_wiki_en or "",
+                                max_candidates=2,
+                            )
+                            if cand_portraits:
+                                p_asset = self.verifier.select_best_candidate(
+                                    candidates=cand_portraits,
+                                    spoken_context_tr=evt.text_primary,
+                                    concept_title_tr=evt.text_primary,
+                                    theme_display_name=theme_profile.display_name,
+                                )
+                        if p_asset:
+                            chosen_url = str(p_asset["url"])
+                            img_x = 80.9 if horiz_pos == "left" else 19.1
+                            # 2'şerli Sayfalama (2-by-2 Pagination):
+                            # 16:9 ekranda görseller ~%20-24 dikey yer kapladığı için aynı anda en fazla 2 görsel
+                            # (Üst: Y=23.0%, Alt: Y=52.0%) gösterilir; 3. madde başladığında ilk 2 görsel kalkar ve
+                            # 3. ile 4. görseller aynı ferah yuvalara (Y=23.0%, Y=52.0%) yerleşir.
+                            row_in_page = slot % 2
+                            img_y = 23.0 if row_in_page == 0 else 52.0
+                            img_track_id = 3 + row_in_page
+                            next_page_first_slot = ((slot // 2) + 1) * 2
+                            next_page_start = group_slot_starts.get((evt.group_id or "", next_page_first_slot))
+                            if next_page_start is not None and next_page_start > evt.start_sec + 0.5:
+                                img_end_sec = round(next_page_start - 0.08, 2)
+                            else:
+                                img_end_sec = evt.end_sec
+                            img_dur = round(max(0.65, img_end_sec - evt.start_sec), 2)
+                            generated_overlays.append({
+                                "id": f"ad_img_{evt.event_id}",
+                                "type": "image",
+                                "content": evt.text_primary,
+                                "text": evt.text_primary,
+                                "source": chosen_url,
+                                "timestamp": evt.start_sec,
+                                "start": evt.start_sec,
+                                "end": img_end_sec,
+                                "duration": img_dur,
+                                "position": ["right" if horiz_pos == "left" else "left", "top"],
+                                "positionX": img_x,
+                                "positionY": img_y,
+                                "scale": 0.65,
+                                "opacity": 98.0,
+                                "animation": sub_theme.entry_animation,
+                                "exitAnimation": sub_theme.exit_animation,
+                                "actionType": "PERSON_INTRODUCTION",
+                                "subThemeRole": sub_theme.role_id,
+                                "shape": "rounded",
+                                "maskShape": "rounded",
+                                "borderRadius": 14,
+                                "dropShadow": True,
+                                "shadowBlur": 16,
+                                "removeBg": False,
+                                "trackId": img_track_id,
+                                "track_id": img_track_id,
+                                "semanticPriority": True,
+                                "pairedGroupId": evt.group_id or f"stack_{evt.event_id}",
+                                "groupId": evt.group_id or f"stack_{evt.event_id}",
+                                "stackSlot": slot,
+                            })
 
                     # HER MADDEDE (slot = 0, 1, 2, 3, 4...) KENDİ MİNİ-TEMA SESİ ÇALAR!
                     generated_sfx.append({

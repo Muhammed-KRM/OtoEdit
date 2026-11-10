@@ -78,6 +78,10 @@ class VLMAssetVerifier:
             )
             if scored:
                 return scored
+            # VLM tarafından açıkça reddedilen (veto edilen) adayları deterministik aşamaya taşıma!
+            clean_candidates = [c for c in clean_candidates if not c.get("_vlm_rejected")]
+            if not clean_candidates:
+                return None
 
         # Aşama 3: Deterministik Puanlayıcı (Wikipedia Portre/Kavram + Pexels + Wikimedia + OpenCV metrikleri)
         best_cand: Optional[Dict[str, Any]] = None
@@ -141,6 +145,7 @@ class VLMAssetVerifier:
                     or ev.get("is_blank_cover_or_barcode")
                     or ev.get("matches_target_entity") is False
                 ):
+                    cand["_vlm_rejected"] = True
                     logger.info(
                         f"[VLMAssetVerifier] VLM görseli reddetti ({concept_title_tr}): {ev.get('literal_description')}"
                     )

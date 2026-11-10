@@ -15,11 +15,14 @@ logger = get_logger(__name__)
 
 import urllib.request
 import urllib.error
+import threading
 
 class GeminiClient:
     """Google Gemini API ve Antigravity Proxy ile viral klip tespiti ve transkript zenginleştirme istemcisi."""
 
     _global_project_id: Optional[str] = None
+    _proxy_lock = threading.Lock()
+    _last_proxy_call_ts: float = 0.0
 
     def __init__(self):
         self.current_project_id: Optional[str] = None
@@ -40,7 +43,13 @@ class GeminiClient:
         self.groq_api_key = getattr(Config, "GROQ_API_KEY", "") or os.getenv("GROQ_API_KEY", "")
         self.groq_api_keys: List[str] = list(getattr(Config, "GROQ_API_KEYS", []) or ([] if not self.groq_api_key else [self.groq_api_key]))
         self._groq_key_idx = 0
-        self.groq_models = ["qwen/qwen3.8-27b", "openai/gpt-oss-120b", "openai/gpt-oss-20b"]
+        self.groq_models = [
+            "llama-3.3-70b-versatile",
+            "openai/gpt-oss-120b",
+            "qwen/qwen3.8-27b",
+            "openai/gpt-oss-20b",
+            "llama-3.1-8b-instant",
+        ]
         self.model = None
         self._genai = None
         self._proxy_dead = False
@@ -67,14 +76,16 @@ class GeminiClient:
                 logger.warning(f"Gemini API başlatılamadı, diğer sağlayıcılar kullanılacak: {e}")
 
         if self.groq_api_key:
-            logger.info("⚡ Groq Cloud LLM yedek istemcisi hazır (openai/gpt-oss-120b, qwen/qwen3.8-27b).")
+            logger.info("⚡ Groq Cloud LLM yedek istemcisi hazır (llama-3.3-70b-versatile, qwen/qwen3.8-27b, openai/gpt-oss-120b).")
 
     def _call_groq_llm(self, prompt: str, json_mode: bool = False) -> Optional[str]:
-        """Groq Cloud OpenAI-uyumlu uç noktasını anahtar havuzu rotasyonuyla çağırır."""
+        """Groq Cloud OpenAI-uyumlu uç noktasını anahtar ve model havuzu rotasyonuyla çağırır."""
         if not self.groq_api_keys or time.time() < getattr(self, "_groq_disabled_until", 0.0):
             return None
         url = "https://api.groq.com/openai/v1/chat/completions"
-        for model_name in self.groq_models:
+        start_m_idx = getattr(self, "_groq_model_idx", 0)
+        for offset in range(len(self.groq_models)):
+            model_name = self.groq_models[(start_m_idx + offset) % len(self.groq_models)]
             active_key = self.groq_api_keys[self._groq_key_idx % len(self.groq_api_keys)]
             self._groq_key_idx += 1
             headers = {
@@ -97,10 +108,12 @@ class GeminiClient:
                     data = json.loads(resp.read().decode("utf-8"))
                 content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 if content:
+                    self._groq_model_idx = (start_m_idx + offset + 1) % len(self.groq_models)
                     return content
             except Exception as ex:
                 logger.warning(f"Groq LLM ({model_name}) çağrısı başarısız: {ex}")
-        self._groq_disabled_until = time.time() + 30.0
+                if "429" in str(ex):
+                    time.sleep(2.5)
         return None
 
     def _get_redis(self):
@@ -164,7 +177,7 @@ class GeminiClient:
     def _call_openrouter_llm(self, prompt: str, json_mode: bool = False, model: str = None, api_key: str = None) -> Optional[str]:
         """OpenRouter API uç noktasını çağırır (22s sert zaman aşımı ile kilitlenmeye karşı korunmuştur)."""
         key = api_key or self.openrouter_api_key
-        if not key or time.time() < getattr(self, "_openrouter_disabled_until", 0.0):
+        if not key or time.time() < max(getattr(self, "_openrouter_disabled_until", 0.0), getattr(GeminiClient, "_class_openrouter_disabled_until", 0.0)):
             return None
         from concurrent.futures import ThreadPoolExecutor, TimeoutError
         pool = ThreadPoolExecutor(max_workers=1)
@@ -238,16 +251,18 @@ class GeminiClient:
             else:
                 logger.warning(f"OpenRouter LLM ({target_model}) HTTP {status_code}: {err_txt}")
                 if status_code in (401, 402, 403):
-                    self._openrouter_disabled_until = time.time() + 60.0
+                    self._openrouter_disabled_until = time.time() + 600.0
+                    GeminiClient._class_openrouter_disabled_until = time.time() + 600.0
         except Exception as ex:
             logger.warning(f"OpenRouter LLM ({target_model}) çağrısı başarısız: {ex}")
             if "401" in str(ex) or "402" in str(ex):
-                self._openrouter_disabled_until = time.time() + 60.0
+                self._openrouter_disabled_until = time.time() + 600.0
+                GeminiClient._class_openrouter_disabled_until = time.time() + 600.0
         return None
 
     def _call_direct_gemini(self, prompt: str, max_retries: int = 2) -> Optional[str]:
         """Google Gemini API çağrısı (google.generativeai veya doğrudan REST)."""
-        if self._gemini_dead or not self.api_keys or time.time() < getattr(self, "_gemini_disabled_until", 0.0):
+        if self._gemini_dead or not self.api_keys or time.time() < max(getattr(self, "_gemini_disabled_until", 0.0), getattr(GeminiClient, "_class_gemini_disabled_until", 0.0)):
             return None
         delay = 1.0
         total_attempts = max(max_retries, min(len(self.api_keys), 3))
@@ -255,29 +270,22 @@ class GeminiClient:
             try:
                 key = self.api_keys[self._key_idx % len(self.api_keys)]
                 self._key_idx += 1
-                if self._genai:
-                    self._genai.configure(api_key=key)
-                    model_name = getattr(self, "model_name", "gemini-2.5-flash")
-                    model = self._genai.GenerativeModel(model_name)
-                    response = model.generate_content(prompt)
-                    if response and hasattr(response, "text"):
-                        return response.text
-                # REST yedek
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={key}"
                 pdata = json.dumps({"contents": [{"parts": [{"text": prompt}]}]}).encode("utf-8")
                 req = urllib.request.Request(url, data=pdata, headers={"Content-Type": "application/json"}, method="POST")
                 import ssl
                 ctx = ssl.create_default_context()
-                with urllib.request.urlopen(req, context=ctx, timeout=20) as resp:
+                with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
                     rdata = json.loads(resp.read().decode("utf-8"))
                     cand = rdata.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
                     if cand:
                         return cand
             except Exception as ex:
                 logger.warning(f"Direct Gemini API denemesi #{attempt} başarısız: {ex}")
-                if "402" in str(ex) or "RESOURCE_EXHAUSTED" in str(ex):
-                    logger.warning("Gemini API kredisi tükenmiş (402). Yedek sağlayıcıya geçiliyor.")
-                    self._gemini_disabled_until = time.time() + 60.0
+                if any(k in str(ex) for k in ("402", "429", "depleted", "RESOURCE_EXHAUSTED", "quota")):
+                    logger.warning("Gemini API kredisi/kotası tükenmiş (429/402). Yedek sağlayıcıya geçiliyor.")
+                    self._gemini_disabled_until = time.time() + 600.0
+                    GeminiClient._class_gemini_disabled_until = time.time() + 600.0
                     break
                 if attempt < total_attempts:
                     time.sleep(delay)
@@ -296,49 +304,53 @@ class GeminiClient:
         except Exception:
             return False
 
-    def _call_antigravity_proxy(self, prompt: str, cfg: Optional[Dict[str, Any]] = None, timeout: float = 300.0) -> Optional[str]:
-        """Antigravity CLI / Manager yerel API Proxy'sini (Gemini 3.8 Flash) çağırır."""
+    def _call_antigravity_proxy(self, prompt: str, cfg: Optional[Dict[str, Any]] = None, timeout: float = 6.0) -> Optional[str]:
+        """Antigravity CLI / Manager yerel API Proxy'sini sıralı kilit ve model yedeklemesi altında çağırır."""
+        if time.time() < max(getattr(self, "_proxy_disabled_until", 0.0), getattr(GeminiClient, "_class_proxy_disabled_until", 0.0)):
+            return None
         cfg = cfg or self._get_active_provider_config()
         p_url = cfg.get("proxy_url") or self.proxy_url
         p_key = cfg.get("proxy_key") or self.proxy_key
-        p_model = cfg.get("proxy_model") or self.proxy_model
 
         if not p_url or not p_key:
             return None
 
-        active_provider = cfg.get("provider", "").lower()
-        now_ts = time.time()
-        # Eğer aktif sağlayıcı antigravity ise geçici soğuma kilidini yok say ve ısrarla proxy'yi çağır
-        if active_provider != "antigravity" and now_ts < getattr(self, "_proxy_disabled_until", 0.0):
-            return None
+        cand_model = getattr(GeminiClient, "_working_proxy_model", None) or "claude-sonnet-5-5-low"
 
         url = f"{p_url}/chat/completions"
-        payload = {
-            "model": p_model,
-            "messages": [{"role": "user", "content": prompt}],
-        }
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {p_key}",
             "Connection": "close",
         }
-        try:
-            req = urllib.request.Request(
-                url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            if content:
-                self._proxy_fail_count = 0
-                self._proxy_dead = False
-                return content
-        except Exception as ex:
-            self._proxy_fail_count = getattr(self, "_proxy_fail_count", 0) + 1
-            logger.warning(f"Antigravity Proxy ({p_model}) çağrı hatası (#{self._proxy_fail_count}): {ex}")
-            if active_provider != "antigravity" and self._proxy_fail_count >= 3:
-                self._proxy_disabled_until = time.time() + 30.0
-                logger.warning(f"Antigravity Proxy ({p_model}) 3 kez erişilemedi; 30s soğumaya alındı, yedek sağlayıcıya geçiliyor.")
+        with GeminiClient._proxy_lock:
+            if time.time() < max(getattr(self, "_proxy_disabled_until", 0.0), getattr(GeminiClient, "_class_proxy_disabled_until", 0.0)):
+                return None
+            elapsed = time.time() - getattr(GeminiClient, "_last_proxy_call_ts", 0.0)
+            if elapsed < 0.25:
+                time.sleep(0.25 - elapsed)
+            payload = {
+                "model": cand_model,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            try:
+                req = urllib.request.Request(
+                    url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=min(timeout, 6.0)) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                GeminiClient._last_proxy_call_ts = time.time()
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                if content:
+                    GeminiClient._working_proxy_model = cand_model
+                    self._proxy_fail_count = 0
+                    self._proxy_dead = False
+                    return content
+            except Exception as ex:
+                GeminiClient._last_proxy_call_ts = time.time()
+                logger.warning(f"Antigravity Proxy ({cand_model}) çağrı uyarısı: {ex}")
+                self._proxy_disabled_until = time.time() + 180.0
+                GeminiClient._class_proxy_disabled_until = time.time() + 180.0
         return None
 
     def _execute_with_retry(self, prompt: str, max_retries: int = 2) -> Optional[str]:
@@ -346,33 +358,18 @@ class GeminiClient:
         cfg = self._get_active_provider_config()
         active_provider = cfg["provider"]
 
-        # 1. Antigravity Proxy (aktif sağlayıcı antigravity ise kullanıcı yedek butona basana kadar bekle)
+        # Kullanıcı arayüzden kural motoruna geçiş istediyse doğrudan None dön
+        if self.is_fallback_requested():
+            logger.warning("⚡ Kullanıcı 'Yedek Kural Motoruna Geç' talep etti; LLM çağrısı atlanıyor.")
+            return None
+
+        # 1. Antigravity Proxy (hızlı çağrı + gecikirse anında yedek AI zincirine geçiş)
         if active_provider == "antigravity":
-            proxy_attempts = 0
-            while True:
-                proxy_attempts += 1
-                res = self._call_antigravity_proxy(prompt, cfg=cfg, timeout=300.0)
-                if res:
-                    return res
-
-                # Kullanıcı arayüzdeki [⚡ Yedek Kural Motoruna Geç] butonuna bastı mı?
-                if self.is_fallback_requested():
-                    logger.warning("⚡ Kullanıcı arayüzden 'Yedek Kural Motoruna Geç' butonuna bastı. Kural tabanlı yedek motora geçiliyor.")
-                    break
-
-                # Kullanıcı butona basmadığı sürece yapay zekayı beklemeye devam et
-                if proxy_attempts >= 2:
-                    logger.info(f"⏳ Antigravity Proxy bekleniyor (Deneme #{proxy_attempts}). Kullanıcı yedek butonuna basmadıkça beklenmeye devam edilecek...")
-                    time.sleep(3.0)
-                    if proxy_attempts >= 10:
-                        if self.is_fallback_requested():
-                            break
-                        time.sleep(5.0)
-                        if proxy_attempts >= 20:
-                            logger.error("❌ Antigravity Proxy 20 deneme boyunca yanıt vermedi. Güvenlik için kural motoruna geçiliyor.")
-                            break
-                else:
-                    time.sleep(1.5)
+            res = self._call_antigravity_proxy(prompt, cfg=cfg, timeout=24.0)
+            if res:
+                return res
+            if self.is_fallback_requested():
+                return None
 
         # 2. Eğer Groq aktifse doğrudan Groq'a gönder (yüksek hız, güvenilir)
         if active_provider == "groq" and self.groq_api_key:
@@ -392,9 +389,9 @@ class GeminiClient:
             if res:
                 return res
 
-        # --- YEDEK ZİNCİRİ (FALLBACK CHAIN) ---
-        # Yalnızca kullanıcı fallback talep ettiyse veya aktif sağlayıcı antigravity değilse
-        if active_provider != "antigravity" or self.is_fallback_requested():
+        # --- YEDEK YAPAY ZEKA ZİNCİRİ (AI FALLBACK CHAIN) ---
+        # Birincil sağlayıcı zaman aşımına uğrarsa veya hız sınırına (429) takılırsa kural motoruna düşmek yerine diğer AI sağlayıcılarını dener
+        if not self.is_fallback_requested():
             # Groq yedeği
             if self.groq_api_key and active_provider != "groq":
                 groq_res = self._call_groq_llm(prompt)
@@ -494,10 +491,25 @@ class GeminiClient:
                 if or_res:
                     return or_res
 
-            if getattr(self, "use_proxy", False) and time.time() >= self._proxy_disabled_until:
-                url = f"{self.proxy_url}/chat/completions"
+            if (
+                getattr(self, "use_proxy", False)
+                and time.time() >= max(
+                    getattr(self, "_vision_proxy_disabled_until", 0.0),
+                    getattr(GeminiClient, "_class_vision_proxy_disabled_until", 0.0),
+                    getattr(GeminiClient, "_class_proxy_disabled_until", 0.0),
+                )
+            ):
+                p_url = cfg.get("proxy_url") or self.proxy_url
+                p_key = cfg.get("proxy_key") or self.proxy_key
+                url = f"{p_url}/chat/completions"
+                v_model = "claude-sonnet-5-5-low"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {p_key}",
+                    "Connection": "close",
+                }
                 payload = {
-                    "model": self.proxy_model,
+                    "model": v_model,
                     "messages": [
                         {
                             "role": "user",
@@ -508,35 +520,25 @@ class GeminiClient:
                         }
                     ],
                 }
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.proxy_key}",
-                    "Connection": "close",
-                }
-                for attempt in range(1, max_retries + 1):
-                    try:
+                try:
+                    with GeminiClient._proxy_lock:
                         req = urllib.request.Request(
                             url, data=json.dumps(payload).encode("utf-8"), headers=headers, method="POST"
                         )
-                        with urllib.request.urlopen(req, timeout=22) as resp:
+                        with urllib.request.urlopen(req, timeout=8) as resp:
                             data = json.loads(resp.read().decode("utf-8"))
-                        return data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    except Exception as ex:
-                        logger.warning(f"Vision Proxy denemesi #{attempt} başarısız: {ex}")
-                        if attempt < max_retries:
-                            time.sleep(1.0)
+                    v_content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                    if v_content:
+                        return v_content
+                except Exception as ex:
+                    logger.warning(f"Vision Proxy ({v_model}) denemesi başarısız: {ex}")
+                self._vision_proxy_disabled_until = time.time() + 180.0
+                GeminiClient._class_vision_proxy_disabled_until = time.time() + 180.0
 
             if active_provider != "openrouter":
                 or_res = _try_openrouter_vision()
                 if or_res:
                     return or_res
-
-            if self.model and not self._gemini_dead:
-                from PIL import Image
-                with Image.open(image_path) as img:
-                    response = self.model.generate_content([prompt, img])
-                    if response and hasattr(response, "text"):
-                        return response.text
         except Exception as e:
             logger.warning(f"generate_vision hatası: {e}")
         return None
@@ -563,8 +565,9 @@ class GeminiClient:
             "1. Görselde tam olarak ne görünüyor? (literal_description)\n"
             "2. Görsel simsiyah/boş bir kitap kapağı, kütüphane barkod etiketi veya filigranlı stok görsel mi? (is_blank_cover_or_barcode: true/false)\n"
             "   NOT: Eğer aranan kavram bir kitap, eser, Kur'an suresi/ayeti, el yazması, kanunname veya tarihsel belge ise; temiz hat/kaligrafi levhaları, mushaf/el yazması sayfaları ve orijinal kitap kapakları GEÇERLİDİR (is_blank_cover_or_barcode: false, matches_target_entity: true).\n"
+            "   ÇOK ÖNEMLİ KİŞİ/PORTRE KURALI: Eğer aranan kavram bir kişi/düşünür/alim ise (örn. Nurettin Topçu, İmam Gazali, Bediüzzaman vb.), görselde o kişinin portresi/fotoğrafı/temsili çizimi OLMALIDIR! O kişinin adını taşıyan bir İLKOKUL, LİSE, OKUL BİNASI, ÖĞRENCİ GRUBU, BELEDİYE ETKİNLİĞİ veya BAŞKA BİR KİŞİ görseli KESİNLİKLE GEÇERSİZDİR (matches_target_entity: false, fatal_veto: true, weighted_score: 0)!\n"
             f"3. Görsel izleyiciye gerçekten aranan kişi/eser/kavramı ({concept_title}) doğru ve anlamlı biçimde temsil ediyor mu? (matches_target_entity: true/false)\n"
-            "4. 0-100 arası uygunluk puanı (weighted_score). Eğer sadece barkodlu kapak, tamamen boş cilt veya alakasız bir görsel ise fatal_veto: true ve weighted_score: 0 ver.\n"
+            "4. 0-100 arası uygunluk puanı (weighted_score). Eğer okul binası, öğrenci grubu, barkodlu kapak, boş cilt veya alakasız bir görsel ise fatal_veto: true ve weighted_score: 0 ver.\n"
             "SADECE JSON döndür:\n"
             '{"literal_description": "...", "is_blank_cover_or_barcode": false, "matches_target_entity": true, "weighted_score": 88, "fatal_veto": false, "mask_shape": "rounded", "remove_bg": false}'
         )
@@ -743,11 +746,20 @@ Transkript Segmentleri:
 
     @classmethod
     def extract_balanced_json(cls, text: str, prefer_array: bool = False) -> Optional[str]:
-        """Metin içindeki [w12|1.4] gibi etiketlere takılmadan dengeli JSON dizisi veya nesnesi ayıklar."""
+        """Metin içindeki <think>...</think> bloklarına ve [w12|1.4] gibi etiketlere takılmadan dengeli JSON dizisi veya nesnesi ayıklar."""
         if not text:
             return None
-        code_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", text, flags=re.IGNORECASE)
-        search_targets = code_blocks + [text]
+        # Reasoning modellerinin (<think>...</think>) düşünme blokları içindeki örnek JSON parçalarını atla
+        cleaned_text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
+        if "<think>" in cleaned_text.lower():
+            think_end = cleaned_text.lower().rfind("</think>")
+            if think_end != -1:
+                cleaned_text = cleaned_text[think_end + 8 :].strip()
+        if not cleaned_text:
+            cleaned_text = text
+
+        code_blocks = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", cleaned_text, flags=re.IGNORECASE)
+        search_targets = code_blocks + [cleaned_text]
         for target in search_targets:
             for start_pos, ch in enumerate(target):
                 if ch not in ("[", "{"):

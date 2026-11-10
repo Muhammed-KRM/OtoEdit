@@ -168,7 +168,7 @@ class EdlBuilder:
         if auto_director:
             try:
                 from pipeline.llm_director import LlmDirector
-                director = LlmDirector(enable_web_crawl=bool(video_path))
+                director = LlmDirector(enable_web_crawl=True)
                 composed = director.compose_intelligent_plan(
                     segments=transcript_dict.get("segments", []),
                     cuts=sorted_cuts,

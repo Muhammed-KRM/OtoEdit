@@ -173,7 +173,7 @@ class AnalysisConsumer:
 
             # ⚡ DIRECT-TO-EDITOR HIZLI GEÇİŞ YOLU (Fast Path)
             if direct_to_editor or not any([
-                auto_jumpcut, auto_retake, auto_broll, auto_subtitles, audio_enhancement, gesture_enabled
+                auto_jumpcut, auto_retake, auto_broll, auto_subtitles, audio_enhancement, gesture_enabled, auto_director
             ]):
                 logger.info(f"⚡ Direct-to-Editor Hızlı Geçiş (Fast Path) aktif! STT ve ağır analizler atlanıyor (VideoId={video_id})")
                 self.pipeline_logger.log_progress(
@@ -271,7 +271,7 @@ class AnalysisConsumer:
                 return res
 
             def _run_face():
-                if video_format not in (1, 2) and not auto_director:
+                if video_format not in (1, 2):
                     return []
                 logger.info("🧵 Thread: Yüz takibi başladı")
                 sample_interval = 1.5 if video_format not in (1, 2) else 0.4
@@ -418,8 +418,9 @@ class AnalysisConsumer:
                 message="Nihai EDL karar listesi derleniyor..."
             )
             def _director_progress_cb(stage: str, pct: int, msg: str):
+                target_stage = stage or getattr(PipelineStage, "OTONOM_YONETMEN", PipelineStage.EDL_OLUSTURMA)
                 self.pipeline_logger.log_progress(
-                    project_id, video_id, PipelineStage.OTONOM_YONETMEN, pct, message=msg
+                    project_id, video_id, target_stage, pct, message=msg
                 )
 
             edl_dict = self.edl_builder.build(

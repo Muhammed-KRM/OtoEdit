@@ -249,12 +249,16 @@ class MasterPlanValidator:
             last_paired_group = paired_group
 
         # Kural 4.5: Kümülatif Liste / İkili Grup Sıkıştırması (Contiguous Slot Compaction) ve
-        # Grup Ortak Bitiş Senkronizasyonu (PROB-2.5, PROB-3.3)
+        # Grup Ortak Bitiş Senkronizasyonu (PROB-2.5, PROB-3.3) — SADECE METİN ('text') KATMANLARI İÇİN!
         grouped_stack_map: Dict[str, List[Dict[str, Any]]] = {}
+        grouped_image_map: Dict[str, List[Dict[str, Any]]] = {}
         for ov_item in repaired_overlays:
             p_grp = str(ov_item.get("pairedGroupId") or ov_item.get("groupId") or "")
             if p_grp and ov_item.get("stackSlot") is not None:
-                grouped_stack_map.setdefault(p_grp, []).append(ov_item)
+                if str(ov_item.get("type", "text")) == "image":
+                    grouped_image_map.setdefault(p_grp, []).append(ov_item)
+                else:
+                    grouped_stack_map.setdefault(p_grp, []).append(ov_item)
 
         for p_grp, grp_items in grouped_stack_map.items():
             grp_items.sort(key=lambda x: (float(x.get("start", 0.0)), int(x.get("stackSlot", 0))))
@@ -287,6 +291,59 @@ class MasterPlanValidator:
                 m_en = round(max(m_st + 0.65, grp_shared_end), 2)
                 member_ov["end"] = m_en
                 member_ov["duration"] = round(m_en - m_st, 2)
+
+        # Kural 4.6: Görsel ('image') Katmanlarında Dikey Üst Üste Binme Önleyici & 2'şerli Sayfalama (PROB-IMG-STACK)
+        # 1) Liste içi kişi görsellerini 2'şerli sayfala (Sayfa 1: slot 0-1 -> Y=23%, 52%; Sayfa 2: slot 2-3 -> Y=23%, 52%)
+        for p_grp, img_items in grouped_image_map.items():
+            img_items.sort(key=lambda x: (float(x.get("start", 0.0)), int(x.get("stackSlot", 0))))
+            txt_grp = grouped_stack_map.get(p_grp, [])
+            grp_end_cap = (
+                max(float(x.get("end", 0.0)) for x in txt_grp)
+                if txt_grp
+                else max(float(x.get("end", 0.0)) for x in img_items)
+            )
+            for idx_img, img_ov in enumerate(img_items):
+                slot_val = int(img_ov.get("stackSlot", idx_img))
+                page_idx = slot_val // 2
+                row_in_page = slot_val % 2
+                img_ov["positionY"] = 23.0 if row_in_page == 0 else 52.0
+                img_ov["trackId"] = 3 + row_in_page
+                img_ov["track_id"] = img_ov["trackId"]
+                img_ov["scale"] = min(float(img_ov.get("scale", 0.65)), 0.65)
+                next_page_slot = (page_idx + 1) * 2
+                next_page_candidates = [
+                    x for x in img_items if int(x.get("stackSlot", 0)) >= next_page_slot
+                ]
+                m_st = float(img_ov.get("start", 0.0))
+                if next_page_candidates:
+                    nxt_st = float(next_page_candidates[0].get("start", grp_end_cap))
+                    m_en = round(max(m_st + 0.65, nxt_st - 0.08), 2)
+                else:
+                    m_en = round(max(m_st + 0.65, grp_end_cap), 2)
+                img_ov["end"] = m_en
+                img_ov["duration"] = round(m_en - m_st, 2)
+
+        # 2) Genel Görsel Çarpışma Koruması: Aynı anda aynı sütunda olan 2 görselin Y koordinatları asla <25% yakın olamaz
+        all_images = [o for o in repaired_overlays if str(o.get("type", "")) == "image"]
+        all_images.sort(key=lambda x: (float(x.get("start", 0.0)), int(x.get("stackSlot") or 0)))
+        for i_a, img_a in enumerate(all_images):
+            for img_b in all_images[i_a + 1 :]:
+                st_a, en_a = float(img_a.get("start", 0.0)), float(img_a.get("end", 0.0))
+                st_b, en_b = float(img_b.get("start", 0.0)), float(img_b.get("end", 0.0))
+                if max(st_a, st_b) < min(en_a, en_b) - 0.05:
+                    xa, xb = float(img_a.get("positionX", 80.9)), float(img_b.get("positionX", 80.9))
+                    ya, yb = float(img_a.get("positionY", 24.0)), float(img_b.get("positionY", 24.0))
+                    if abs(xa - xb) < 22.0 and abs(ya - yb) < 24.0:
+                        # Eğer farklı sayfadaysa veya tekil görseller çakıştıysa ya dikey ayır (23% / 52%) ya da zamanını kırp
+                        if ya <= 30.0:
+                            img_a["positionY"] = 23.0
+                            img_b["positionY"] = 52.0
+                            if int(img_b.get("trackId", 3)) == int(img_a.get("trackId", 3)):
+                                img_b["trackId"] = int(img_a.get("trackId", 3)) + 1
+                                img_b["track_id"] = img_b["trackId"]
+                        elif st_b - st_a >= 0.8:
+                            img_a["end"] = round(st_b - 0.08, 2)
+                            img_a["duration"] = round(img_a["end"] - st_a, 2)
 
         # Kural 5: Geçiş (Transitions) Denetimi ve Kesim Sınırına Mikro-Mıknatıslama (PROB-6.4)
         # Eski 3.5s jump-cut mıknatısı cümle sonundaki geçişleri cümle ortası nefes kesimlerine çekiyordu;
