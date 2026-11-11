@@ -648,8 +648,112 @@ class TranscriptVerifier:
                                 ec.command = f"[Belirsiz Retake] {ec.command}"
                             break
 
+        # ------------------------------------------------------------------
+        # 4. AŞAMA (SPLICE & SWALLOWED ONSET GUARD):
+        # Silinen tekrar adasının ilk kelimesi, korunan adanın başında STT tarafından
+        # yutulmuşsa (örn. [591.30s 'Nefsani'] -> [596.36s VAD başlangıcı, ama ilk kelime 596.78s 'sefalete']),
+        # korunan adanın başındaki [596.36s - 596.76s] aktif ses aralığına yutulan kelimeyi geri kazandır!
+        # ------------------------------------------------------------------
+        self._repair_swallowed_onset_in_transcript(
+            transcript=transcript,
+            groups=groups,
+            all_words=all_words,
+            analysis=analysis,
+            all_cuts=(existing_cuts or []) + new_cuts,
+        )
+
         logger.info(
             f"✅ 3-Aşamalı Çok Ajanlı Retake Denetimi tamamlandı: "
             f"{len(new_cuts)} ek kesim üretildi, {len(uncertain_word_ids)} belirsiz kelime işaretlendi."
         )
         return new_cuts
+
+    def _repair_swallowed_onset_in_transcript(
+        self,
+        transcript: TranscriptResult,
+        groups: List[RetakeGroup],
+        all_words: List[Dict[str, Any]],
+        analysis: Optional[AudioAnalysis],
+        all_cuts: List[CutItem],
+    ) -> None:
+        """
+        Kesilen retake grubunun ilk kelimesi korunan adanın başında akustik olarak söylenmiş
+        fakat STT tarafından yutulmuşsa, korunan VAD adasının başına o kelimeyi onararak ekler
+        ve sessizlik/retake kesimlerinin bu korunan başlangıcı kırpmasını engeller.
+        """
+        if analysis is None or not groups or not hasattr(analysis, "find_speech_region_for_word"):
+            return
+
+        segments = getattr(transcript, "segments", None) or []
+        if not segments:
+            return
+
+        for grp in groups:
+            if len(grp.candidates) < 2:
+                continue
+            bad_c = grp.candidates[0]
+            good_c = grp.candidates[-1]
+            if not (0 <= bad_c.start_word_idx < len(all_words) and 0 <= good_c.start_word_idx < len(all_words)):
+                continue
+
+            bad_first_w = all_words[bad_c.start_word_idx]
+            good_first_w = all_words[good_c.start_word_idx]
+            if self.aligner.is_word_match(bad_first_w["word"], good_first_w["word"]):
+                # Zaten korunan adanın başında kelime mevcut
+                continue
+
+            good_reg = analysis.find_speech_region_for_word(good_first_w["start"], good_first_w["end"])
+            if good_reg is None:
+                continue
+
+            unexplained_lead = good_first_w["start"] - good_reg.start
+            if 0.22 <= unexplained_lead <= 1.15:
+                # Bu aralıkta başka bir kelime var mı?
+                has_other = any(
+                    w["end"] > good_reg.start + 0.05 and w["start"] < good_first_w["start"] - 0.05
+                    for w in all_words
+                )
+                if has_other:
+                    continue
+
+                restored_word_str = bad_first_w["word"].strip().rstrip(",;:")
+                r_start = round(good_reg.start, 3)
+                r_end = round(max(r_start + 0.18, good_first_w["start"] - 0.02), 3)
+
+                # Kesimlerin [r_start, r_end] aralığını yutmadığından emin ol
+                for c in all_cuts:
+                    if c.end > r_start - 0.02 and c.start < r_start:
+                        c.end = round(max(c.start + 0.02, r_start - 0.03), 3)
+
+                # İlgili segmenti bul ve başına kelimeyi ekle
+                for seg in segments:
+                    seg_words = getattr(seg, "words", None) or []
+                    for sw_idx, sw in enumerate(seg_words):
+                        sw_s = float(sw.get("start", 0.0) if isinstance(sw, dict) else getattr(sw, "start", 0.0))
+                        if abs(sw_s - good_first_w["start"]) <= 0.05:
+                            if isinstance(sw, dict):
+                                new_w_entry = {
+                                    "word": restored_word_str,
+                                    "start": r_start,
+                                    "end": r_end,
+                                    "confidence": 0.95,
+                                }
+                            else:
+                                from models.transcript_model import WordTimestamp
+                                new_w_entry = WordTimestamp(
+                                    word=restored_word_str,
+                                    start=r_start,
+                                    end=r_end,
+                                    confidence=0.95,
+                                )
+                            seg_words.insert(sw_idx, new_w_entry)
+                            seg.start = min(float(seg.start), r_start)
+                            seg.text = " ".join(
+                                (w.get("word", "") if isinstance(w, dict) else getattr(w, "word", "")).strip()
+                                for w in seg_words
+                            )
+                            logger.info(
+                                f"🩹 [Splice Onarımı] Korunan adanın başında STT'nin yuttuğu tekrar kelimesi "
+                                f"altyazıya ve sese geri kazandırıldı: '{restored_word_str}' [{r_start:.2f}s - {r_end:.2f}s]"
+                            )
+                            break

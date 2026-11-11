@@ -48,6 +48,8 @@ class GroqEngine(BaseSTTEngine):
         add_field("temperature", "0.0")
         add_field("response_format", "verbose_json")
         add_field("timestamp_granularities[]", "word")
+        if getattr(chunk, "prompt", None):
+            add_field("prompt", str(chunk.prompt))
 
         body.extend(f"--{boundary}\r\n".encode("utf-8"))
         body.extend(f'Content-Disposition: form-data; name="file"; filename="{filename}"\r\n'.encode("utf-8"))

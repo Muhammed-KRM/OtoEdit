@@ -140,10 +140,16 @@ class DynamicTypographySizer:
         effective_min = max(38, f_min - 4) if (max_word_len >= 13 or total_len >= 24) else f_min
         final_font_size = int(round(max(effective_min, min(f_max, raw_size))))
 
-        # 4. Tahmini satır sayısı (1 veya 2 satır)
-        chars_per_line_cap = max(10, int(avail_px_1080p / max(1.0, final_font_size * 0.60)))
-        est_lines = 2 if (len(words) >= 2 and total_len > chars_per_line_cap) else 1
-        line_height = 1.12 if est_lines > 1 else 1.15
+        # 4. Tahmini satır sayısı (1, 2 veya 3+ satır)
+        chars_per_line_cap = max(10, int(avail_px_1080p / max(1.0, final_font_size * 0.58)))
+        est_lines = max(1, math.ceil(total_len / max(1, chars_per_line_cap)))
+        if est_lines >= 3:
+            # 3+ satırlı uzun metinlerde kutunun aşırı dikey şişmesini önlemek için fontu optimize et
+            final_font_size = int(round(max(36, final_font_size * 0.88)))
+            chars_per_line_cap = max(10, int(avail_px_1080p / max(1.0, final_font_size * 0.58)))
+            est_lines = max(1, math.ceil(total_len / max(1, chars_per_line_cap)))
+
+        line_height = 1.10 if est_lines >= 3 else (1.12 if est_lines == 2 else 1.15)
 
         return final_font_size, effective_cqi, line_height, est_lines
 
@@ -459,14 +465,6 @@ class SafeZoneSpatialSolver:
                 row = (slot - 4) % 4
                 side_prefix = "RIGHT_STACK"
 
-            if stack_count == 2:
-                # İkili kavram (örn. TABİAT / FITRAT): Y=20% ve Y=33% (gövdeye %0 temas!)
-                pos_y = round(20.0 + row * 13.0, 1)
-            else:
-                # 3+ sıralı liste: Satır 1 (16%), Satır 2 (27%), Satır 3 (38%) omuz üstünde,
-                # yalnızca Satır 4 (49%) omuz dış eğimine hafif yaklaşır
-                pos_y = round(16.0 + row * 11.0, 1)
-
             font_sz, max_cqi, line_h, est_lines = DynamicTypographySizer.compute(
                 text=text,
                 stack_count=stack_count,
@@ -474,7 +472,26 @@ class SafeZoneSpatialSolver:
                 action_type=action_type,
                 corridor_width_pct=corridor_w,
             )
-            box_h = 8.5 if est_lines == 1 else 12.0
+            # 1080p ekranda satır sayısı ve padding'e göre gerçek dikey kutu yüksekliği (%)
+            box_h = 7.5 if est_lines == 1 else (13.5 if est_lines == 2 else 18.5)
+
+            if stack_count == 2:
+                # İkili kavram: Eğer metinler 2-3 satır ise dikey adımı aç (çakışmayı %0'a indir)
+                # Slot 0 için tepe 14% + box_h/2; Slot 1 için Slot 0'ın altı + 3.5% boşluk + box_h/2
+                if row == 0:
+                    pos_y = round(15.0 + (box_h / 2.0), 1)
+                else:
+                    # Slot 1: Önceki kutunun altından en az 3.5% güvenli boşluk bırak
+                    prev_h = 13.5 if est_lines >= 2 else 9.0
+                    slot1_top = 15.0 + prev_h + 3.5
+                    pos_y = round(slot1_top + (box_h / 2.0), 1)
+                    # Omuz koruma tavanı (maksimum 48% merkeze kadar esne)
+                    pos_y = min(48.0, pos_y)
+            else:
+                # 3+ sıralı liste: Kümülatif dikey yerleşim
+                step = 13.0 if est_lines >= 2 else 10.5
+                pos_y = round(15.0 + (box_h / 2.0) + (row * step), 1)
+                pos_y = min(50.0, pos_y)
             rect = BBoxPct(
                 max(2.0, pos_x - max_cqi / 2.0),
                 max(2.0, pos_y - box_h / 2.0),

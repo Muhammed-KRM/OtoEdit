@@ -32,36 +32,62 @@ class GapFiller:
 
     SAMPLE_RATE = 16000
     SILENCE_SEP_SEC = 1.25
+    VERBATIM_DISFLUENCY_PROMPT = (
+        "Konuşmacının tekrar ettiği kelimeleri, yarım bıraktığı heceleri ve "
+        "dil sürçmelerini silmeden duyduğun gibi kelimesi kelimesine yaz."
+    )
 
     def __init__(
         self,
-        min_gap_sec: float = 0.45,
-        intra_subgap_sec: float = 0.65,
-        stretched_word_sec: float = 1.45,
-        max_gaps: int = 140,
+        min_gap_sec: float = 0.42,
+        intra_subgap_sec: float = 0.60,
+        micro_island_subgap_sec: float = 0.28,
+        stretched_word_sec: float = 1.40,
+        max_gaps: int = 160,
     ):
         self.min_gap_sec = min_gap_sec
         self.intra_subgap_sec = intra_subgap_sec
+        self.micro_island_subgap_sec = micro_island_subgap_sec
         self.stretched_word_sec = stretched_word_sec
         self.max_gaps = max_gaps
 
-    def find_untranscribed_gaps(
+    @staticmethod
+    def _is_phonetically_stretched(word_obj: Word, stretched_limit: float) -> bool:
+        """
+        Kelimenin akustik süresini harf sayısına göre beklenen maksimum normal konuşma süresiyle
+        karşılaştırır (örn. 7 harfli 'Nefsani' için beklenen <= 1.19s iken 1.55s ise içinde yutulmuş 'haf' vardır).
+        """
+        dur = float(word_obj.end) - float(word_obj.start)
+        if dur >= stretched_limit:
+            return True
+        clean = word_obj.word.strip().strip(".,!?;:\"'…")
+        char_len = max(1, len(clean))
+        expected_max = max(0.72, char_len * 0.115 + 0.36)
+        return dur >= expected_max and dur >= 0.95
+
+    def find_untranscribed_gaps_with_priority(
         self,
         analysis: AudioAnalysis,
         words: List[Word],
-    ) -> List[Tuple[float, float]]:
+    ) -> List[Tuple[float, float, int]]:
         """
-        VAD konuşma bölgelerini tarayarak:
-        1. İçinde hiç kelime bulunmayan (EMPTY) konuşma adalarını,
-        2. İçinde >= 0.65sn kelimesiz alt-boşluk bulunan (PARTIAL) konuşma adalarını,
-        3. İçinde >= 1.45sn boyunca tek kelimeye sıkıştırılmış (STRETCHED) konuşma adalarını
-        tespit eder.
+        VAD konuşma bölgelerini tarayarak (start, end, priority_tier) listesi döner:
+        - Tier 3 (En Yüksek): Önünde/arkasında >= 1.2s sessizlik bulunan <= 3 kelimelik tereddüt
+          mikro-adaları veya fonetik süresi şişmiş kısa adalar (örn. 591.20s 'nefsani haf' ve 596.36s 'nefsani sefalete').
+        - Tier 2 (Yüksek): İçinde hiç kelime bulunmayan (EMPTY) konuşma adaları.
+        - Tier 1 (Normal): Uzun konuşma adaları içindeki kısmi alt-boşluklar.
         """
-        gaps: List[Tuple[float, float]] = []
+        prioritized: List[Tuple[float, float, int]] = []
+        regions = analysis.speech_regions
+        num_reg = len(regions)
 
-        for region in analysis.speech_regions:
+        for r_idx, region in enumerate(regions):
             if region.duration < self.min_gap_sec:
                 continue
+
+            prev_silence = (region.start - regions[r_idx - 1].end) if r_idx > 0 else region.start
+            next_silence = (regions[r_idx + 1].start - region.end) if (r_idx + 1) < num_reg else 5.0
+            is_hesitation_bounded = (prev_silence >= 1.15 or next_silence >= 1.15)
 
             reg_words = [
                 w for w in words
@@ -69,38 +95,56 @@ class GapFiller:
             ]
 
             if not reg_words:
-                gaps.append((round(region.start, 3), round(region.end, 3)))
+                tier = 3 if (is_hesitation_bounded and region.duration <= 4.5) else 2
+                prioritized.append((round(region.start, 3), round(region.end, 3), tier))
                 continue
 
+            is_micro_island = (len(reg_words) <= 3 and region.duration <= 5.5)
+            effective_subgap = (
+                self.micro_island_subgap_sec
+                if (is_micro_island and is_hesitation_bounded)
+                else self.intra_subgap_sec
+            )
+
             has_stretched_word = any(
-                (float(w.end) - float(w.start)) >= self.stretched_word_sec
+                self._is_phonetically_stretched(w, self.stretched_word_sec)
                 for w in reg_words
             )
 
             spans = sorted(
-                (max(region.start, float(w.start) - 0.04), min(region.end, float(w.end) + 0.04))
+                (max(region.start, float(w.start) - 0.03), min(region.end, float(w.end) + 0.03))
                 for w in reg_words
             )
             cur = region.start
             uncovered_subgaps: List[Tuple[float, float]] = []
             for s, e in spans:
-                if s - cur >= self.intra_subgap_sec:
+                if s - cur >= effective_subgap:
                     uncovered_subgaps.append((cur, s))
                 cur = max(cur, e)
-            if region.end - cur >= self.intra_subgap_sec:
+            if region.end - cur >= effective_subgap:
                 uncovered_subgaps.append((cur, region.end))
 
             if has_stretched_word or uncovered_subgaps:
+                tier = 3 if (is_micro_island and is_hesitation_bounded) else 1
                 if region.duration <= 14.0:
-                    gaps.append((round(region.start, 3), round(region.end, 3)))
+                    prioritized.append((round(region.start, 3), round(region.end, 3), tier))
                 else:
                     for sub_s, sub_e in uncovered_subgaps:
-                        gaps.append((
+                        prioritized.append((
                             round(max(region.start, sub_s - 0.25), 3),
                             round(min(region.end, sub_e + 0.25), 3),
+                            tier,
                         ))
 
-        return gaps
+        return prioritized
+
+    def find_untranscribed_gaps(
+        self,
+        analysis: AudioAnalysis,
+        words: List[Word],
+    ) -> List[Tuple[float, float]]:
+        """Geriye dönük uyumluluk için (start, end) çiftleri döner."""
+        return [(s, e) for s, e, _ in self.find_untranscribed_gaps_with_priority(analysis, words)]
 
     def _decode_full_pcm(self, media_path: str) -> Optional[np.ndarray]:
         """Medya dosyasını tek seferde 16kHz mono int16 PCM dizisine çözer."""
@@ -128,25 +172,36 @@ class GapFiller:
         raw_words: Optional[List[Word]] = None,
     ) -> List[Word]:
         """Tespit edilen boş veya kısmi konuşma adalarını serpiştirilmiş paketlerle yeniden transkribe eder."""
-        gaps = self.find_untranscribed_gaps(analysis, words)
-        if not gaps:
+        prioritized_gaps = self.find_untranscribed_gaps_with_priority(analysis, words)
+        if not prioritized_gaps:
             logger.info("✨ Şüpheli transkript boşluğu bulunamadı, tüm konuşmalar kapsandı.")
             return words
 
-        if len(gaps) > self.max_gaps:
+        if len(prioritized_gaps) > self.max_gaps:
+            tier3_cnt = sum(1 for _, _, t in prioritized_gaps if t == 3)
             logger.info(
-                f"🔍 {len(gaps)} adet boş/kısmi konuşma adası tespit edildi. "
-                f"En belirgin {self.max_gaps} bölge inceleniyor..."
+                f"🔍 {len(prioritized_gaps)} adet boş/kısmi konuşma adası tespit edildi "
+                f"({tier3_cnt} yüksek öncelikli tereddüt mikro-adası). "
+                f"Öncelik sırasına göre en kritik {self.max_gaps} bölge inceleniyor..."
             )
-            gaps_by_dur = sorted(gaps, key=lambda g: (g[1] - g[0]), reverse=True)[: self.max_gaps]
-            gaps = sorted(gaps_by_dur, key=lambda g: g[0])
+            # Önce priority_tier (3 > 2 > 1), sonra süre büyüklüğü
+            selected = sorted(
+                prioritized_gaps,
+                key=lambda g: (g[2], (g[1] - g[0])),
+                reverse=True,
+            )[: self.max_gaps]
+            gaps = [(s, e) for s, e, _ in sorted(selected, key=lambda g: g[0])]
         else:
+            gaps = [(s, e) for s, e, _ in prioritized_gaps]
             logger.info(f"🔍 {len(gaps)} adet boş/kısmi konuşma adası tespit edildi. Kurtarma başlıyor...")
 
         work_dir = temp_dir or Config.TEMP_DIR
         os.makedirs(work_dir, exist_ok=True)
 
-        pcm = self._decode_full_pcm(media_path)
+        if getattr(analysis, "pcm_samples", None) is not None and len(analysis.pcm_samples) > 0:
+            pcm = np.clip(analysis.pcm_samples * 32768.0, -32768, 32767).astype(np.int16)
+        else:
+            pcm = self._decode_full_pcm(media_path)
         results: List[Dict[str, Any]] = []
 
         if pcm is not None and len(pcm) > 0:
@@ -218,6 +273,7 @@ class GapFiller:
                         end_sec=total_batch_sec,
                         audio_path=batch_mp3,
                         has_speech=True,
+                        prompt=self.VERBATIM_DISFLUENCY_PROMPT,
                     )
                     batch_words, engine_used = chain.transcribe_chunk(chunk)
 

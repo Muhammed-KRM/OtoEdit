@@ -83,7 +83,7 @@ class RetakeDetector:
 
         logger.info(f"Akıllı Retake analizi (Take-Aware V4 + 3-Pass Multi-Agent) başlıyor ({len(words)} kelime taranıyor)...")
 
-        raw_cuts = self.aligner.detect_retakes(words)
+        raw_cuts = self.aligner.detect_retakes(words, analysis=analysis)
         logger.info(
             f"TakeAligner V4 {len(raw_cuts)} aday retake/restart bölgesi ve "
             f"{len(self.aligner.last_groups)} tekrar grubu buldu."

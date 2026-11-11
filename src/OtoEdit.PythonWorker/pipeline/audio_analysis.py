@@ -35,6 +35,137 @@ class AudioAnalysis:
     peaks: List[float] = field(default_factory=list)  # UI için normalize dalga formu (1000 nokta)
     rms_hop_ms: float = 10.0
     sample_rate: int = 16000
+    pcm_samples: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=np.float32), repr=False)
+
+    def find_speech_region_for_word(self, word_start: float, word_end: float) -> SpeechRegion:
+        """Verilen kelime zaman aralığını kapsayan veya en çok örtüşen VAD konuşma adasını döner."""
+        best_reg = None
+        best_ov = 0.0
+        for reg in self.speech_regions:
+            ov = min(word_end, reg.end) - max(word_start, reg.start)
+            if ov > best_ov:
+                best_ov = ov
+                best_reg = reg
+        return best_reg
+
+    def _extract_onset_mfcc(self, onset_sec: float, window_sec: float = 0.68) -> np.ndarray:
+        """
+        Belirtilen başlangıç saniyesinden itibaren ilk aktif konuşma zarfının (window_sec)
+        normalize Log-Mel + MFCC öznitelik matrisini (T x D) çıkarır.
+        """
+        if self.pcm_samples is None or len(self.pcm_samples) == 0:
+            return np.zeros((0, 0), dtype=np.float32)
+
+        sr = self.sample_rate
+        s_idx = max(0, int((onset_sec - 0.04) * sr))
+        e_idx = min(len(self.pcm_samples), int((onset_sec + window_sec + 0.15) * sr))
+        if e_idx - s_idx < int(0.18 * sr):
+            return np.zeros((0, 0), dtype=np.float32)
+
+        seg = self.pcm_samples[s_idx:e_idx].astype(np.float32)
+        # Ön-vurgu (Pre-emphasis: y[n] = x[n] - 0.97 * x[n-1])
+        seg = np.append(seg[0], seg[1:] - 0.97 * seg[:-1])
+
+        win_len = int(0.025 * sr)  # 400 sample (25ms)
+        hop_len = int(0.010 * sr)  # 160 sample (10ms)
+        if len(seg) < win_len:
+            return np.zeros((0, 0), dtype=np.float32)
+
+        num_frames = 1 + (len(seg) - win_len) // hop_len
+        frames = np.lib.stride_tricks.as_strided(
+            seg,
+            shape=(num_frames, win_len),
+            strides=(seg.strides[0] * hop_len, seg.strides[0]),
+        ).copy()
+
+        # Enerji kapısı ile gerçek ses başlangıcını (active voice onset) bul
+        frame_rms = np.sqrt(np.mean(frames ** 2, axis=1) + 1e-10)
+        peak_rms = float(np.max(frame_rms)) if len(frame_rms) > 0 else 0.0
+        if peak_rms < 1e-4:
+            return np.zeros((0, 0), dtype=np.float32)
+
+        active_idx = np.where(frame_rms >= max(0.002, peak_rms * 0.14))[0]
+        if len(active_idx) > 0:
+            first_active = max(0, int(active_idx[0]) - 1)
+            max_frames = int(window_sec / 0.010)
+            frames = frames[first_active: first_active + max_frames]
+
+        if len(frames) < 10:
+            return np.zeros((0, 0), dtype=np.float32)
+
+        hann = np.hanning(win_len).astype(np.float32)
+        spec = np.abs(np.fft.rfft(frames * hann, n=512, axis=1)) ** 2  # (T, 257)
+
+        # 24 Mel filtresi (80 Hz - 7600 Hz)
+        n_mels = 24
+        freqs = np.linspace(0.0, sr / 2.0, 257)
+        mel_min = 2595.0 * np.log10(1.0 + 80.0 / 700.0)
+        mel_max = 2595.0 * np.log10(1.0 + 7600.0 / 700.0)
+        mel_pts = np.linspace(mel_min, mel_max, n_mels + 2)
+        hz_pts = 700.0 * (10.0 ** (mel_pts / 2595.0) - 1.0)
+
+        fb = np.zeros((n_mels, 257), dtype=np.float32)
+        for m in range(1, n_mels + 1):
+            f_left, f_center, f_right = hz_pts[m - 1], hz_pts[m], hz_pts[m + 1]
+            left_slope = (freqs - f_left) / max(1e-5, f_center - f_left)
+            right_slope = (f_right - freqs) / max(1e-5, f_right - f_center)
+            fb[m - 1] = np.maximum(0.0, np.minimum(left_slope, right_slope))
+
+        mel_energy = np.dot(spec, fb.T)
+        log_mel = np.log(np.maximum(mel_energy, 1e-8))
+
+        # Kanal/kazanç bağımsızlığı için Cepstral Mean Normalization (CMN) ve çerçeve L2 normalizasyonu
+        log_mel = log_mel - np.mean(log_mel, axis=1, keepdims=True)
+        norms = np.linalg.norm(log_mel, axis=1, keepdims=True)
+        feats = log_mel / np.maximum(norms, 1e-6)
+        return feats.astype(np.float32)
+
+    def compute_onset_similarity(self, t1: float, t2: float, window_sec: float = 0.68) -> float:
+        """
+        İki konuşma adasının başlangıç sesleri (t1 ve t2) arasındaki akustik
+        Log-Mel / MFCC + DTW (Dynamic Time Warping) benzerliğini [0.0, 1.0] aralığında hesaplar.
+        STT tekrarlanan kelimeyi yutsa bile aynı kelimeyle başlayan adalarda yüksek skor üretir.
+        """
+        f1 = self._extract_onset_mfcc(t1, window_sec=window_sec)
+        f2 = self._extract_onset_mfcc(t2, window_sec=window_sec)
+        if f1.size == 0 or f2.size == 0:
+            return 0.0
+
+        n, m = len(f1), len(f2)
+        k_len = min(n, m)
+        if k_len < 10:
+            return 0.0
+        f1 = f1[:k_len]
+        f2 = f2[:k_len]
+
+        # Kosinüs mesafe matrisi: D[i, j] = 1 - cos(f1[i], f2[j]) in [0, 2]
+        sim_matrix = np.clip(np.dot(f1, f2.T), -1.0, 1.0)
+        cost_matrix = 1.0 - sim_matrix
+
+        # Sakoe-Chiba bantlı (±12 çerçeve = ±120ms) DTW
+        band = max(8, int(k_len * 0.22))
+        dp = np.full((k_len, k_len), 1e9, dtype=np.float32)
+        dp[0, 0] = cost_matrix[0, 0]
+
+        for i in range(k_len):
+            j_start = max(0, i - band)
+            j_end = min(k_len, i + band + 1)
+            for j in range(j_start, j_end):
+                if i == 0 and j == 0:
+                    continue
+                c = cost_matrix[i, j]
+                prev_best = 1e9
+                if i > 0:
+                    prev_best = min(prev_best, dp[i - 1, j])
+                if j > 0:
+                    prev_best = min(prev_best, dp[i, j - 1])
+                if i > 0 and j > 0:
+                    prev_best = min(prev_best, dp[i - 1, j - 1])
+                dp[i, j] = c + prev_best
+
+        avg_dtw_cost = float(dp[k_len - 1, k_len - 1]) / float(2 * k_len)
+        dtw_sim = max(0.0, min(1.0, 1.0 - avg_dtw_cost))
+        return round(dtw_sim, 4)
 
     def get_rms_at(self, time_sec: float) -> float:
         """Belirtilen saniyedeki RMS enerji değerini döner."""
@@ -284,5 +415,6 @@ class AudioAnalyzer:
             rms_envelope=rms_envelope,
             peaks=peaks,
             rms_hop_ms=10.0,
-            sample_rate=self.sample_rate
+            sample_rate=self.sample_rate,
+            pcm_samples=audio,
         )

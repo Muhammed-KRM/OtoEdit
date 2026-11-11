@@ -335,10 +335,10 @@ class TakeAligner:
                 starts.append(idx)
         return starts
 
-    def detect_retakes(self, raw_words: List[Any]) -> List[RetakeCut]:
+    def detect_retakes(self, raw_words: List[Any], analysis: Optional[Any] = None) -> List[RetakeCut]:
         """
         Kelime listesi üzerinden tüm retake, 2x-4x çoklu tekrar, cümle ortası birleştirme (stitch),
-        fonetik dil sürçmesi ve stüdyo dışı konuşma kesimlerini hesaplar.
+        fonetik dil sürçmesi, akustik başlangıç tekrarı (MFCC/DTW) ve stüdyo dışı konuşma kesimlerini hesaplar.
         Ayrıca oluşturulan tekrar gruplarını self.last_groups içinde saklar.
         """
         words: List[WordRef] = []
@@ -696,14 +696,29 @@ class TakeAligner:
                         k >= 1
                         and self.is_phonetic_repair_pair(prior_words[p_idx].word, r_probe_words[0].word)
                     )
-                    # "son bin... -> Son 1400" gibi "..." ile biten yarım kalmış 2 kelimelik denemeler
-                    # veya "Profesör doktor, -> Profesör Hans Küng'dür" gibi unvan tekrarları
+                    # "son bin... -> Son 1400" gibi "..." ile biten yarım kalmış 2 kelimelik denemeler,
+                    # "Profesör doktor, -> Profesör Hans Küng'dür" gibi unvan tekrarları,
+                    # VEYA "nefsani haf, -> [duraksama] -> nefsani sefalete" / "Nefsaniye hao. -> Nefsani sefalete"
+                    # gibi 1 güçlü içerik kelimesi (k=1, >=5 harf, 'birer/bunun' gibi genel sözcük olmayan) + 1 yarım sürçme hecesi!
+                    norm_head_r = self.normalize_word(r_probe_words[0].word)
+                    norm_tail_0 = self.normalize_word(tail_prior[0].word) if len(tail_prior) == 1 else ""
                     has_ellipsis_cutoff = (
                         k == 1
                         and len(tail_prior) == 1
                         and (
                             ".." in tail_prior[0].word
-                            or self.normalize_word(tail_prior[0].word) in ("doktor", "dr")
+                            or norm_tail_0 in ("doktor", "dr")
+                            or (
+                                len(norm_head_r) >= 5
+                                and norm_head_r not in ("birer", "bunun", "bunlar", "onlar", "şunlar", "ancak", "fakat", "çünkü", "sonra", "böyle")
+                                and not tail_prior[0].word.strip().endswith(('!', '?'))
+                                and (
+                                    not tail_prior[0].word.strip().endswith('.')
+                                    or norm_tail_0 in ("hao", "haf", "ha", "he", "hi", "ho", "hu", "hm", "ıı", "ee")
+                                )
+                                and len(norm_tail_0) <= 4
+                                and (r_words[0].start - tail_prior[-1].end) >= 0.70
+                            )
                         )
                     )
                     valid_k = (
@@ -912,7 +927,12 @@ class TakeAligner:
                 )
             i += 1
 
-        # 4C. 1-3 kelimelik yarım başlangıç adacıkları (False Starts)
+        # 4C. 1-3 kelimelik yarım başlangıç adacıkları (False Starts), Akustik (MFCC/DTW) Tekrarlar ve Yalıtılmış Mikro-Adalar
+        STANDALONE_VALID_SINGLE_WORDS = {
+            "evet", "hayır", "tamam", "peki", "tabii", "elbette", "kesinlikle",
+            "arkadaşlar", "şimdi", "birincisi", "ikincisi", "üçüncüsü", "dördüncüsü", "beşincisi",
+            "sonuç", "özetle", "örneğin", "mesela", "neden", "niçin", "nasıl", "ancak", "fakat",
+        }
         chunks_fs = self.split_into_chunks(words, gap_threshold=0.50)
         for c_idx in range(len(chunks_fs) - 1):
             cur_c = chunks_fs[c_idx]
@@ -923,23 +943,80 @@ class TakeAligner:
                 continue
 
             gap = nxt_alive[0].start - cur_alive[-1].end
-            if len(cur_alive) <= 3 and gap >= 1.6:
-                if cur_alive[-1].word.strip().endswith(('.', '!', '?', '…')) and ".." not in cur_alive[-1].word:
-                    continue
+            prev_gap = (
+                (cur_alive[0].start - chunks_fs[c_idx - 1].words[-1].end)
+                if c_idx > 0 and chunks_fs[c_idx - 1].words
+                else cur_alive[0].start
+            )
+
+            if len(cur_alive) <= 3 and gap >= 0.75:
                 first_cur = cur_alive[0].word
-                is_repeat = any(
-                    self.is_word_match(first_cur, nxt_alive[j].word)
-                    for j in range(min(3, len(nxt_alive)))
+                norm_first = self.normalize_word(first_cur)
+                # 've', 'bir', 'bu' gibi kısa bağlaçlar tek başına cümle tekrarı sayılmaz; içerik kelimesi (>=4 harf) olmalı
+                is_repeat = (
+                    len(norm_first) >= 4
+                    and norm_first not in self.CONNECTORS
+                    and any(
+                        self.is_word_match(first_cur, nxt_alive[j].word)
+                        for j in range(min(3, len(nxt_alive)))
+                    )
                 )
-                if is_repeat:
+                # Eğer cümle soru/ünlem ile bitiyorsa veya 3 kelimelik tam cümle olup nokta ile bitiyorsa ve tekrar/kısa sürçme yoksa koru
+                ends_hard_punct = cur_alive[-1].word.strip().endswith(('.', '!', '?', '…')) and ".." not in cur_alive[-1].word
+                if ends_hard_punct:
+                    norm_last_c = self.normalize_word(cur_alive[-1].word)
+                    is_short_aborted_stub = (
+                        len(cur_alive) <= 2
+                        and not cur_alive[-1].word.strip().endswith(('!', '?'))
+                        and is_repeat
+                        and norm_last_c in ("hao", "haf", "ha", "he", "hi", "ho", "hu", "hm", "ıı", "ee")
+                    )
+                    if not is_short_aborted_stub:
+                        continue
+
+                # Akustik MFCC/DTW Başlangıç Benzerliği Kontrolü (STT ikinci adadaki tekrar kelimesini yuttuysa!)
+                is_acoustic_repeat = False
+                acoustic_sim = 0.0
+                if not is_repeat and analysis is not None and 1.0 <= gap <= 8.5 and hasattr(analysis, "compute_onset_similarity"):
+                    cur_reg = analysis.find_speech_region_for_word(cur_alive[0].start, cur_alive[-1].end)
+                    nxt_reg = analysis.find_speech_region_for_word(nxt_alive[0].start, nxt_alive[-1].end)
+                    t1_onset = cur_reg.start if cur_reg is not None else cur_alive[0].start
+                    t2_onset = nxt_reg.start if nxt_reg is not None else nxt_alive[0].start
+                    has_swallowed_lead = (nxt_alive[0].start - t2_onset) >= 0.20
+                    if abs(t2_onset - t1_onset) >= 1.2:
+                        acoustic_sim = analysis.compute_onset_similarity(t1_onset, t2_onset, window_sec=0.68)
+                        if (has_swallowed_lead and acoustic_sim >= 0.74) or acoustic_sim >= 0.84:
+                            is_acoustic_repeat = True
+
+                # Yalıtılmış Yarım Hece Adası (Orphan Truncated Syllable Island, örn: 3215.50s 'İm...' -> 'Ali İmran Suresi'):
+                # Sadece '..' ile biten yarım kalmış heceler veya 1 kelime + anlamsız sürçme hecesi ('haf', 'hao')
+                is_orphan_micro_island = (
+                    prev_gap >= 1.8
+                    and gap >= 1.8
+                    and (
+                        (len(cur_alive) <= 2 and ".." in cur_alive[-1].word and len(norm_first) >= 2)
+                        or (
+                            len(cur_alive) == 2
+                            and self.normalize_word(cur_alive[1].word) in ("hao", "haf", "ha", "he", "ıı", "ee")
+                        )
+                    )
+                )
+
+                if is_repeat or is_acoustic_repeat or is_orphan_micro_island:
+                    cmd_label = "Yarım Başlangıç (False Start)"
+                    if is_acoustic_repeat and not is_repeat:
+                        cmd_label = f"Akustik Tekrar (MFCC={acoustic_sim:.2f}, STT Kelime Yutması)"
+                    elif is_orphan_micro_island and not is_repeat:
+                        cmd_label = "Yalıtılmış Tereddüt Mikro-Adası (False Start)"
+
                     _register_cut(
                         start_w_idx=cur_alive[0].index,
                         end_w_idx=cur_alive[-1].index,
                         reason="smart_retake",
-                        command=f"Yarım Başlangıç (False Start): {' '.join(w.word for w in cur_alive)}",
+                        command=f"{cmd_label}: {' '.join(w.word for w in cur_alive)}",
                         kept_start_w_idx=nxt_alive[0].index,
                         kept_end_w_idx=nxt_alive[min(len(nxt_alive) - 1, 3)].index,
-                        confidence=0.95,
+                        confidence=0.95 if (is_repeat or is_acoustic_repeat) else 0.90,
                     )
 
         cuts.sort(key=lambda c: c.start)

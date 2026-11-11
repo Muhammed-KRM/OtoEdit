@@ -25,6 +25,7 @@ class AudioChunk:
     end_sec: float
     audio_path: str
     has_speech: bool = True
+    prompt: str = None
 
     @property
     def duration(self) -> float:
